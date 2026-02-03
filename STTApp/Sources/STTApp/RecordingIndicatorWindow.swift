@@ -5,7 +5,7 @@ class RecordingIndicatorWindow: NSPanel {
     private var hostingController: NSHostingController<RecordingIndicatorView>?
     
     init() {
-        let contentRect = NSRect(x: 0, y: 0, width: 300, height: 180)
+        let contentRect = NSRect(x: 0, y: 0, width: 60, height: 60)
         
         super.init(
             contentRect: contentRect,
@@ -32,26 +32,10 @@ class RecordingIndicatorWindow: NSPanel {
     }
     
     private func setupContent() {
-        let view = RecordingIndicatorView(isRecording: true)
+        let view = RecordingIndicatorView(state: .recording)
         hostingController = NSHostingController(rootView: view)
         
-        let visualEffectView = NSVisualEffectView()
-        visualEffectView.material = .hudWindow
-        visualEffectView.state = .active
-        visualEffectView.wantsLayer = true
-        visualEffectView.layer?.cornerRadius = 12
-        visualEffectView.alphaValue = 0.9
-        
-        self.contentView = visualEffectView
-        visualEffectView.addSubview(hostingController!.view)
-        
-        hostingController!.view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            hostingController!.view.topAnchor.constraint(equalTo: visualEffectView.topAnchor),
-            hostingController!.view.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor),
-            hostingController!.view.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor),
-            hostingController!.view.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor)
-        ])
+        self.contentView = hostingController?.view
     }
     
     private func positionWindow() {
@@ -71,22 +55,43 @@ class RecordingIndicatorWindow: NSPanel {
         )
     }
     
-    func show() {
-        self.orderFrontRegardless()
-        self.alphaValue = 0
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.3
-            self.animator().alphaValue = 1.0
+    func showRecording() {
+        DispatchQueue.main.async {
+            self.orderFrontRegardless()
+            self.alphaValue = 0
+            
+            let view = RecordingIndicatorView(state: .recording)
+            self.hostingController = NSHostingController(rootView: view)
+            self.contentView = self.hostingController?.view
+            
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.3
+                self.animator().alphaValue = 1.0
+            }
         }
     }
     
+    func showProcessing() {
+        DispatchQueue.main.async {
+            let view = RecordingIndicatorView(state: .processing)
+            self.hostingController = NSHostingController(rootView: view)
+            self.contentView = self.hostingController?.view
+        }
+    }
+    
+    func show() {
+        showRecording()
+    }
+    
     func hide() {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.3
-            context.completionHandler = {
-                self.orderOut(nil)
+        DispatchQueue.main.async {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.3
+                context.completionHandler = {
+                    self.orderOut(nil)
+                }
+                self.animator().alphaValue = 0
             }
-            self.animator().alphaValue = 0
         }
     }
 }

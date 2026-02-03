@@ -77,16 +77,19 @@ final class PythonProcessManager: @unchecked Sendable {
             if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
                 let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
-                    Logger.shared.log("Python stderr: \(trimmed)", level: .error)
+                    let isError = trimmed.contains("Error:") || trimmed.contains("Traceback") || trimmed.contains("Exception")
+                    let level: Logger.LogLevel = isError ? .error : .info
+                    Logger.shared.log("Python stderr: \(trimmed)", level: level)
                 }
             }
         }
         Logger.shared.log("Error handler set up", level: .debug)
     }
     
-    func sendInput(_ text: String) {
-        Logger.shared.log("Sending input to Python: \(text)", level: .debug)
-        guard let data = (text + "\n").data(using: .utf8) else {
+    func sendInput(_ text: String, language: String = "ja", temperature: Double = 0.0, beamSize: Int = 5) {
+        let input = "\(text)|\(language)|\(temperature)|\(beamSize)"
+        Logger.shared.log("Sending input to Python: \(input)", level: .debug)
+        guard let data = (input + "\n").data(using: .utf8) else {
             Logger.shared.log("Failed to encode input text", level: .error)
             return
         }

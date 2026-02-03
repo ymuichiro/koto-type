@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import os.log
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var menuBarController: MenuBarController?
     var hotkeyManager: HotkeyManager?
@@ -9,10 +10,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var pythonProcessManager: PythonProcessManager?
     var settingsWindowController: SettingsWindowController?
     var recordingIndicatorWindow: RecordingIndicatorWindow?
+    var permissionWindowController: PermissionWindowController?
     var isRecording = false
+    private var currentSettings: AppSettings = AppSettings()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.shared.log("Application did finish launching", level: .info)
+        
+        let permissionStatus = PermissionChecker.shared.checkAccessibilityPermission()
+        if permissionStatus == .denied {
+            showPermissionWindow()
+            return
+        }
+        
+        continueSetup()
+    }
+    
+    private func showPermissionWindow() {
+        permissionWindowController = PermissionWindowController()
+        permissionWindowController?.showWindow(nil)
+        
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.permissionWindowController?.close()
+        }
+    }
+    
+    private func continueSetup() {
         NSApp.setActivationPolicy(.accessory)
         menuBarController = MenuBarController()
         Logger.shared.log("MenuBarController created", level: .debug)
@@ -48,13 +71,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if output.isEmpty {
                 Logger.shared.log("Empty transcription received, skipping", level: .warning)
                 self.menuBarController?.updateStatus("Ready")
+                self.recordingIndicatorWindow?.hide()
             } else {
                 Logger.shared.log("Typing text into active window...", level: .info)
                 KeystrokeSimulator.typeText(output)
                 Logger.shared.log("Text typing completed", level: .info)
                 self.menuBarController?.updateStatus("Ready")
+                self.recordingIndicatorWindow?.hide()
             }
         }
+        
+        currentSettings = SettingsManager.shared.load()
+        Logger.shared.log("Loaded settings: \(currentSettings)", level: .info)
         
         hotkeyManager = HotkeyManager()
         hotkeyManager?.hotkeyKeyDown = { [weak self] in
@@ -63,9 +91,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager?.hotkeyKeyUp = { [weak self] in
             self?.stopRecording()
         }
+        
+        NotificationCenter.default.addObserver(forName: .hotkeyConfigurationChanged, object: nil, queue: .main) { [weak self] notification in
+            guard let self = self else { return }
+            if let config = notification.object as? HotkeyConfiguration {
+                Logger.shared.log("AppDelegate: Received hotkeyConfigurationChanged notification: \(config.description)")
+            }
+            self.currentSettings = SettingsManager.shared.load()
+            Logger.shared.log("AppDelegate: Reloaded settings - language=\(self.currentSettings.language), temp=\(self.currentSettings.temperature), beam=\(self.currentSettings.beamSize)")
+        }
     }
     
-    @MainActor
     func startRecording() {
         isRecording = true
         Logger.shared.log("Starting audio recording...", level: .info)
@@ -79,7 +115,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingIndicatorWindow?.show()
     }
     
-    @MainActor
     func stopRecording() {
         isRecording = false
         Logger.shared.log("Stopping audio recording...", level: .info)
@@ -90,10 +125,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         audioRecorder?.stopRecording()
         Logger.shared.log("Recording stopped at: \(recordingURL.path)", level: .info)
         Logger.shared.log("Sending audio path to Python: \(recordingURL.path)", level: .info)
-        pythonProcessManager?.sendInput(recordingURL.path)
+        
+        currentSettings = SettingsManager.shared.load()
+        pythonProcessManager?.sendInput(
+            recordingURL.path,
+            language: currentSettings.language,
+            temperature: currentSettings.temperature,
+            beamSize: currentSettings.beamSize
+        )
+        
         Logger.shared.log("Audio path sent to Python, waiting for transcription...", level: .info)
         menuBarController?.updateStatus("Processing...")
-        recordingIndicatorWindow?.hide()
+        recordingIndicatorWindow?.showProcessing()
     }
     
     func applicationWillTerminate(_ notification: Notification) {

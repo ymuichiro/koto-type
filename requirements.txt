@@ -1,4 +1,4 @@
-openai-whisper
+faster-whisper
 torch
 ffmpeg-python
 setuptools-rust

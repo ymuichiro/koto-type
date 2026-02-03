@@ -2,62 +2,109 @@
 # -*- coding: utf-8 -*-
 
 import sys
-import whisper
+from faster_whisper import WhisperModel
 import os
+from datetime import datetime
+import traceback
 
-sys.stdin.reconfigure(encoding="utf-8", line_buffering=True)
+
+def setup_logging():
+    log_dir = os.path.expanduser("~/Library/Application Support/stt-simple")
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_file = os.path.join(log_dir, "server.log")
+
+    def log(message):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_line = f"[{timestamp}] {message}\n"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(log_line)
+
+    return log_file, log
 
 
 def main():
-    print("Loading Whisper model...", file=sys.stderr)
-    model = whisper.load_model("large-v3", device="cpu")
-    print("Model loaded", file=sys.stderr)
+    log_file, log = setup_logging()
+    log("=== Server started ===")
 
-    for line in sys.stdin:
-        audio_path = line.strip()
-        print(f"Received audio path: {audio_path}", file=sys.stderr)
+    log("Loading Whisper model...")
+    model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+    log("Model loaded")
 
-        if not audio_path:
-            print("Empty audio path, skipping", file=sys.stderr)
-            continue
+    log("Waiting for input from stdin...")
+    sys.stdout.flush()
 
+    while True:
         try:
-            if not os.path.exists(audio_path):
-                print(f"Error: File not found: {audio_path}", file=sys.stderr)
-                print("", file=sys.stdout)
-                continue
+            line = sys.stdin.readline()
+            if not line:
+                log("EOF reached, exiting")
+                break
 
-            print(f"File exists, starting transcription...", file=sys.stderr)
-            print(f"File size: {os.path.getsize(audio_path)} bytes", file=sys.stderr)
+            parts = line.strip().split("|")
+            audio_path = parts[0]
+            language = parts[1] if len(parts) > 1 else "ja"
+            temperature = float(parts[2]) if len(parts) > 2 else 0.0
+            beam_size = int(parts[3]) if len(parts) > 3 else 5
 
-            result = model.transcribe(
-                audio_path,
-                language="ja",
-                task="transcribe",
-                temperature=0.0,
-                patience=1.0,
-                beam_size=5,
-                best_of=5,
-                no_speech_threshold=0.6,
-                compression_ratio_threshold=2.4,
-                logprob_threshold=-1.0,
-                fp16=False,
-                condition_on_previous_text=True,
-                initial_prompt="これは会話の文字起こしです。正確な日本語で出力してください。",
+            log(
+                f"Received: audio={audio_path}, language={language}, temp={temperature}, beam={beam_size}"
             )
 
-            print("Transcription completed", file=sys.stderr)
-            transcription = result["text"].strip()
-            print(f"Transcription result: '{transcription}'", file=sys.stderr)
+            if not audio_path:
+                log("Empty audio path, skipping")
+                continue
+
+            if not os.path.exists(audio_path):
+                log(f"Error: File not found: {audio_path}")
+                print("", file=sys.stdout)
+                sys.stdout.flush()
+                continue
+
+            log(f"File exists, size: {os.path.getsize(audio_path)} bytes")
+
+            import time
+
+            initial_prompt = None
+            if language == "ja":
+                initial_prompt = (
+                    "これは会話の文字起こしです。正確な日本語で出力してください。"
+                )
+            elif language == "en":
+                initial_prompt = (
+                    "This is a speech transcription. Please output accurate English."
+                )
+
+            start_time = time.time()
+
+            log("Starting transcription with Whisper...")
+
+            segments, info = model.transcribe(
+                audio_path,
+                language=language,
+                task="transcribe",
+                temperature=temperature,
+                beam_size=beam_size,
+                best_of=5,
+                vad_filter=True,
+                word_timestamps=False,
+                initial_prompt=initial_prompt,
+            )
+
+            elapsed_time = time.time() - start_time
+            log(f"Transcription completed in {elapsed_time:.2f} seconds")
+
+            transcription = " ".join([segment.text for segment in segments]).strip()
+            log(f"Transcription result: '{transcription}'")
+            log(f"Transcription length: {len(transcription)} characters")
+
             print(transcription, file=sys.stdout)
             sys.stdout.flush()
-            print("Output flushed", file=sys.stderr)
+            log("Output flushed")
 
         except Exception as e:
-            print(f"Error: {str(e)}", file=sys.stderr)
-            import traceback
-
-            traceback.print_exc(file=sys.stderr)
+            log(f"Error: {str(e)}")
+            log(f"Traceback: {traceback.format_exc()}")
             print("", file=sys.stdout)
             sys.stdout.flush()
 

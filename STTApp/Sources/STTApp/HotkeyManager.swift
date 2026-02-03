@@ -8,10 +8,13 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
     private let lock = NSLock()
     private var _previousModifiers: NSEvent.ModifierFlags = []
     private var _isHotkeyPressed = false
+    private var _isProcessingHotkey = false
     
     override init() {
         super.init()
         Logger.shared.log("HotkeyManager: initializing", level: .debug)
+        let settings = SettingsManager.shared.load()
+        configuration = settings.hotkeyConfig
         setupGlobalMonitor()
         setupNotificationObserver()
         Logger.shared.log("HotkeyManager: initialized with config: \(configuration.description)", level: .info)
@@ -30,9 +33,11 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] notification in
             guard let self = self, let config = notification.object as? HotkeyConfiguration else { return }
+            Logger.shared.log("HotkeyManager: Received hotkeyConfigurationChanged notification: \(config.description)")
             self.lock.lock()
             self.configuration = config
             self.lock.unlock()
+            Logger.shared.log("HotkeyManager: Updated configuration to: \(config.description)")
         }
     }
     
@@ -44,12 +49,15 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
         let currentConfig = configuration
         lock.unlock()
         
+        let currentModifiers = modifiers.intersection([.command, .option, .control, .shift])
+        let targetModifiers = NSEvent.ModifierFlags(rawValue: currentConfig.modifiers)
+        let modifiersMatch = currentModifiers == targetModifiers
+        
+        Logger.shared.log("HotkeyManager: event type=\(event.type), keyCode=\(keyCode), currentConfig.keyCode=\(currentConfig.keyCode), modifiersMatch=\(modifiersMatch), currentModifiers=\(currentModifiers.rawValue), target=\(targetModifiers.rawValue), _isHotkeyPressed=\(_isHotkeyPressed)")
+        
         if currentConfig.keyCode == 0 {
             if event.type == .flagsChanged {
-                let currentModifiers = modifiers.intersection([.command, .option, .control, .shift])
                 let prevModifiers = _previousModifiers.intersection([.command, .option, .control, .shift])
-                
-                let targetModifiers = NSEvent.ModifierFlags(rawValue: currentConfig.modifiers)
                 
                 if currentModifiers == targetModifiers && prevModifiers != targetModifiers {
                     _isHotkeyPressed = true
@@ -67,20 +75,37 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
                 
                 _previousModifiers = modifiers
             }
-        } else if modifiers.rawValue == currentConfig.modifiers && keyCode == currentConfig.keyCode {
+        } else if modifiersMatch && keyCode == currentConfig.keyCode {
             if event.type == .keyDown {
-                _isHotkeyPressed = true
-                Logger.shared.log("HotkeyManager: hotkey key down", level: .debug)
-                DispatchQueue.main.async { [weak self] in
-                    self?.hotkeyKeyDown?()
+                if !_isHotkeyPressed && !_isProcessingHotkey {
+                    _isHotkeyPressed = true
+                    _isProcessingHotkey = true
+                    Logger.shared.log("HotkeyManager: hotkey key down", level: .debug)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.hotkeyKeyDown?()
+                    }
                 }
-            } else if event.type == .keyUp {
+            } else if event.type == .keyUp && _isHotkeyPressed {
                 _isHotkeyPressed = false
+                _isProcessingHotkey = false
                 Logger.shared.log("HotkeyManager: hotkey key up", level: .debug)
                 DispatchQueue.main.async { [weak self] in
                     self?.hotkeyKeyUp?()
                 }
             }
+        } else if event.type == .flagsChanged {
+            let prevModifiers = _previousModifiers.intersection([.command, .option, .control, .shift])
+            
+            if _isHotkeyPressed && prevModifiers == targetModifiers && currentModifiers != targetModifiers {
+                _isHotkeyPressed = false
+                _isProcessingHotkey = false
+                Logger.shared.log("HotkeyManager: hotkey key up (modifiers changed)", level: .debug)
+                DispatchQueue.main.async { [weak self] in
+                    self?.hotkeyKeyUp?()
+                }
+            }
+            
+            _previousModifiers = modifiers
         }
     }
     
