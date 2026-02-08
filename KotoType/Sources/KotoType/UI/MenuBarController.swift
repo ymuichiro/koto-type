@@ -68,10 +68,7 @@ class MenuBarController: NSObject {
     
     private func loadMenuBarIconImage() -> NSImage? {
         let imageName = isDarkMode ? "koto-type_logo_mini_light" : "koto-type_logo_mini_dark"
-        guard
-            let resourceURL = Bundle.module.url(forResource: imageName, withExtension: "png"),
-            let image = NSImage(contentsOf: resourceURL)
-        else {
+        guard let image = AppImageLoader.loadPNG(named: imageName) else {
             return nil
         }
 

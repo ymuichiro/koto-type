@@ -212,12 +212,6 @@ struct InitialSetupView: View {
     }
 
     private static func loadBannerImage() -> NSImage? {
-        guard
-            let resourceURL = Bundle.module.url(forResource: "koto-tyoe_banner_transparent", withExtension: "png"),
-            let image = NSImage(contentsOf: resourceURL)
-        else {
-            return nil
-        }
-        return image
+        AppImageLoader.loadPNG(named: "koto-tyoe_banner_transparent")
     }
 }
