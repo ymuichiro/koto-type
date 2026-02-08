@@ -10,6 +10,7 @@ echo ""
 # 設定
 APP_NAME="STTApp"
 BUILD_DIR=".build/debug"
+APP_VERSION="$(./scripts/version.sh)"
 BUNDLE_NAME="${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_NAME}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -74,11 +75,16 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
 </plist>
 EOF
 
+# バージョン埋め込み
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
+
 # アドホック署名
 echo "Applying ad-hoc signature..."
 codesign --force --deep --sign - "${BUNDLE_NAME}" 2>/dev/null || true
 
 echo "✅ ${BUNDLE_NAME} created successfully!"
 echo "Bundle location: $(pwd)/${BUNDLE_NAME}"
+echo "Version: ${APP_VERSION}"
 echo ""
 echo "To launch: open ${BUNDLE_NAME}"

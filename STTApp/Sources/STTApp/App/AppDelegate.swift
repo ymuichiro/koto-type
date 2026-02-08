@@ -13,7 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindowController: SettingsWindowController?
     var historyWindowController: HistoryWindowController?
     var recordingIndicatorWindow: RecordingIndicatorWindow?
-    var permissionWindowController: PermissionWindowController?
+    var initialSetupWindowController: InitialSetupWindowController?
     var isRecording = false
     private var isImportingAudio = false
     private var didSuspendRealtimeWorkersForImport = false
@@ -25,25 +25,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.shared.log("Application did finish launching", level: .info)
-        
-        let permissionStatus = PermissionChecker.shared.checkAccessibilityPermission()
-        if permissionStatus == .denied {
-            showPermissionWindow()
+
+        let diagnosticsService = InitialSetupDiagnosticsService()
+        let report = diagnosticsService.evaluate()
+        let setupState = InitialSetupStateManager.shared
+
+        if setupState.hasCompletedInitialSetup && report.canStartApplication {
+            continueSetup()
             return
         }
-        
-        continueSetup()
+
+        showInitialSetupWindow(diagnosticsService: diagnosticsService)
     }
 
-    private func showPermissionWindow() {
-        permissionWindowController = PermissionWindowController()
-        permissionWindowController?.showWindow(nil)
-
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.permissionWindowController?.close()
-            }
+    private func showInitialSetupWindow(diagnosticsService: InitialSetupDiagnosticsService) {
+        initialSetupWindowController = InitialSetupWindowController(
+            diagnosticsService: diagnosticsService
+        ) { [weak self] in
+            guard let self else { return }
+            InitialSetupStateManager.shared.markCompleted()
+            self.initialSetupWindowController?.close()
+            self.initialSetupWindowController = nil
+            self.continueSetup()
         }
+        initialSetupWindowController?.showWindow(nil)
     }
     
     private func continueSetup() {

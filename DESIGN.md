@@ -48,6 +48,7 @@ Macネイティブの音声文字起こしアプリケーション。OpenAI Whis
 - 音声ファイル（`wav` / `mp3`）取り込み文字起こし
 - 文字起こし履歴の保存・参照
 - ログイン時自動起動（ON/OFF）
+- 初回セットアップ（権限・依存関係チェック）
 
 ### 2. Python スクリプト
 
@@ -116,7 +117,13 @@ text = " ".join([segment.text for segment in segments])
 
 1. **初期化**:
    - Swiftアプリ起動
-   - メニューバーにアイコン表示
+   - 初期セットアップ画面で必須チェックを実行
+     - アクセシビリティ権限
+     - マイク権限
+     - バックエンド実行環境（同梱バイナリまたは開発用`.venv`）
+     - `ffmpeg` コマンド
+     - Python依存（`faster-whisper`, `ffmpeg-python`）
+   - 条件を満たしたらメニューバー常駐モードへ移行
    - Pythonプロセスをバックグラウンドで起動
 
 2. **待機状態**:
@@ -146,6 +153,13 @@ text = " ".join([segment.text for segment in segments])
 8. **起動設定**:
    - Settingsのトグルでログイン時自動起動を切り替え
    - `ServiceManagement`で登録状態を反映
+
+## リリース設計
+
+- `VERSION` ファイルで配布版バージョンを管理
+- `main` への push で `v<VERSION>.<run_number>` 形式のタグを自動作成
+- タグ push で GitHub Actions が `.app/.dmg` をビルド
+- `.dmg` をタグ Release に添付し、配布用インストーラーとして公開
 
 ## シンプルさを維持するための設計方針
 

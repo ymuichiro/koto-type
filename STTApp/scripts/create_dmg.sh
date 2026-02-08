@@ -3,7 +3,8 @@ set -e
 
 APP_NAME="STTApp"
 APP_BUNDLE="${APP_NAME}.app"
-DMG_NAME="${APP_NAME}-1.0.0.dmg"
+APP_VERSION="$(./scripts/version.sh)"
+DMG_NAME="${APP_NAME}-${APP_VERSION}.dmg"
 VOL_NAME="STTApp"
 
 echo "Creating DMG for ${APP_BUNDLE}..."

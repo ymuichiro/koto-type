@@ -30,6 +30,16 @@ final class PermissionCheckerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
+    func testCheckMicrophonePermission() throws {
+        let checker = PermissionChecker.shared
+        let status = checker.checkMicrophonePermission()
+
+        XCTAssertTrue(
+            status == .granted || status == .denied || status == .unknown,
+            "Microphone permission status should be granted, denied, or unknown"
+        )
+    }
+
     func testPermissionStatusEquality() throws {
         let grantedStatus = PermissionChecker.PermissionStatus.granted
         let deniedStatus = PermissionChecker.PermissionStatus.denied

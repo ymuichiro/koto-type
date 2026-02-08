@@ -1,0 +1,38 @@
+name: Create Tag On Main Update
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate tag name
+        id: tag
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          TAG="v${VERSION}.${GITHUB_RUN_NUMBER}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create and push tag
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${TAG}"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}" "${GITHUB_SHA}"
+          git push origin "${TAG}"
