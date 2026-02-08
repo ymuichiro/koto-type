@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-benchmark test-all build-server build-app build-all install-deps clean view-log
+.PHONY: help run-app run-server test-transcription test-benchmark test-user-dictionary test-all build-server build-app build-all install-deps clean view-log
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -17,6 +17,7 @@ help:
 	@echo "テスト:"
 	@echo "  make test-transcription - 音声文字起こしテスト"
 	@echo "  make test-benchmark - 速度ベンチマークテスト"
+	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
 	@echo "  make test-all       - すべてのテストを実行"
 	@echo ""
 	@echo "ビルド:"
@@ -45,7 +46,11 @@ test-benchmark:
 	@echo "Whisper速度ベンチマークを実行中..."
 	$(PYTHON) $(PYTHON_TEST_DIR)/test_benchmark.py
 
-test-all: test-transcription test-benchmark
+test-user-dictionary:
+	@echo "辞書機能ユニットテストを実行中..."
+	$(PYTHON) $(PYTHON_TEST_DIR)/test_user_dictionary.py
+
+test-all: test-transcription test-benchmark test-user-dictionary
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 

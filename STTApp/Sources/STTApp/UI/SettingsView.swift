@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var silenceThreshold: Double
     @State private var silenceDuration: Double
     @State private var parallelism: Int
+    @State private var dictionaryWords: [String]
     @Binding var isPresented: Bool
     
     let onHotkeyChanged: (HotkeyConfiguration) -> Void
@@ -33,6 +34,8 @@ struct SettingsView: View {
     @State private var pendingSilenceThreshold: Double
     @State private var pendingSilenceDuration: Double
     @State private var pendingParallelism: Int
+    @State private var pendingDictionaryWords: [String]
+    @State private var pendingDictionaryEntry: String
     
     let availableLanguages = [
         ("auto", "自動判定"),
@@ -51,6 +54,7 @@ struct SettingsView: View {
         self.onSettingsChanged = onSettingsChanged
         
         let settings = SettingsManager.shared.load()
+        let userDictionaryWords = UserDictionaryManager.shared.loadWords()
         self._hotkeyConfig = State(initialValue: settings.hotkeyConfig)
         self._language = State(initialValue: settings.language)
         self._temperature = State(initialValue: settings.temperature)
@@ -64,6 +68,7 @@ struct SettingsView: View {
         self._silenceThreshold = State(initialValue: settings.silenceThreshold)
         self._silenceDuration = State(initialValue: settings.silenceDuration)
         self._parallelism = State(initialValue: settings.parallelism)
+        self._dictionaryWords = State(initialValue: userDictionaryWords)
         self.hotkeyConfig = settings.hotkeyConfig
         self.language = settings.language
         self.temperature = settings.temperature
@@ -77,6 +82,7 @@ struct SettingsView: View {
         self.silenceThreshold = settings.silenceThreshold
         self.silenceDuration = settings.silenceDuration
         self.parallelism = settings.parallelism
+        self.dictionaryWords = userDictionaryWords
         
         self._pendingHotkeyConfig = State(initialValue: settings.hotkeyConfig)
         self._pendingLanguage = State(initialValue: settings.language)
@@ -91,6 +97,8 @@ struct SettingsView: View {
         self._pendingSilenceThreshold = State(initialValue: settings.silenceThreshold)
         self._pendingSilenceDuration = State(initialValue: settings.silenceDuration)
         self._pendingParallelism = State(initialValue: settings.parallelism)
+        self._pendingDictionaryWords = State(initialValue: userDictionaryWords)
+        self._pendingDictionaryEntry = State(initialValue: "")
     }
     
     var body: some View {
@@ -272,6 +280,64 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("専門用語辞書")
+                        .font(.subheadline)
+
+                    HStack {
+                        TextField("例: ctranslate2, Whisper large-v3-turbo", text: $pendingDictionaryEntry)
+                            .onSubmit {
+                                addDictionaryWord()
+                            }
+                        Button("追加") {
+                            addDictionaryWord()
+                        }
+                        .disabled(pendingDictionaryEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    if pendingDictionaryWords.isEmpty {
+                        Text("登録された用語はありません")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 8)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(pendingDictionaryWords, id: \.self) { word in
+                                    HStack {
+                                        Text(word)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Button {
+                                            removeDictionaryWord(word)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 150)
+                        .padding(8)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(8)
+
+                        HStack {
+                            Spacer()
+                            Button("すべて削除", role: .destructive) {
+                                pendingDictionaryWords.removeAll()
+                            }
+                        }
+                    }
+
+                    Text("最大200語まで。保存後、次回の文字起こしから反映されます。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
                 HStack {
                     Spacer()
                     Button("保存") {
@@ -412,7 +478,7 @@ struct SettingsView: View {
     }
     
     private func saveSettings() {
-        Logger.shared.log("SettingsView.saveSettings called: hotkey=\(hotkeyConfig.description)")
+        Logger.shared.log("SettingsView.saveSettings called: hotkey=\(hotkeyConfig.description), dictionaryWords=\(dictionaryWords.count)")
         let settings = AppSettings(
             hotkeyConfig: hotkeyConfig,
             language: language,
@@ -429,6 +495,7 @@ struct SettingsView: View {
             parallelism: parallelism
         )
         SettingsManager.shared.save(settings)
+        UserDictionaryManager.shared.saveWords(dictionaryWords)
     }
 
     private func applySettings() {
@@ -446,10 +513,26 @@ struct SettingsView: View {
         silenceThreshold = pendingSilenceThreshold
         silenceDuration = pendingSilenceDuration
         parallelism = pendingParallelism
+        dictionaryWords = pendingDictionaryWords
 
         saveSettings()
+        let reloadedWords = UserDictionaryManager.shared.loadWords()
+        dictionaryWords = reloadedWords
+        pendingDictionaryWords = reloadedWords
+        pendingDictionaryEntry = ""
         onHotkeyChanged(hotkeyConfig)
         onSettingsChanged?()
+    }
+
+    private func addDictionaryWord() {
+        let cleaned = pendingDictionaryEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        pendingDictionaryWords = UserDictionaryManager.normalizedWords(pendingDictionaryWords + [cleaned])
+        pendingDictionaryEntry = ""
+    }
+
+    private func removeDictionaryWord(_ word: String) {
+        pendingDictionaryWords.removeAll { $0 == word }
     }
     
     private func openLogFile() {

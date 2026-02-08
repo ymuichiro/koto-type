@@ -192,6 +192,7 @@ test_audio.wav
 test_integration.py
 features/*/tests/
 test_*.py
+!tests/python/test_user_dictionary.py
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 

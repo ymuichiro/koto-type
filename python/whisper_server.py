@@ -7,6 +7,10 @@ import traceback
 from datetime import datetime
 
 
+def default_dictionary_path():
+    return os.path.expanduser("~/Library/Application Support/stt-simple/user_dictionary.json")
+
+
 def setup_logging():
     log_dir = os.path.expanduser("~/Library/Application Support/stt-simple")
     os.makedirs(log_dir, exist_ok=True)
@@ -91,23 +95,60 @@ def post_process_text(text, language="ja"):
     return text
 
 
-def load_user_dictionary():
-    dict_path = os.path.expanduser(
-        "~/Library/Application Support/stt-simple/user_dictionary.json"
-    )
+def normalize_user_words(words):
+    normalized = []
+    seen = set()
+
+    for word in words:
+        if not isinstance(word, str):
+            continue
+
+        cleaned = " ".join(word.strip().split())
+        if not cleaned:
+            continue
+
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+
+        seen.add(key)
+        normalized.append(cleaned)
+
+        if len(normalized) >= 200:
+            break
+
+    return normalized
+
+
+def load_user_dictionary(path=None, log=None):
+    dict_path = path or default_dictionary_path()
     try:
-        if os.path.exists(dict_path):
-            import json
+        if not os.path.exists(dict_path):
+            return []
 
-            with open(dict_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("words", [])
-    except Exception:
-        pass
-    return []
+        import json
+
+        with open(dict_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if isinstance(data, dict):
+            raw_words = data.get("words", [])
+        elif isinstance(data, list):
+            raw_words = data
+        else:
+            raw_words = []
+
+        words = normalize_user_words(raw_words)
+        if log:
+            log(f"Loaded user dictionary words: {len(words)}")
+        return words
+    except Exception as error:
+        if log:
+            log(f"Failed to load user dictionary: {error}")
+        return []
 
 
-def generate_initial_prompt(language, use_context=True):
+def generate_initial_prompt(language, use_context=True, user_words=None):
     base_prompts = {
         "ja": "これは会話の文字起こしです。正確な日本語で出力してください。",
         "en": "This is a speech transcription. Please output accurate English.",
@@ -116,10 +157,15 @@ def generate_initial_prompt(language, use_context=True):
     prompt = base_prompts.get(language, "")
 
     if use_context:
-        user_words = load_user_dictionary()
-        if user_words:
-            word_list = "、".join(user_words[:20])
-            prompt += f" 以下の単語や専門用語を正確に認識してください: {word_list}。"
+        words_for_prompt = user_words if user_words is not None else load_user_dictionary()
+        normalized_words = normalize_user_words(words_for_prompt)
+        if normalized_words:
+            if language == "ja":
+                word_list = "、".join(normalized_words[:20])
+                prompt += f" 以下の単語や専門用語を正確に認識してください: {word_list}。"
+            else:
+                word_list = ", ".join(normalized_words[:20])
+                prompt += f" Please accurately recognize these terms: {word_list}."
 
     return prompt if prompt else None
 
@@ -199,8 +245,11 @@ def main():
 
             import time
 
+            user_words = load_user_dictionary(log=log)
             initial_prompt = generate_initial_prompt(
-                actual_language or language or "ja", use_context=True
+                actual_language or language or "ja",
+                use_context=True,
+                user_words=user_words,
             )
 
             start_time = time.time()
