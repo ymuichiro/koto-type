@@ -54,6 +54,33 @@ strip_code_signature_if_present() {
     fi
 }
 
+ad_hoc_sign() {
+    local target_path="$1"
+
+    echo "Ad-hoc signing: ${target_path}"
+    if ! codesign --force --sign - "${target_path}"; then
+        echo "❌ Error: Failed to ad-hoc sign ${target_path}"
+        exit 1
+    fi
+}
+
+verify_signed_binary() {
+    local target_path="$1"
+    if ! codesign -dv "${target_path}" >/dev/null 2>&1; then
+        echo "❌ Error: ${target_path} is not code signed"
+        exit 1
+    fi
+}
+
+verify_bundle_signature() {
+    local bundle_path="$1"
+    if ! codesign --verify --deep --strict --verbose=2 "${bundle_path}" >/dev/null 2>&1; then
+        echo "❌ Error: Bundle signature verification failed: ${bundle_path}"
+        codesign --verify --deep --strict --verbose=4 "${bundle_path}" || true
+        exit 1
+    fi
+}
+
 echo "Creating KotoType.app bundle..."
 echo ""
 echo "注意: whisper_server バイナリ（dist/whisper_server）が必須です"
@@ -195,6 +222,16 @@ EOF
 # バージョン埋め込み
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
+
+echo "Applying ad-hoc signatures..."
+ad_hoc_sign "${RESOURCES_DIR}/whisper_server"
+ad_hoc_sign "${MACOS_DIR}/${APP_NAME}"
+ad_hoc_sign "${BUNDLE_NAME}"
+
+echo "Verifying signatures..."
+verify_signed_binary "${RESOURCES_DIR}/whisper_server"
+verify_signed_binary "${MACOS_DIR}/${APP_NAME}"
+verify_bundle_signature "${BUNDLE_NAME}"
 
 echo "Validating app bundle layout..."
 validate_app_bundle_layout "${BUNDLE_NAME}"
