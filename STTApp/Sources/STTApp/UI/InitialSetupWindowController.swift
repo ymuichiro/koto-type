@@ -13,12 +13,13 @@ final class InitialSetupWindowController: NSWindowController {
         let hostingController = NSHostingController(rootView: content)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 620),
-            styleMask: [.titled],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.center()
         window.title = "初期セットアップ"
+        window.minSize = NSSize(width: 700, height: 620)
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
         self.init(window: window)
@@ -51,31 +52,40 @@ struct InitialSetupView: View {
                     .foregroundColor(.secondary)
             }
 
-            List(report.items, id: \.id) { item in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: item.status == .passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundColor(item.status == .passed ? .green : .red)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(item.title)
-                                .font(.headline)
-                            if item.required {
-                                Text("必須")
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.red.opacity(0.15))
-                                    .clipShape(Capsule())
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(report.items, id: \.id) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: item.status == .passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(item.status == .passed ? .green : .red)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(item.title)
+                                        .font(.headline)
+                                    if item.required {
+                                        Text("必須")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.red.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text(item.detail)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
+                            Spacer(minLength: 0)
                         }
-                        Text(item.detail)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
-                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollIndicators(.automatic)
             .frame(height: 320)
 
             HStack(spacing: 10) {
@@ -120,6 +130,7 @@ struct InitialSetupView: View {
             }
         }
         .padding(24)
+        .frame(minWidth: 700, minHeight: 620, alignment: .topLeading)
     }
 
     private func refreshChecks() {
