@@ -114,6 +114,27 @@ make help
 
 - `make clean` - Remove temporary files
 - `make view-log` - View server logs
+- `make capture-artifacts` - Collect crash-investigation artifacts into `artifacts/runtime/`
+
+### Crash-Resilient Testing Workflow
+
+When validating production-like behavior (especially recording start/stop), preserve evidence before and after each run:
+
+```bash
+# 1) Capture baseline
+make capture-artifacts
+
+# 2) Execute scenario (launch app, start recording, stop recording)
+
+# 3) Capture post-run evidence
+make capture-artifacts
+```
+
+If the machine crashes/reboots, run `make capture-artifacts` immediately after login.
+Then append a summary entry to:
+
+- `docs/testing/test-ledger.md`
+- `docs/operations/restart-storm-runbook.md`
 
 ### Launching the Application
 

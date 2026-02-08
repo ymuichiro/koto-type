@@ -5,6 +5,10 @@ import os
 import re
 import sys
 import traceback
+import atexit
+import signal
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from math import inf, log10
 import wave
@@ -22,11 +26,154 @@ def setup_logging():
 
     def log(message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_line = f"[{timestamp}] {message}\n"
+        log_line = f"[{timestamp}] [pid={os.getpid()}] {message}\n"
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(log_line)
 
     return log_file, log
+
+
+def default_server_state_path():
+    return os.path.expanduser("~/Library/Application Support/koto-type/server_state.json")
+
+
+def default_server_state_lock_path():
+    return os.path.expanduser("~/Library/Application Support/koto-type/server_state.lock")
+
+
+def parse_int(value, default):
+    if value is None:
+        return default
+
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def pid_exists(pid):
+    if pid <= 0:
+        return False
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+    return True
+
+
+def load_server_state(path):
+    default_state = {"active_pids": [], "loading_pids": [], "updated_at": None}
+    if not os.path.exists(path):
+        return default_state
+
+    try:
+        import json
+
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+    except Exception:
+        return default_state
+
+    if not isinstance(loaded, dict):
+        return default_state
+
+    active_pids = loaded.get("active_pids", [])
+    loading_pids = loaded.get("loading_pids", [])
+
+    if not isinstance(active_pids, list):
+        active_pids = []
+    if not isinstance(loading_pids, list):
+        loading_pids = []
+
+    return {
+        "active_pids": [int(pid) for pid in active_pids if isinstance(pid, int)],
+        "loading_pids": [int(pid) for pid in loading_pids if isinstance(pid, int)],
+        "updated_at": loaded.get("updated_at"),
+    }
+
+
+def save_server_state(path, state):
+    import json
+
+    state["updated_at"] = datetime.now().isoformat()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+
+
+@contextmanager
+def server_state_lock(lock_path):
+    import fcntl
+
+    lock_dir = os.path.dirname(lock_path)
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_file = open(lock_path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
+
+
+def mutate_server_state(state_path, lock_path, mutator):
+    with server_state_lock(lock_path):
+        state = load_server_state(state_path)
+        state["active_pids"] = [pid for pid in state["active_pids"] if pid_exists(pid)]
+        state["loading_pids"] = [pid for pid in state["loading_pids"] if pid_exists(pid)]
+        result = mutator(state)
+        save_server_state(state_path, state)
+        return result
+
+
+def register_server_pid(state_path, lock_path, pid, max_active_servers):
+    def mutator(state):
+        if pid not in state["active_pids"]:
+            state["active_pids"].append(pid)
+
+        active_count = len(state["active_pids"])
+        if active_count > max_active_servers:
+            state["active_pids"] = [active_pid for active_pid in state["active_pids"] if active_pid != pid]
+            state["loading_pids"] = [loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid]
+            return False, active_count - 1
+        return True, active_count
+
+    return mutate_server_state(state_path, lock_path, mutator)
+
+
+def unregister_server_pid(state_path, lock_path, pid):
+    def mutator(state):
+        state["active_pids"] = [active_pid for active_pid in state["active_pids"] if active_pid != pid]
+        state["loading_pids"] = [loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid]
+        return None
+
+    mutate_server_state(state_path, lock_path, mutator)
+
+
+def try_acquire_model_load_slot(state_path, lock_path, pid, max_parallel_model_loads):
+    def mutator(state):
+        loading = state["loading_pids"]
+        if pid in loading:
+            return True, len(loading)
+        if len(loading) >= max_parallel_model_loads:
+            return False, len(loading)
+        loading.append(pid)
+        return True, len(loading)
+
+    return mutate_server_state(state_path, lock_path, mutator)
+
+
+def release_model_load_slot(state_path, lock_path, pid):
+    def mutator(state):
+        state["loading_pids"] = [loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid]
+        return None
+
+    mutate_server_state(state_path, lock_path, mutator)
 
 
 def build_audio_filter_chain(enable_noise_reduction=True, use_nlm_denoise=False):
@@ -461,6 +608,69 @@ def main():
     log_file, log = setup_logging()
     log("=== Server started ===")
 
+    state_path = default_server_state_path()
+    lock_path = default_server_state_lock_path()
+    current_pid = os.getpid()
+    max_active_servers = max(1, parse_int(os.environ.get("KOTOTYPE_MAX_ACTIVE_SERVERS"), 1))
+    max_parallel_model_loads = max(1, parse_int(os.environ.get("KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"), 1))
+    model_load_wait_timeout = max(1, parse_int(os.environ.get("KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"), 120))
+
+    registered, active_count = register_server_pid(
+        state_path=state_path,
+        lock_path=lock_path,
+        pid=current_pid,
+        max_active_servers=max_active_servers,
+    )
+    if not registered:
+        log(
+            "Server startup skipped: active server limit reached "
+            f"(max={max_active_servers}, current={active_count})"
+        )
+        return
+
+    def cleanup_server_state():
+        release_model_load_slot(state_path=state_path, lock_path=lock_path, pid=current_pid)
+        unregister_server_pid(state_path=state_path, lock_path=lock_path, pid=current_pid)
+
+    atexit.register(cleanup_server_state)
+
+    for signal_name in ("SIGTERM", "SIGINT"):
+        if hasattr(signal, signal_name):
+            sig = getattr(signal, signal_name)
+
+            def _handler(signum, frame):
+                cleanup_server_state()
+                raise SystemExit(0)
+
+            signal.signal(sig, _handler)
+
+    wait_started = time.time()
+    while True:
+        acquired, loading_count = try_acquire_model_load_slot(
+            state_path=state_path,
+            lock_path=lock_path,
+            pid=current_pid,
+            max_parallel_model_loads=max_parallel_model_loads,
+        )
+        if acquired:
+            if loading_count > 1:
+                log(
+                    "Model load slot acquired after waiting "
+                    f"(parallel_loads={loading_count}, max={max_parallel_model_loads})"
+                )
+            break
+
+        elapsed = time.time() - wait_started
+        if elapsed >= model_load_wait_timeout:
+            log(
+                "Server startup aborted: timed out waiting for model-load slot "
+                f"(timeout={model_load_wait_timeout}s, max_parallel={max_parallel_model_loads})"
+            )
+            cleanup_server_state()
+            return
+
+        time.sleep(0.25)
+
     log("Loading Whisper model...")
 
     # faster-whisperのみを使用
@@ -471,6 +681,7 @@ def main():
         device="cpu",
         compute_type="int8",
     )
+    release_model_load_slot(state_path=state_path, lock_path=lock_path, pid=current_pid)
 
     log("Model loaded (device=cpu, compute_type=int8)")
     log("Using faster-whisper backend")

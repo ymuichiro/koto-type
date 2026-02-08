@@ -209,3 +209,6 @@ test_*.py
 
 # Cline / Claude
 .cline/
+
+# Runtime artifact bundles
+artifacts/runtime/

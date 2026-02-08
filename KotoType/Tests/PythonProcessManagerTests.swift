@@ -129,6 +129,34 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(buffer, "")
     }
 
+    func testRuntimeEnvironmentForAppBundleForcesBackendSafetyCaps() {
+        let environment = PythonProcessManager.runtimeEnvironment(
+            base: [
+                "KOTOTYPE_MAX_ACTIVE_SERVERS": "8",
+                "KOTOTYPE_MAX_PARALLEL_MODEL_LOADS": "4",
+            ],
+            bundlePath: "/Applications/KotoType.app"
+        )
+
+        XCTAssertEqual(environment["KOTOTYPE_MAX_ACTIVE_SERVERS"], "1")
+        XCTAssertEqual(environment["KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"], "1")
+        XCTAssertEqual(environment["KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"], "120")
+    }
+
+    func testRuntimeEnvironmentForDevelopmentKeepsExistingValues() {
+        let environment = PythonProcessManager.runtimeEnvironment(
+            base: [
+                "KOTOTYPE_MAX_ACTIVE_SERVERS": "8",
+                "KOTOTYPE_MAX_PARALLEL_MODEL_LOADS": "4",
+            ],
+            bundlePath: "/tmp/koto-type/.build/debug/KotoType"
+        )
+
+        XCTAssertEqual(environment["KOTOTYPE_MAX_ACTIVE_SERVERS"], "8")
+        XCTAssertEqual(environment["KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"], "4")
+        XCTAssertNil(environment["KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"])
+    }
+
     private func makeRuntime(
         currentDirectoryPath: String,
         bundlePath: String,

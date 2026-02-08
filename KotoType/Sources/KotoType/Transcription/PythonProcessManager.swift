@@ -63,6 +63,10 @@ final class PythonProcessManager: @unchecked Sendable {
         process?.standardError = errorPipe
         process?.standardInput = inputPipe
         process?.currentDirectoryURL = URL(fileURLWithPath: launchCommand.workingDirectory)
+        process?.environment = Self.runtimeEnvironment(
+            base: ProcessInfo.processInfo.environment,
+            bundlePath: runtime.bundlePath()
+        )
         process?.terminationHandler = { [weak self] terminatedProcess in
             guard let self = self else { return }
             if self.isStoppingProcess {
@@ -265,6 +269,17 @@ extension PythonProcessManager.Runtime {
 }
 
 extension PythonProcessManager {
+    static func runtimeEnvironment(base: [String: String], bundlePath: String) -> [String: String] {
+        var environment = base
+        if bundlePath.hasSuffix(".app") {
+            // Distribution runtime safety: never allow multi-server / multi-load overrides.
+            environment["KOTOTYPE_MAX_ACTIVE_SERVERS"] = "1"
+            environment["KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"] = "1"
+            environment["KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"] = "120"
+        }
+        return environment
+    }
+
     static func resolveExecutable(named name: String) -> String? {
         let fallbackPaths = [
             "/opt/homebrew/bin/\(name)",

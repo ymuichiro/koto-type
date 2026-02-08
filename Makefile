@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-benchmark test-user-dictionary test-all build-server build-app build-all install-deps clean view-log
+.PHONY: help run-app run-server test-transcription test-benchmark test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -29,6 +29,7 @@ help:
 	@echo "ユーティリティ:"
 	@echo "  make clean          - 一時ファイルを削除"
 	@echo "  make view-log       - サーバーログを表示"
+	@echo "  make capture-artifacts - クラッシュ調査用アーティファクトを収集"
 
 run-app:
 	@echo "Swiftアプリケーションを起動中..."
@@ -81,3 +82,7 @@ clean:
 view-log:
 	@echo "サーバーログを表示:"
 	@cat ~/Library/Application\ Support/koto-type/server.log
+
+capture-artifacts:
+	@echo "実行時アーティファクトを収集中..."
+	./scripts/capture_runtime_artifacts.sh
