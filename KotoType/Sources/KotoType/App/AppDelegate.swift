@@ -22,6 +22,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentSettings: AppSettings = AppSettings()
     private var lastTranscriptionText: String = ""
     private var pendingSegmentFiles: [Int: URL] = [:]
+
+    nonisolated static func resolvedWorkerCount(
+        requested: Int,
+        bundlePath: String = Bundle.main.bundlePath
+    ) -> Int {
+        let normalizedRequested = max(1, requested)
+        // Distribution app bundles are memory-sensitive during model boot.
+        // Keep one worker to avoid cascading restarts from concurrent model loads.
+        if bundlePath.hasSuffix(".app") {
+            return 1
+        }
+        return normalizedRequested
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.shared.log("Application did finish launching", level: .info)
@@ -97,8 +110,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Starting Python process at: \(scriptPath)", level: .info)
 
         currentSettings = SettingsManager.shared.load()
-        multiProcessManager?.initialize(count: currentSettings.parallelism, scriptPath: scriptPath)
-        Logger.shared.log("MultiProcessManager initialized with \(currentSettings.parallelism) processes", level: .info)
+        let workerCount = Self.resolvedWorkerCount(requested: currentSettings.parallelism)
+        if workerCount != currentSettings.parallelism {
+            Logger.shared.log(
+                "Worker count clamped from \(currentSettings.parallelism) to \(workerCount) for app-bundle execution",
+                level: .warning
+            )
+        }
+        multiProcessManager?.initialize(count: workerCount, scriptPath: scriptPath)
+        Logger.shared.log("MultiProcessManager initialized with \(workerCount) processes", level: .info)
         _ = LaunchAtLoginManager.shared.setEnabled(currentSettings.launchAtLogin)
 
         multiProcessManager?.outputReceived = { [weak self] processIndex, output in
@@ -316,7 +336,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !serverScriptPath.isEmpty else { return }
 
         currentSettings = SettingsManager.shared.load()
-        multiProcessManager?.initialize(count: currentSettings.parallelism, scriptPath: serverScriptPath)
+        let workerCount = Self.resolvedWorkerCount(requested: currentSettings.parallelism)
+        if workerCount != currentSettings.parallelism {
+            Logger.shared.log(
+                "Worker count clamped from \(currentSettings.parallelism) to \(workerCount) for app-bundle execution",
+                level: .warning
+            )
+        }
+        multiProcessManager?.initialize(count: workerCount, scriptPath: serverScriptPath)
         Logger.shared.log("Resumed realtime transcription workers after file import", level: .info)
         didSuspendRealtimeWorkersForImport = false
     }

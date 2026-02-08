@@ -27,6 +27,7 @@ final class InitialSetupWindowController: NSWindowController {
 }
 
 struct InitialSetupView: View {
+    private static let accessibilityResetCommand = "tccutil reset Accessibility com.ymuichiro.kototype"
     private let diagnosticsService: InitialSetupDiagnosticsService
     private let onComplete: () -> Void
     private let bannerImage: NSImage?
@@ -35,6 +36,7 @@ struct InitialSetupView: View {
     @State private var isRequestingMicrophone = false
     @State private var isWaitingForAccessibilityUpdate = false
     @State private var shouldShowAccessibilityRestartHint = false
+    @State private var hasCopiedAccessibilityResetCommand = false
     @State private var accessibilityRefreshTask: Task<Void, Never>?
 
     init(
@@ -136,6 +138,39 @@ struct InitialSetupView: View {
                     .foregroundColor(.orange)
             }
 
+            if !isAccessibilityGranted {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("アクセシビリティ権限のトラブルシューティング")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text("権限が反映されない場合は、以下のコマンドで KotoType のアクセシビリティ権限をリセットしてから再起動してください。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(Self.accessibilityResetCommand)
+                        .font(.system(.caption, design: .monospaced))
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .cornerRadius(6)
+
+                    HStack(spacing: 10) {
+                        Button("コマンドをコピー") {
+                            copyAccessibilityResetCommand()
+                        }
+                        .buttonStyle(.bordered)
+
+                        if hasCopiedAccessibilityResetCommand {
+                            Text("コピーしました。ターミナルで実行してください。")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("補足")
                     .font(.subheadline)
@@ -209,6 +244,13 @@ struct InitialSetupView: View {
     private func restartApp() {
         guard AppRelauncher.relaunchCurrentApp() else { return }
         NSApp.terminate(nil)
+    }
+
+    private func copyAccessibilityResetCommand() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(Self.accessibilityResetCommand, forType: .string)
+        hasCopiedAccessibilityResetCommand = true
     }
 
     private static func loadBannerImage() -> NSImage? {

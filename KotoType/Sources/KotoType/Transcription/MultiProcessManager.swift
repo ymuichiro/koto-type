@@ -15,10 +15,17 @@ final class MultiProcessManager: @unchecked Sendable {
     private let idleTerminationWindowSeconds: TimeInterval = 30
     private let idleRecoveryCooldownSeconds: TimeInterval = 60
     private let idleRecoveryBaseDelaySeconds: TimeInterval = 0.5
+    private let fatalIdleTerminationCooldownSeconds: TimeInterval = 300
     private var isStopping = false
     
     var outputReceived: ((Int, String) -> Void)?
     var segmentComplete: ((Int, String) -> Void)?
+
+    static func shouldAutoRecoverIdleTermination(status: Int32) -> Bool {
+        // SIGKILL indicates external termination (often memory pressure).
+        // Auto-restarting immediately can amplify the pressure and create a restart storm.
+        status != 9
+    }
     
     func initialize(count: Int, scriptPath: String) {
         Logger.shared.log("MultiProcessManager: initialize called - count=\(count), scriptPath=\(scriptPath)", level: .info)
@@ -140,6 +147,9 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.lock()
         let shouldHandle = !isStopping && processes[processIndex] != nil
         let context = segmentContextByProcess[processIndex]
+        if context == nil {
+            idleProcesses.remove(processIndex)
+        }
         processLock.unlock()
 
         guard shouldHandle else {
@@ -265,6 +275,7 @@ final class MultiProcessManager: @unchecked Sendable {
         var shouldCooldown = false
         var isBlocked = false
         var delay = idleRecoveryBaseDelaySeconds
+        var shouldAutoRecover = true
 
         processLock.lock()
         var history = idleTerminationHistory[processIndex] ?? []
@@ -273,7 +284,10 @@ final class MultiProcessManager: @unchecked Sendable {
         idleTerminationHistory[processIndex] = history
         historyCount = history.count
 
-        if let blockedUntil = recoverySuppressedUntil[processIndex], blockedUntil > now {
+        if !Self.shouldAutoRecoverIdleTermination(status: status) {
+            shouldAutoRecover = false
+            recoverySuppressedUntil[processIndex] = now.addingTimeInterval(fatalIdleTerminationCooldownSeconds)
+        } else if let blockedUntil = recoverySuppressedUntil[processIndex], blockedUntil > now {
             isBlocked = true
         } else if historyCount > maxIdleTerminationsPerWindow {
             shouldCooldown = true
@@ -285,6 +299,13 @@ final class MultiProcessManager: @unchecked Sendable {
         }
         processLock.unlock()
 
+        if !shouldAutoRecover {
+            Logger.shared.log(
+                "MultiProcessManager: process \(processIndex) terminated with status \(status); auto-recovery disabled for \(Int(fatalIdleTerminationCooldownSeconds))s to prevent restart storm",
+                level: .error
+            )
+            return
+        }
         if isBlocked {
             Logger.shared.log(
                 "MultiProcessManager: recovery suppressed for process \(processIndex); status=\(status)",
