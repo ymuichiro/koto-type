@@ -41,17 +41,28 @@ jobs:
       - name: Build Swift App
         run: |
           cd STTApp
-          swift build --release
+          swift build -c release
       
       - name: Create App Bundle
         run: |
           cd STTApp
+          export STT_BUILD_CONFIG=release
           ./scripts/create_app.sh
       
       - name: Create DMG
         run: |
           cd STTApp
           ./scripts/create_dmg.sh
+
+      - name: Verify DMG output
+        run: |
+          shopt -s nullglob
+          files=(STTApp/*.dmg)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No DMG files were generated."
+            exit 1
+          fi
+          printf 'Generated DMG:\n%s\n' "${files[@]}"
       
       - name: Upload DMG
         uses: actions/upload-artifact@v4

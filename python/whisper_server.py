@@ -304,7 +304,13 @@ def parse_bool(value, default=True):
 def parse_optional_bool(value):
     if value is None:
         return None
-    return parse_bool(value, default=None)
+
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
 
 
 def parse_float(value, default):
