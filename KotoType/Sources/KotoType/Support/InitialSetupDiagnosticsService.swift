@@ -22,6 +22,13 @@ struct InitialSetupReport: Equatable {
 }
 
 final class InitialSetupDiagnosticsService: @unchecked Sendable {
+    enum BundleExecutionLocation: Equatable {
+        case appTranslocation
+        case systemApplications
+        case userApplications
+        case outsideApplications
+    }
+
     struct Runtime {
         var checkAccessibilityPermission: () -> PermissionChecker.PermissionStatus
         var checkMicrophonePermission: () -> PermissionChecker.PermissionStatus
@@ -41,11 +48,14 @@ final class InitialSetupDiagnosticsService: @unchecked Sendable {
         var items: [InitialSetupCheckItem] = []
 
         let accessibilityStatus = runtime.checkAccessibilityPermission()
+        let bundleExecutionLocation = Self.bundleExecutionLocation(for: runtime.currentBundlePath())
         let accessibilityDetail: String
         if accessibilityStatus == .granted {
             accessibilityDetail = "許可済み"
-        } else if runtime.currentBundlePath().contains("/AppTranslocation/") {
-            accessibilityDetail = "現在AppTranslocationから実行中のため権限が反映されない可能性があります。/Applications に移動して起動し直してください"
+        } else if bundleExecutionLocation == .appTranslocation {
+            accessibilityDetail = "現在AppTranslocationから実行中のため権限が反映されない可能性があります。Applications フォルダ（/Applications または ~/Applications）に移動して起動し直してください"
+        } else if bundleExecutionLocation == .outsideApplications {
+            accessibilityDetail = "権限の再発防止のため、Applications フォルダ（/Applications または ~/Applications）から起動してください"
         } else {
             accessibilityDetail = "キーボード入力シミュレーションに必要です"
         }
@@ -113,6 +123,35 @@ extension InitialSetupDiagnosticsService.Runtime {
 }
 
 extension InitialSetupDiagnosticsService {
+    static func bundleExecutionLocation(
+        for rawBundlePath: String,
+        homeDirectory: String = NSHomeDirectory()
+    ) -> BundleExecutionLocation {
+        let normalizedBundlePath = URL(fileURLWithPath: rawBundlePath)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
+
+        if normalizedBundlePath.contains("/AppTranslocation/") {
+            return .appTranslocation
+        }
+
+        if normalizedBundlePath.hasPrefix("/Applications/") {
+            return .systemApplications
+        }
+
+        let userApplicationsRoot = URL(fileURLWithPath: homeDirectory)
+            .appendingPathComponent("Applications", isDirectory: true)
+            .standardizedFileURL
+            .path
+
+        if normalizedBundlePath == userApplicationsRoot || normalizedBundlePath.hasPrefix(userApplicationsRoot + "/") {
+            return .userApplications
+        }
+
+        return .outsideApplications
+    }
+
     static func findExecutable(named name: String) -> String? {
         let fallbackPaths = [
             "/opt/homebrew/bin/\(name)",

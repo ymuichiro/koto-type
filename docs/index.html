@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KotoType | Voice-to-Text for macOS</title>
+    <meta
+      name="description"
+      content="KotoType is a local-first voice-to-text app for macOS. Press one hotkey, speak, and text appears in your current cursor position."
+    />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <link rel="canonical" href="https://ymuichiro.github.io/koto-type/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="KotoType" />
+    <meta property="og:title" content="KotoType | Voice-to-Text for macOS" />
+    <meta
+      property="og:description"
+      content="Speak naturally and insert text directly at your cursor. KotoType is a local-first voice-to-text app for macOS."
+    />
+    <meta property="og:url" content="https://ymuichiro.github.io/koto-type/" />
+    <meta
+      property="og:image"
+      content="https://ymuichiro.github.io/koto-type/assets/og-image-1200x630.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="KotoType: Speak naturally. Type anywhere on macOS."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="KotoType | Voice-to-Text for macOS" />
+    <meta
+      name="twitter:description"
+      content="Speak naturally and insert text directly at your cursor with a local-first macOS dictation workflow."
+    />
+    <meta
+      name="twitter:image"
+      content="https://ymuichiro.github.io/koto-type/assets/og-image-1200x630.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="KotoType: Speak naturally. Type anywhere on macOS."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/png" href="./assets/icon.png" />
+    <link rel="apple-touch-icon" href="./assets/icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow bg-glow-left" aria-hidden="true"></div>
+    <div class="bg-glow bg-glow-right" aria-hidden="true"></div>
+    <header class="site-header">
+      <img class="logo" src="./assets/icon-light.png" alt="KotoType icon" />
+      <span class="brand">KotoType</span>
+      <a class="btn btn-ghost" href="https://github.com/ymuichiro/koto-type" target="_blank" rel="noreferrer">GitHub</a>
+    </header>
+
+    <main>
+      <section class="hero reveal">
+        <p class="eyebrow">Voice-to-Text for macOS</p>
+        <h1>Speak naturally. Type anywhere.</h1>
+        <p class="lead">
+          KotoType stays in your menu bar, records with one hotkey, and inserts transcribed text directly at your cursor.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/ymuichiro/koto-type/releases/latest" target="_blank" rel="noreferrer">Download Latest Release</a>
+          <a class="btn btn-ghost" href="https://github.com/ymuichiro/koto-type#installation" target="_blank" rel="noreferrer">Install Guide</a>
+        </div>
+        <img class="hero-banner" src="./assets/banner.png" alt="KotoType banner" />
+      </section>
+
+      <section class="compat reveal">
+        <h2>Compatibility at a glance</h2>
+        <div class="chip-row">
+          <span class="chip">macOS 13+</span>
+          <span class="chip">Apple Silicon / Intel</span>
+          <span class="chip">Accessibility permission</span>
+          <span class="chip">Microphone permission</span>
+          <span class="chip">Requires `ffmpeg`</span>
+        </div>
+      </section>
+
+      <section class="strengths">
+        <h2 class="reveal">Why KotoType</h2>
+        <div class="grid">
+          <article class="card reveal">
+            <h3>Direct input into any app</h3>
+            <p>
+              Start and stop recording with a global hotkey, then insert text at the active cursor position.
+            </p>
+          </article>
+          <article class="card reveal">
+            <h3>Works in real-world audio</h3>
+            <p>
+              Noise reduction, normalization, and automatic gain handling improve transcription from noisy or quiet input.
+            </p>
+          </article>
+          <article class="card reveal">
+            <h3>Local-first by design</h3>
+            <p>
+              Built around local processing, so your workflow stays fast and privacy-friendly without mandatory cloud usage.
+            </p>
+          </article>
+          <article class="card reveal">
+            <h3>Made for daily use</h3>
+            <p>
+              Menu bar UX, setup checks, transcription history, audio-file import, and launch-at-login support.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="flow reveal">
+        <h2>Get started in 30 seconds</h2>
+        <ol>
+          <li>Download the latest release and move KotoType to Applications.</li>
+          <li>On first launch, allow Accessibility and Microphone permissions.</li>
+          <li>Press your hotkey, speak, release hotkey, and text is inserted at your cursor.</li>
+        </ol>
+      </section>
+
+      <section class="privacy reveal">
+        <h2>Privacy</h2>
+        <p class="section-copy">
+          KotoType is designed for local-first operation. There is no mandatory cloud upload in the core workflow.
+        </p>
+      </section>
+
+      <section class="faq reveal">
+        <h2>FAQ</h2>
+        <details>
+          <summary>Does KotoType send audio to the cloud?</summary>
+          <p>Core usage is local-first and does not require mandatory cloud upload.</p>
+        </details>
+        <details>
+          <summary>Can I transcribe directly into any app?</summary>
+          <p>Yes. KotoType inserts text at the active cursor position after transcription.</p>
+        </details>
+        <details>
+          <summary>What should I check when accuracy is low?</summary>
+          <p>Confirm microphone permission, check input level, and ensure ffmpeg is installed and available.</p>
+        </details>
+      </section>
+
+      <section class="support-grid reveal">
+        <article class="card">
+          <h3>Troubleshooting</h3>
+          <p>If setup or recognition fails, start from the troubleshooting and support guides.</p>
+          <a href="https://github.com/ymuichiro/koto-type#troubleshooting" target="_blank" rel="noreferrer">Open Troubleshooting</a>
+        </article>
+        <article class="card">
+          <h3>Latest updates</h3>
+          <p>Track current release notes, known limitations, and fixes.</p>
+          <a href="https://github.com/ymuichiro/koto-type/releases" target="_blank" rel="noreferrer">View Releases</a>
+        </article>
+      </section>
+
+      <section class="cta-block reveal">
+        <h2>Ready to try KotoType?</h2>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/ymuichiro/koto-type/releases/latest" target="_blank" rel="noreferrer">Download</a>
+          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type" target="_blank" rel="noreferrer">View on GitHub</a>
+          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type#documentation" target="_blank" rel="noreferrer">Read Docs</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer reveal">
+      <p>Open-source under MIT License.</p>
+      <a href="https://github.com/ymuichiro/koto-type" target="_blank" rel="noreferrer">View source</a>
+    </footer>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

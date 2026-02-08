@@ -80,6 +80,38 @@ final class InitialSetupDiagnosticsServiceTests: XCTestCase {
         let accessibility = try XCTUnwrap(report.items.first { $0.id == "accessibility" })
         XCTAssertEqual(accessibility.status, .failed)
         XCTAssertTrue(accessibility.detail.contains("AppTranslocation"))
+        XCTAssertTrue(accessibility.detail.contains("/Applications"))
+        XCTAssertTrue(accessibility.detail.contains("~/Applications"))
+    }
+
+    func testBundleExecutionLocationDetectsSystemApplications() {
+        XCTAssertEqual(
+            InitialSetupDiagnosticsService.bundleExecutionLocation(
+                for: "/Applications/KotoType.app",
+                homeDirectory: "/Users/tester"
+            ),
+            .systemApplications
+        )
+    }
+
+    func testBundleExecutionLocationDetectsUserApplications() {
+        XCTAssertEqual(
+            InitialSetupDiagnosticsService.bundleExecutionLocation(
+                for: "/Users/tester/Applications/KotoType.app",
+                homeDirectory: "/Users/tester"
+            ),
+            .userApplications
+        )
+    }
+
+    func testBundleExecutionLocationDetectsAppTranslocation() {
+        XCTAssertEqual(
+            InitialSetupDiagnosticsService.bundleExecutionLocation(
+                for: "/private/var/folders/zz/yy/AppTranslocation/ABC/d/KotoType.app",
+                homeDirectory: "/Users/tester"
+            ),
+            .appTranslocation
+        )
     }
 
     private func makeRuntime(
