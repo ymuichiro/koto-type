@@ -90,7 +90,8 @@ final class MultiProcessManager: @unchecked Sendable {
             compressionRatioThreshold: context.settings.compressionRatioThreshold,
             task: context.settings.task,
             bestOf: context.settings.bestOf,
-            vadThreshold: context.settings.vadThreshold
+            vadThreshold: context.settings.vadThreshold,
+            autoPunctuation: context.settings.autoPunctuation
         )
 
         if !sendSucceeded {

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import re
 import sys
 import traceback
 from datetime import datetime
@@ -64,9 +65,23 @@ def audio_preprocess(input_path, log):
         return input_path
 
 
-def post_process_text(text, language="ja"):
+def parse_bool(value, default=True):
+    if value is None:
+        return default
+
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def post_process_text(text, language="ja", auto_punctuation=True):
     if not text:
         return text
+
+    auto_punctuation = parse_bool(auto_punctuation, default=True)
 
     ERROR_CORRECTION_DICT = {
         "ですい": "です",
@@ -86,11 +101,27 @@ def post_process_text(text, language="ja"):
 
     text = text.replace("\n\n", "\n").replace("\n ", "\n")
 
+    if not auto_punctuation:
+        return text
+
     if language == "ja":
+        text = text.translate(str.maketrans({",": "、", ".": "。", "!": "！", "?": "？"}))
+        text = re.sub(r"\s*([、。！？])\s*", r"\1", text)
+        text = re.sub(r"([、。！？])\1+", r"\1", text)
+        text = re.sub(
+            r"(?<!^)(そして|しかし|ただし|また|さらに|なので|だから)",
+            r"、\1",
+            text,
+        )
+        text = text.replace("、。", "。")
+
         if text and not text.endswith(("。", "！", "？", "!", "?")):
             text += "。"
-
-            text = text.replace("、 ", "、")
+    else:
+        text = re.sub(r"\s*([,.!?])\s*", r"\1 ", text).strip()
+        text = re.sub(r"\s{2,}", " ", text)
+        if text and not text.endswith((".", "!", "?")):
+            text += "."
 
     return text
 
@@ -208,12 +239,13 @@ def main():
             task = parts[6] if len(parts) > 6 else "transcribe"
             best_of = int(parts[7]) if len(parts) > 7 else 5
             vad_threshold = float(parts[8]) if len(parts) > 8 else 0.5
+            auto_punctuation = parse_bool(parts[9], default=True) if len(parts) > 9 else True
 
             actual_language = None if language == "auto" else language
             log(
                 f"Received: audio={audio_path}, language={language}, actual_language={actual_language}, temp={temperature}, beam={beam_size}, "
                 f"no_speech_threshold={no_speech_threshold}, compression_ratio_threshold={compression_ratio_threshold}, "
-                f"task={task}, best_of={best_of}, vad_threshold={vad_threshold}"
+                f"task={task}, best_of={best_of}, vad_threshold={vad_threshold}, auto_punctuation={auto_punctuation}"
             )
 
             if not audio_path:
@@ -256,7 +288,7 @@ def main():
 
             log("Starting transcription with Whisper...")
             log(
-                f"Transcription parameters: audio={transcription_audio_path}, language={actual_language}, task={task}, temperature={temperature}, beam_size={beam_size}, best_of={best_of}, vad_threshold={vad_threshold}, initial_prompt={initial_prompt[:50] if initial_prompt else None}..."
+                f"Transcription parameters: audio={transcription_audio_path}, language={actual_language}, task={task}, temperature={temperature}, beam_size={beam_size}, best_of={best_of}, vad_threshold={vad_threshold}, auto_punctuation={auto_punctuation}, initial_prompt={initial_prompt[:50] if initial_prompt else None}..."
             )
 
             try:
@@ -302,7 +334,11 @@ def main():
             log(f"Transcription result (raw): '{transcription}'")
             log(f"Transcription length: {len(transcription)} characters")
 
-            transcription = post_process_text(transcription, detected_language)
+            transcription = post_process_text(
+                transcription,
+                detected_language,
+                auto_punctuation=auto_punctuation,
+            )
             log(f"Transcription result (post-processed): '{transcription}'")
 
             print(transcription, file=sys.stdout)

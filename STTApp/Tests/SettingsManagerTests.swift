@@ -33,6 +33,7 @@ final class SettingsManagerTests: XCTestCase {
         let settings = settingsManager.load()
         
         XCTAssertEqual(settings.language, "ja")
+        XCTAssertEqual(settings.autoPunctuation, true)
         XCTAssertEqual(settings.temperature, 0.0)
         XCTAssertEqual(settings.beamSize, 5)
         XCTAssertEqual(settings.noSpeechThreshold, 0.6)
@@ -50,6 +51,7 @@ final class SettingsManagerTests: XCTestCase {
         modifiedSettings.hotkeyConfig.useCommand = false
         modifiedSettings.hotkeyConfig.useOption = true
         modifiedSettings.language = "en"
+        modifiedSettings.autoPunctuation = false
         modifiedSettings.temperature = 0.5
         modifiedSettings.beamSize = 10
         modifiedSettings.noSpeechThreshold = 0.8
@@ -63,6 +65,7 @@ final class SettingsManagerTests: XCTestCase {
         
         XCTAssertEqual(loadedSettings.hotkeyConfig.keyCode, 36)
         XCTAssertEqual(loadedSettings.language, "en")
+        XCTAssertEqual(loadedSettings.autoPunctuation, false)
         XCTAssertEqual(loadedSettings.temperature, 0.5)
         XCTAssertEqual(loadedSettings.beamSize, 10)
         XCTAssertEqual(loadedSettings.noSpeechThreshold, 0.8)

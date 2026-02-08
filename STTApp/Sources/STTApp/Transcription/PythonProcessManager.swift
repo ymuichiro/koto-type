@@ -111,8 +111,9 @@ final class PythonProcessManager: @unchecked Sendable {
         Logger.shared.log("Error handler set up", level: .debug)
     }
     
-    func sendInput(_ text: String, language: String = "ja", temperature: Double = 0.0, beamSize: Int = 5, noSpeechThreshold: Double = 0.6, compressionRatioThreshold: Double = 2.4, task: String = "transcribe", bestOf: Int = 5, vadThreshold: Double = 0.5) -> Bool {
-        let input = "\(text)|\(language)|\(temperature)|\(beamSize)|\(noSpeechThreshold)|\(compressionRatioThreshold)|\(task)|\(bestOf)|\(vadThreshold)"
+    func sendInput(_ text: String, language: String = "ja", temperature: Double = 0.0, beamSize: Int = 5, noSpeechThreshold: Double = 0.6, compressionRatioThreshold: Double = 2.4, task: String = "transcribe", bestOf: Int = 5, vadThreshold: Double = 0.5, autoPunctuation: Bool = true) -> Bool {
+        let punctuationFlag = autoPunctuation ? "1" : "0"
+        let input = "\(text)|\(language)|\(temperature)|\(beamSize)|\(noSpeechThreshold)|\(compressionRatioThreshold)|\(task)|\(bestOf)|\(vadThreshold)|\(punctuationFlag)"
         Logger.shared.log("Sending input to Python: \(input)", level: .debug)
         guard let process = process, process.isRunning else {
             Logger.shared.log("Cannot send input: Python process is not running", level: .error)

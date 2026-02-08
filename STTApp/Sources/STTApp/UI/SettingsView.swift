@@ -4,6 +4,7 @@ import AppKit
 struct SettingsView: View {
     @State private var hotkeyConfig: HotkeyConfiguration
     @State private var language: String
+    @State private var autoPunctuation: Bool
     @State private var temperature: Double
     @State private var beamSize: Int
     @State private var noSpeechThreshold: Double
@@ -23,6 +24,7 @@ struct SettingsView: View {
     
     @State private var pendingHotkeyConfig: HotkeyConfiguration
     @State private var pendingLanguage: String
+    @State private var pendingAutoPunctuation: Bool
     @State private var pendingTemperature: Double
     @State private var pendingBeamSize: Int
     @State private var pendingNoSpeechThreshold: Double
@@ -57,6 +59,7 @@ struct SettingsView: View {
         let userDictionaryWords = UserDictionaryManager.shared.loadWords()
         self._hotkeyConfig = State(initialValue: settings.hotkeyConfig)
         self._language = State(initialValue: settings.language)
+        self._autoPunctuation = State(initialValue: settings.autoPunctuation)
         self._temperature = State(initialValue: settings.temperature)
         self._beamSize = State(initialValue: settings.beamSize)
         self._noSpeechThreshold = State(initialValue: settings.noSpeechThreshold)
@@ -71,6 +74,7 @@ struct SettingsView: View {
         self._dictionaryWords = State(initialValue: userDictionaryWords)
         self.hotkeyConfig = settings.hotkeyConfig
         self.language = settings.language
+        self.autoPunctuation = settings.autoPunctuation
         self.temperature = settings.temperature
         self.beamSize = settings.beamSize
         self.noSpeechThreshold = settings.noSpeechThreshold
@@ -86,6 +90,7 @@ struct SettingsView: View {
         
         self._pendingHotkeyConfig = State(initialValue: settings.hotkeyConfig)
         self._pendingLanguage = State(initialValue: settings.language)
+        self._pendingAutoPunctuation = State(initialValue: settings.autoPunctuation)
         self._pendingTemperature = State(initialValue: settings.temperature)
         self._pendingBeamSize = State(initialValue: settings.beamSize)
         self._pendingNoSpeechThreshold = State(initialValue: settings.noSpeechThreshold)
@@ -210,6 +215,14 @@ struct SettingsView: View {
                         Text("翻訳").tag("translate")
                     }
                     .pickerStyle(.segmented)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("句読点を自動補正する", isOn: $pendingAutoPunctuation)
+
+                    Text("有効時は句読点の正規化と文末補完を行います")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -482,6 +495,7 @@ struct SettingsView: View {
         let settings = AppSettings(
             hotkeyConfig: hotkeyConfig,
             language: language,
+            autoPunctuation: autoPunctuation,
             temperature: temperature,
             beamSize: beamSize,
             noSpeechThreshold: noSpeechThreshold,
@@ -502,6 +516,7 @@ struct SettingsView: View {
         Logger.shared.log("SettingsView.applySettings called: hotkey=\(pendingHotkeyConfig.description)")
         hotkeyConfig = pendingHotkeyConfig
         language = pendingLanguage
+        autoPunctuation = pendingAutoPunctuation
         temperature = pendingTemperature
         beamSize = pendingBeamSize
         noSpeechThreshold = pendingNoSpeechThreshold

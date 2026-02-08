@@ -51,6 +51,25 @@ class UserDictionaryTests(unittest.TestCase):
         self.assertIn("faster-whisper", prompt)
         self.assertEqual(prompt.count("OpenAI"), 1)
 
+    def test_post_process_text_with_auto_punctuation_enabled(self):
+        text = "今日は晴れです そして散歩に行きます"
+        processed = whisper_server.post_process_text(
+            text,
+            language="ja",
+            auto_punctuation=True,
+        )
+        self.assertTrue(processed.endswith("。"))
+        self.assertIn("、そして", processed)
+
+    def test_post_process_text_with_auto_punctuation_disabled(self):
+        text = "今日は晴れです そして散歩に行きます"
+        processed = whisper_server.post_process_text(
+            text,
+            language="ja",
+            auto_punctuation=False,
+        )
+        self.assertEqual(processed, "今日は晴れです そして散歩に行きます")
+
 
 if __name__ == "__main__":
     unittest.main()

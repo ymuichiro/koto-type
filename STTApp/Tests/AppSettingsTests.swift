@@ -8,6 +8,7 @@ final class AppSettingsTests: XCTestCase {
         
         XCTAssertEqual(settings.hotkeyConfig.keyCode, HotkeyConfiguration.default.keyCode)
         XCTAssertEqual(settings.language, "ja")
+        XCTAssertEqual(settings.autoPunctuation, true)
         XCTAssertEqual(settings.temperature, 0.0)
         XCTAssertEqual(settings.beamSize, 5)
         XCTAssertEqual(settings.noSpeechThreshold, 0.6)
@@ -28,6 +29,7 @@ final class AppSettingsTests: XCTestCase {
         let settings = AppSettings(
             hotkeyConfig: customConfig,
             language: "en",
+            autoPunctuation: false,
             temperature: 0.5,
             beamSize: 10,
             noSpeechThreshold: 0.8,
@@ -39,6 +41,7 @@ final class AppSettingsTests: XCTestCase {
         
         XCTAssertEqual(settings.hotkeyConfig.keyCode, 36)
         XCTAssertEqual(settings.language, "en")
+        XCTAssertEqual(settings.autoPunctuation, false)
         XCTAssertEqual(settings.temperature, 0.5)
         XCTAssertEqual(settings.beamSize, 10)
         XCTAssertEqual(settings.noSpeechThreshold, 0.8)
@@ -59,6 +62,7 @@ final class AppSettingsTests: XCTestCase {
         let originalSettings = AppSettings(
             hotkeyConfig: customConfig,
             language: "ja",
+            autoPunctuation: false,
             temperature: 0.2,
             beamSize: 7,
             noSpeechThreshold: 0.7,
@@ -80,6 +84,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(decodedSettings.hotkeyConfig.useControl, originalSettings.hotkeyConfig.useControl)
         XCTAssertEqual(decodedSettings.hotkeyConfig.useShift, originalSettings.hotkeyConfig.useShift)
         XCTAssertEqual(decodedSettings.language, originalSettings.language)
+        XCTAssertEqual(decodedSettings.autoPunctuation, originalSettings.autoPunctuation)
         XCTAssertEqual(decodedSettings.temperature, originalSettings.temperature)
         XCTAssertEqual(decodedSettings.beamSize, originalSettings.beamSize)
         XCTAssertEqual(decodedSettings.noSpeechThreshold, originalSettings.noSpeechThreshold)
@@ -94,6 +99,9 @@ final class AppSettingsTests: XCTestCase {
         
         settings.language = "en"
         XCTAssertEqual(settings.language, "en")
+
+        settings.autoPunctuation = false
+        XCTAssertEqual(settings.autoPunctuation, false)
         
         settings.temperature = 1.0
         XCTAssertEqual(settings.temperature, 1.0)
