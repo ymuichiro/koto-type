@@ -52,22 +52,18 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
         let currentModifiers = modifiers.intersection([.command, .option, .control, .shift])
         let targetModifiers = NSEvent.ModifierFlags(rawValue: currentConfig.modifiers)
         let modifiersMatch = currentModifiers == targetModifiers
-        
-        Logger.shared.log("HotkeyManager: event type=\(event.type), keyCode=\(keyCode), currentConfig.keyCode=\(currentConfig.keyCode), modifiersMatch=\(modifiersMatch), currentModifiers=\(currentModifiers.rawValue), target=\(targetModifiers.rawValue), _isHotkeyPressed=\(_isHotkeyPressed)")
-        
+
         if currentConfig.keyCode == 0 {
             if event.type == .flagsChanged {
                 let prevModifiers = _previousModifiers.intersection([.command, .option, .control, .shift])
                 
                 if currentModifiers == targetModifiers && prevModifiers != targetModifiers {
                     _isHotkeyPressed = true
-                    Logger.shared.log("HotkeyManager: modifier-only hotkey key down", level: .debug)
                     DispatchQueue.main.async { [weak self] in
                         self?.hotkeyKeyDown?()
                     }
                 } else if prevModifiers == targetModifiers && currentModifiers != targetModifiers && _isHotkeyPressed {
                     _isHotkeyPressed = false
-                    Logger.shared.log("HotkeyManager: modifier-only hotkey key up", level: .debug)
                     DispatchQueue.main.async { [weak self] in
                         self?.hotkeyKeyUp?()
                     }
@@ -80,7 +76,6 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
                 if !_isHotkeyPressed && !_isProcessingHotkey {
                     _isHotkeyPressed = true
                     _isProcessingHotkey = true
-                    Logger.shared.log("HotkeyManager: hotkey key down", level: .debug)
                     DispatchQueue.main.async { [weak self] in
                         self?.hotkeyKeyDown?()
                     }
@@ -88,7 +83,6 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
             } else if event.type == .keyUp && _isHotkeyPressed {
                 _isHotkeyPressed = false
                 _isProcessingHotkey = false
-                Logger.shared.log("HotkeyManager: hotkey key up", level: .debug)
                 DispatchQueue.main.async { [weak self] in
                     self?.hotkeyKeyUp?()
                 }
@@ -99,7 +93,6 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
             if _isHotkeyPressed && prevModifiers == targetModifiers && currentModifiers != targetModifiers {
                 _isHotkeyPressed = false
                 _isProcessingHotkey = false
-                Logger.shared.log("HotkeyManager: hotkey key up (modifiers changed)", level: .debug)
                 DispatchQueue.main.async { [weak self] in
                     self?.hotkeyKeyUp?()
                 }

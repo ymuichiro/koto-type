@@ -22,7 +22,7 @@ uv venv
 source .venv/bin/activate
 
 # 依存パッケージのインストール
-uv pip install -r requirements.txt
+uv sync
 ```
 
 ### 3. Swiftアプリのビルド
@@ -39,17 +39,17 @@ swift build
 ```bash
 # Pythonテスト
 source .venv/bin/activate
-.venv/bin/python features/whisper_transcription/tests/test_basic.py
-.venv/bin/python features/whisper_transcription/tests/test_server.py
+.venv/bin/python tests/python/test_transcription.py
+.venv/bin/python tests/python/test_benchmark.py
 
 # 型検査
-.venv/bin/ty check features/whisper_transcription/
+.venv/bin/ty check python/
 
 # リンティング
-.venv/bin/ruff check features/whisper_transcription/
+.venv/bin/ruff check python tests/python
 
 # フォーマット
-.venv/bin/ruff format features/whisper_transcription/
+.venv/bin/ruff format python tests/python
 ```
 
 ### Swiftアプリの実行

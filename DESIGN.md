@@ -49,7 +49,7 @@ Macネイティブの音声文字起こしアプリケーション。OpenAI Whis
 ### 2. Python スクリプト
 
 **ライブラリ**:
-- `openai-whisper` (音声認識)
+- `faster-whisper` (音声認識)
 - `sys` (標準入出力)
 
 **機能**:
@@ -59,14 +59,20 @@ Macネイティブの音声文字起こしアプリケーション。OpenAI Whis
 
 #### Whisperモデル設定（精度重視）
 
-**使用モデル**: `large-v3`（最新のLargeモデル）
+**使用モデル**: `large-v3-turbo`（最新のLarge Turboモデル）
 
 **精度向上のためのパラメータ**:
 
 ```python
-model = whisper.load_model("large-v3", device="cpu")
+from faster_whisper import WhisperModel
 
-result = model.transcribe(
+model = WhisperModel(
+    "large-v3-turbo",
+    device="cpu",
+    compute_type="int8"
+)
+
+segments, info = model.transcribe(
     audio_file,
     
     # 言語設定
@@ -75,34 +81,33 @@ result = model.transcribe(
     
     # デコーディング精度設定
     temperature=0.0,            # 最も確定的な出力（精度重視）
-    temperature_increment_on_fallback=0.2,  # バックアップ時の温度上昇
-    patience=1.0,               # より厳密なデコーディング
     beam_size=5,                # ビームサーチで探索（デフォルト1から増加）
     best_of=5,                  # 複数サンプルから最良を選択
     
     # 品質フィルタ設定
+    vad_filter=True,             # VAD（Voice Activity Detection）を使用
+    vad_parameters={"threshold": 0.5},  # VADの閾値
     no_speech_threshold=0.6,    # 無音検出の閾値
     compression_ratio_threshold=2.4,  # 圧縮率による品質判定
-    logprob_threshold=-1.0,     # 対数尤度による品質判定
     
     # その他
-    fp16=False,                 # 単精度で計算（精度向上、処理は遅くなる）
-    condition_on_previous_text=True,  # 前の文脈を考慮
     initial_prompt="これは会話の文字起こしです。正確な日本語で出力してください。"  # 初期プロンプト
 )
+
+# 結果を結合
+text = " ".join([segment.text for segment in segments])
 ```
 
 **パラメータの説明**:
 - **temperature=0.0**: 最も確定的な出力を生成し、一貫性を向上
 - **beam_size=5 & best_of=5**: ビームサーチで複数候補から最適な選択
-- **patience=1.0**: より長い探索時間を許容し精度向上
-- **fp16=False**: 倍精度計算で数値的安定性を向上
+- **compute_type="int8"**: 8ビット量子化でメモリ使用量を削減し、高速化
 - **language="ja"**: 日本語固定で自動検出の誤りを回避
 - **initial_prompt**: 文脈を与えて期待する出力形式を誘導
 
 **処理時間への影響**:
-- モデルサイズ（large-v3）とこれらのパラメータにより、処理時間は中程度の音声で5-15秒程度かかる
-- 精度重視のため処理速度は妥協
+- モデルサイズ（large-v3-turbo）とint8量子化により、処理時間は中程度の音声で5-10秒程度
+- faster-whisperの最適化により、CPUでも高速に処理可能
 
 ## 実装フロー
 
@@ -144,13 +149,19 @@ result = model.transcribe(
 ```
 stt-simple/
 ├── STTApp/                    # Swift アプリ
-│   ├── STTApp.swift          # メイン
-│   ├── MenuBarController.swift
-│   ├── HotkeyManager.swift
-│   ├── AudioRecorder.swift
-│   └── KeystrokeSimulator.swift
-├── whisper_server.py         # Python スクリプト
-├── requirements.txt          # Python 依存
+│   ├── Sources/STTApp/
+│   │   ├── App/
+│   │   ├── Audio/
+│   │   ├── Input/
+│   │   ├── Transcription/
+│   │   ├── UI/
+│   │   └── Support/
+│   └── Tests/
+├── python/
+│   └── whisper_server.py     # Python スクリプト
+├── tests/
+│   └── python/               # Pythonテスト
+├── pyproject.toml           # Python依存
 └── README.md
 ```
 

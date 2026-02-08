@@ -27,10 +27,11 @@
 ### 技術スタック
 
 - **フロントエンド**: Swift 6.2.3 + SwiftUI + AppKit
-- **バックエンド**: Python 3.13.7 + OpenAI Whisper (large-v3)
+- **バックエンド**: Python 3.13.7 + faster-whisper (large-v3-turbo)
 - **パッケージ管理**: UV (Python) + Xcode (Swift)
-- **ビルドツール**: Xcode, Swift Package Manager
-- **依存管理**: requirements.txt, Package.swift
+- **ビルドツール**: Xcode, Swift Package Manager, PyInstaller
+- **依存管理**: pyproject.toml, Package.swift
+- **配布形式**: .appバンドル, .dmgディスクイメージ
 
 ## 開発の全体方針
 
@@ -73,13 +74,13 @@
 **コマンド例**:
 ```bash
 uv pip install <package>
-uv pip install -r requirements.txt
+uv sync
 ```
 
 **重要事項**:
 - すべてのPythonパッケージ管理にUVを使用
 - 仮想環境（.venv）で作業
-- requirements.txtを常に最新に保つ
+- pyproject.tomlを常に最新に保つ
 
 ### 2. swift-dev (推奨追加)
 **用途**: Swift/Xcodeプロジェクトの作成と管理
@@ -102,9 +103,10 @@ uv pip install -r requirements.txt
 - 文字起こし結果の検証
 
 **重要事項**:
-- large-v3モデルを使用
+- large-v3-turboモデルを使用
 - 精度重視パラメータ（temperature=0.0, beam_size=5など）
 - 日本語固定設定
+- CPUで高速に動作（int8量子化を使用）
 
 ## プロジェクト構成
 
@@ -116,13 +118,19 @@ stt-simple/
 │       ├── swift-dev/           # Swift開発 (推奨)
 │       └── whisper-transcribe/  # Whisper実装 (推奨)
 ├── STTApp/                     # Swift アプリ
-│   ├── STTApp.swift
-│   ├── MenuBarController.swift
-│   ├── HotkeyManager.swift
-│   ├── AudioRecorder.swift
-│   └── KeystrokeSimulator.swift
-├── whisper_server.py            # Python スクリプト
-├── requirements.txt             # Python 依存
+│   ├── Sources/STTApp/
+│   │   ├── App/
+│   │   ├── Audio/
+│   │   ├── Input/
+│   │   ├── Transcription/
+│   │   ├── UI/
+│   │   └── Support/
+│   └── Tests/
+├── python/
+│   └── whisper_server.py        # Python スクリプト
+├── tests/
+│   └── python/                  # Pythonテスト
+├── pyproject.toml            # Python依存
 ├── DESIGN.md                   # 設計方針
 ├── ENV_CHECK.md                # 環境調査結果
 ├── AGENTS.md                   # このファイル
@@ -164,6 +172,15 @@ stt-simple/
 3. 通知システム（ログで十分）
 
 ## テスト方針
+
+### コード変更後の必須テスト
+
+**重要**: コードの変更を加えた後は、必ず以下を実行すること：
+
+1. **テストコードの作成**: 変更した機能に対応するテストコードを作成する
+2. **動作確認**: 作成したテストコードを実行し、コードの動作確認を行う
+
+このプロセスはすべてのコード変更に対して必須であり、例外はない。
 
 ### 手動テストを優先
 
@@ -216,10 +233,66 @@ stt-simple/
 3. **ファイルパス**: 絶対パスを使用
 4. **一時ファイル**: 使用後に必ず削除
 
+## ビルドと配布
+
+### ビルド手順
+
+アプリケーションをビルドして配布可能な形式にする手順：
+
+```bash
+# 1. 依存関係のインストール（開発依存含む）
+make install-deps
+
+# 2. Pythonサーバーバイナリのビルド（PyInstaller使用）
+make build-server
+
+# 3. Swiftアプリのビルド
+make build-app
+
+# または、上記すべてを一括実行
+make build-all
+
+# 4. .appバンドルの作成
+cd STTApp
+./scripts/create_app.sh
+
+# 5. .dmgディスクイメージの作成（オプション）
+./scripts/create_dmg.sh
+```
+
+### Pythonサーバーのパッケージ化
+
+PythonスクリプトはPyInstallerを使用して単一の実行ファイルにパッケージ化されます：
+
+- **実行コマンド**: `uv run pyinstaller --onefile --name whisper_server ...`
+- **出力先**: `dist/whisper_server`
+- **組み込み場所**: `.app/Contents/Resources/whisper_server`
+- **注意点**: C拡張モジュール（faster-whisper, ctranslate2）の収集に注意
+
+### 配布形式
+
+#### .appバンドル (STTApp.app)
+- macOSアプリケーションの標準形式
+- Applicationsフォルダにドラッグ＆ドロップして使用
+- 単独で配布可能
+
+#### .dmgディスクイメージ (STTApp-1.0.0.dmg)
+- macOSアプリの一般的な配布形式
+- ダブルクリックでマウント
+- アプリとApplicationsフォルダへのリンクを含む
+- 推奨配布形式
+
+### 注意点
+
+- 両形式ともアドホック署名を使用
+- 初回起動時にGatekeeperの警告が表示される可能性
+- ユーザーは「右クリック → 開く」で警告をバイパス可能
+- Whisperモデルはアプリに含まれず、初回実行時にダウンロード
+
 ## 次のステップ
 
 1. 必要なスキルを作成する（swift-dev, whisper-transcribeなど）
-2. Pythonバックエンド（whisper_server.py）を実装
+2. Pythonバックエンド（python/whisper_server.py）を実装
 3. Swiftフロントエンド（STTApp）を実装
 4. 統合テストを実施
 5. ユーザードキュメント（README.md）を作成

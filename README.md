@@ -5,7 +5,7 @@ Macネイティブの音声文字起こしアプリケーション。
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)
-![Python](https://img.shields.io/badge/Python-3.10-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.13-blue.svg)
 
 ## 特徴
 
@@ -30,7 +30,7 @@ Macネイティブの音声文字起こしアプリケーション。
 
 - macOS 13.0以降
 - Xcode 15.0以降
-- Python 3.10
+- Python 3.13
 - uv
 
 #### インストール手順
@@ -41,29 +41,59 @@ git clone https://github.com/yourusername/stt-simple.git
 cd stt-simple
 ```
 
-2. Python仮想環境の設定
+2. 依存関係のインストール（開発依存含む）
 ```bash
-uv venv
-source .venv/bin/activate
+make install-deps
 ```
 
-3. 依存パッケージのインストール
+3. アプリケーションのビルド（Python + Swift）
 ```bash
-uv pip install -r requirements.txt
+make build-all
 ```
 
-4. Swiftアプリのビルド
+4. .appバンドルの作成
 ```bash
 cd STTApp
-swift build
-```
-
-5. アプリケーションの作成
-```bash
 ./scripts/create_app.sh
 ```
 
+5. （オプション）.dmgディスクイメージの作成
+```bash
+./scripts/create_dmg.sh
+```
+
 ## 使用方法
+
+### Makefileを使用した操作（推奨）
+
+すべての操作はMakefileから実行できます。利用可能なコマンドを確認するには：
+
+```bash
+make help
+```
+
+#### アプリケーション
+
+- `make run-app` - Swiftアプリケーションを起動
+- `make run-server` - Pythonサーバーを起動（テスト用）
+
+#### テスト
+
+- `make test-transcription` - 音声文字起こしテスト
+- `make test-benchmark` - 速度ベンチマークテスト
+- `make test-all` - すべてのテストを実行
+
+#### ビルド
+
+- `make build-server` - Pythonサーバーバイナリをビルド（PyInstaller）
+- `make build-app` - Swiftアプリケーションをビルド
+- `make build-all` - すべてのビルド（Python + Swift）
+- `make install-deps` - Python依存関係をインストール（開発依存含む）
+
+#### ユーティリティ
+
+- `make clean` - 一時ファイルを削除
+- `make view-log` - サーバーログを表示
 
 ### 起動
 
@@ -73,6 +103,10 @@ DMGからインストールした場合：
 
 ソースからビルドした場合：
 ```bash
+# Makefileを使用（推奨）
+make run-app
+
+# または直接実行
 cd STTApp
 swift run
 ```
@@ -111,52 +145,75 @@ swift run
 
 ```
 stt-simple/
-├── features/
-│   └── whisper_transcription/
-│       ├── server.py           # Whisperサーバー
-│       └── tests/              # テストスクリプト
+├── python/
+│   └── whisper_server.py       # Whisperサーバー
+├── tests/
+│   └── python/                 # Pythonテスト
+│       ├── test_transcription.py
+│       └── test_benchmark.py
 ├── STTApp/                     # Swiftアプリ
 │   ├── Sources/STTApp/
-│   │   ├── AppDelegate.swift
-│   │   ├── MenuBarController.swift
-│   │   ├── HotkeyManager.swift
-│   │   ├── AudioRecorder.swift
-│   │   ├── PythonProcessManager.swift
-│   │   └── KeystrokeSimulator.swift
+│   │   ├── App/               # エントリポイントとパス解決
+│   │   ├── Audio/             # 録音
+│   │   ├── Input/             # ホットキー/入力
+│   │   ├── Transcription/     # Pythonプロセス通信・バッチ制御
+│   │   ├── UI/                # メニューバー/設定UI
+│   │   └── Support/           # ロガー・設定・権限
 │   ├── Package.swift
 │   └── scripts/
 │       ├── create_app.sh        # アプリ作成スクリプト
 │       └── create_dmg.sh       # DMG作成スクリプト
-├── requirements.txt             # Python依存
+├── pyproject.toml            # Python依存
 ├── LICENSE                    # MIT License
 └── README.md                  # このファイル
 ```
 
 ## テスト
 
-### Whisperサーバーのテスト
+### Makefileを使用したテスト（推奨）
 
 ```bash
-.venv/bin/python features/whisper_transcription/tests/test_basic.py
+# 音声文字起こしテスト
+make test-transcription
+
+# 速度ベンチマークテスト
+make test-benchmark
+
+# すべてのテストを実行
+make test-all
 ```
 
-### 統合テスト
+### 手動でのテスト
 
 ```bash
-.venv/bin/python test_integration.py
+# 音声文字起こしテスト
+uv run python3 tests/python/test_transcription.py
+
+# 速度ベンチマークテスト
+uv run python3 tests/python/test_benchmark.py
+```
+
+### サーバーログの確認
+
+```bash
+# Makefileを使用
+make view-log
+
+# または直接実行
+tail -100 ~/Library/Application\ Support/stt-simple/server.log
 ```
 
 ### 型検査とリンティング
 
 ```bash
 # 型検査（ty）
-.venv/bin/ty check features/whisper_transcription/
+.venv/bin/ty check python/
 
 # リンティング（ruff）
-.venv/bin/ruff check features/whisper_transcription/
+.venv/bin/ruff check python tests/python
 
 # フォーマット
-.venv/bin/ruff format features/whisper_transcription/
+.venv/bin/ruff format python tests/python
 ```
 
 ## 開発
@@ -164,6 +221,12 @@ stt-simple/
 ### ビルド
 
 ```bash
+# Makefileを使用（推奨）
+make build-all    # Python + Swiftの両方をビルド
+make build-server # Pythonサーバーバイナリのみ
+make build-app    # Swiftアプリのみ
+
+# または直接実行
 cd STTApp
 swift build
 ```
@@ -171,16 +234,50 @@ swift build
 ### 実行
 
 ```bash
+# Makefileを使用（推奨）
+make run-app
+
+# または直接実行
 cd STTApp
 swift run
 ```
 
-### DMG作成（リリース用）
+### 依存関係のインストール
 
 ```bash
-cd STTApp
-./scripts/create_dmg.sh
+# Makefileを使用（推奨）
+make install-deps
+
+# または直接実行
+uv sync
 ```
+
+### クリーンアップ
+
+```bash
+# Makefileを使用
+make clean
+```
+
+### 配布用ビルド
+
+```bash
+# 完全なビルド手順
+make install-deps  # 依存関係のインストール
+make build-all     # Python + Swiftのビルド
+cd STTApp
+./scripts/create_app.sh    # .appバンドルの作成
+./scripts/create_dmg.sh    # .dmgディスクイメージの作成（オプション）
+```
+
+### PyInstallerについて
+
+PythonサーバーはPyInstallerを使用して単一の実行ファイルにパッケージ化されます：
+
+- **実行コマンド**: `uv run pyinstaller --onefile --name whisper_server ...`
+- **出力先**: `dist/whisper_server`
+- **組み込み場所**: `.app/Contents/Resources/whisper_server`
+- **C拡張モジュール**: faster-whisper, ctranslate2 が自動的に収集されます
 
 ## トラブルシューティング
 
@@ -193,8 +290,14 @@ cd STTApp
 ### ホットキーが動作しない
 システム環境設定 > セキュリティとプライバシー > アクセシビリティ でSTTAppを許可してください。
 
-### Pythonプロセスが起動しない
-`.venv`フォルダが正しく設定されているか確認してください。
+### Pythonサーバーバイナリが見つからない
+`make build-server` を実行してwhisper_serverバイナリを作成してください。
+
+### PyInstallerのエラー
+開発依存が正しくインストールされているか確認してください：
+```bash
+make install-deps
+```
 
 ## リリース
 
@@ -213,11 +316,9 @@ cd STTApp
 - **マイクの権限**: システム設定で許可が必要
 - **アクセシビリティ権限**: ホットキーとキーボードシミュレーションに必要
 - **Whisperモデル**: 初回起動時に約3GBダウンロード
-- **CPU処理**: WhisperはCPUで動作するため、処理時間がかかる場合があります
 
 ## Roadmap
 
-- [ ] GPU加速の対応
 - [ ] 複数言語のサポート
 - [ ] キーボードショートカットのカスタマイズ
 - [ ] 自動更新機能

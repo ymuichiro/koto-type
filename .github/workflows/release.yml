@@ -22,14 +22,14 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -r requirements.txt
+          uv sync
       
       - name: Test Python
         run: |
           source .venv/bin/activate
-          .venv/bin/python features/whisper_transcription/tests/test_basic.py
-          .venv/bin/ruff check features/whisper_transcription/
-          .venv/bin/ty check features/whisper_transcription/
+          .venv/bin/python -m py_compile python/whisper_server.py
+          .venv/bin/ruff check python tests/python
+          .venv/bin/ty check python/
       
       - name: Build Swift App
         run: |

@@ -1,0 +1,191 @@
+@testable import STTApp
+import XCTest
+import Foundation
+
+final class AppSettingsTests: XCTestCase {
+    func testDefaultInitialization() throws {
+        let settings = AppSettings()
+        
+        XCTAssertEqual(settings.hotkeyConfig.keyCode, HotkeyConfiguration.default.keyCode)
+        XCTAssertEqual(settings.language, "ja")
+        XCTAssertEqual(settings.temperature, 0.0)
+        XCTAssertEqual(settings.beamSize, 5)
+        XCTAssertEqual(settings.noSpeechThreshold, 0.6)
+        XCTAssertEqual(settings.compressionRatioThreshold, 2.4)
+        XCTAssertEqual(settings.task, "transcribe")
+        XCTAssertEqual(settings.bestOf, 5)
+        XCTAssertEqual(settings.vadThreshold, 0.5)
+    }
+
+    func testCustomInitialization() throws {
+        var customConfig = HotkeyConfiguration()
+        customConfig.keyCode = 36
+        customConfig.useCommand = false
+        customConfig.useOption = true
+        customConfig.useControl = false
+        customConfig.useShift = false
+        
+        let settings = AppSettings(
+            hotkeyConfig: customConfig,
+            language: "en",
+            temperature: 0.5,
+            beamSize: 10,
+            noSpeechThreshold: 0.8,
+            compressionRatioThreshold: 3.0,
+            task: "translate",
+            bestOf: 3,
+            vadThreshold: 0.3
+        )
+        
+        XCTAssertEqual(settings.hotkeyConfig.keyCode, 36)
+        XCTAssertEqual(settings.language, "en")
+        XCTAssertEqual(settings.temperature, 0.5)
+        XCTAssertEqual(settings.beamSize, 10)
+        XCTAssertEqual(settings.noSpeechThreshold, 0.8)
+        XCTAssertEqual(settings.compressionRatioThreshold, 3.0)
+        XCTAssertEqual(settings.task, "translate")
+        XCTAssertEqual(settings.bestOf, 3)
+        XCTAssertEqual(settings.vadThreshold, 0.3)
+    }
+
+    func testCodingAndDecoding() throws {
+        var customConfig = HotkeyConfiguration()
+        customConfig.keyCode = 51
+        customConfig.useCommand = true
+        customConfig.useOption = false
+        customConfig.useControl = true
+        customConfig.useShift = false
+        
+        let originalSettings = AppSettings(
+            hotkeyConfig: customConfig,
+            language: "ja",
+            temperature: 0.2,
+            beamSize: 7,
+            noSpeechThreshold: 0.7,
+            compressionRatioThreshold: 2.5,
+            task: "transcribe",
+            bestOf: 6,
+            vadThreshold: 0.4
+        )
+        
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(originalSettings)
+        
+        let decoder = JSONDecoder()
+        let decodedSettings = try decoder.decode(AppSettings.self, from: data)
+        
+        XCTAssertEqual(decodedSettings.hotkeyConfig.keyCode, originalSettings.hotkeyConfig.keyCode)
+        XCTAssertEqual(decodedSettings.hotkeyConfig.useCommand, originalSettings.hotkeyConfig.useCommand)
+        XCTAssertEqual(decodedSettings.hotkeyConfig.useOption, originalSettings.hotkeyConfig.useOption)
+        XCTAssertEqual(decodedSettings.hotkeyConfig.useControl, originalSettings.hotkeyConfig.useControl)
+        XCTAssertEqual(decodedSettings.hotkeyConfig.useShift, originalSettings.hotkeyConfig.useShift)
+        XCTAssertEqual(decodedSettings.language, originalSettings.language)
+        XCTAssertEqual(decodedSettings.temperature, originalSettings.temperature)
+        XCTAssertEqual(decodedSettings.beamSize, originalSettings.beamSize)
+        XCTAssertEqual(decodedSettings.noSpeechThreshold, originalSettings.noSpeechThreshold)
+        XCTAssertEqual(decodedSettings.compressionRatioThreshold, originalSettings.compressionRatioThreshold)
+        XCTAssertEqual(decodedSettings.task, originalSettings.task)
+        XCTAssertEqual(decodedSettings.bestOf, originalSettings.bestOf)
+        XCTAssertEqual(decodedSettings.vadThreshold, originalSettings.vadThreshold)
+    }
+
+    func testModifyingSettings() throws {
+        var settings = AppSettings()
+        
+        settings.language = "en"
+        XCTAssertEqual(settings.language, "en")
+        
+        settings.temperature = 1.0
+        XCTAssertEqual(settings.temperature, 1.0)
+        
+        settings.beamSize = 20
+        XCTAssertEqual(settings.beamSize, 20)
+        
+        settings.task = "translate"
+        XCTAssertEqual(settings.task, "translate")
+    }
+
+    func testLanguageSettings() throws {
+        let languages = ["ja", "en", "es", "fr", "de", "zh"]
+        
+        for lang in languages {
+            let settings = AppSettings(language: lang)
+            XCTAssertEqual(settings.language, lang)
+        }
+    }
+
+    func testTemperatureRange() throws {
+        let temperatures: [Double] = [0.0, 0.1, 0.5, 1.0, 2.0]
+        
+        for temp in temperatures {
+            let settings = AppSettings(temperature: temp)
+            XCTAssertEqual(settings.temperature, temp)
+        }
+    }
+
+    func testBeamSizeRange() throws {
+        let beamSizes = [1, 5, 10, 20, 50]
+        
+        for beam in beamSizes {
+            let settings = AppSettings(beamSize: beam)
+            XCTAssertEqual(settings.beamSize, beam)
+        }
+    }
+
+    func testThresholds() throws {
+        var settings = AppSettings()
+        
+        settings.noSpeechThreshold = 0.0
+        XCTAssertEqual(settings.noSpeechThreshold, 0.0)
+        
+        settings.noSpeechThreshold = 1.0
+        XCTAssertEqual(settings.noSpeechThreshold, 1.0)
+        
+        settings.compressionRatioThreshold = 0.0
+        XCTAssertEqual(settings.compressionRatioThreshold, 0.0)
+        
+        settings.compressionRatioThreshold = 10.0
+        XCTAssertEqual(settings.compressionRatioThreshold, 10.0)
+        
+        settings.vadThreshold = 0.0
+        XCTAssertEqual(settings.vadThreshold, 0.0)
+        
+        settings.vadThreshold = 1.0
+        XCTAssertEqual(settings.vadThreshold, 1.0)
+    }
+
+    func testTaskSettings() throws {
+        let tasks = ["transcribe", "translate"]
+        
+        for task in tasks {
+            let settings = AppSettings(task: task)
+            XCTAssertEqual(settings.task, task)
+        }
+    }
+
+    func testBestOfRange() throws {
+        let bestOfValues = [1, 5, 10, 20, 50]
+        
+        for bestOf in bestOfValues {
+            let settings = AppSettings(bestOf: bestOf)
+            XCTAssertEqual(settings.bestOf, bestOf)
+        }
+    }
+
+    func testHotkeyConfigurationIntegration() throws {
+        var config = HotkeyConfiguration()
+        config.keyCode = 40
+        config.useCommand = false
+        config.useOption = true
+        config.useControl = false
+        config.useShift = true
+        
+        let settings = AppSettings(hotkeyConfig: config)
+        
+        XCTAssertEqual(settings.hotkeyConfig.keyCode, 40)
+        XCTAssertEqual(settings.hotkeyConfig.useCommand, false)
+        XCTAssertEqual(settings.hotkeyConfig.useOption, true)
+        XCTAssertEqual(settings.hotkeyConfig.useControl, false)
+        XCTAssertEqual(settings.hotkeyConfig.useShift, true)
+    }
+}

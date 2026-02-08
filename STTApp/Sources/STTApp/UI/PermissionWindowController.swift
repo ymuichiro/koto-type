@@ -7,7 +7,7 @@ final class PermissionWindowController: NSWindowController {
         let content = PermissionView()
         let hostingController = NSHostingController(rootView: content)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 450),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 550),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -20,7 +20,7 @@ final class PermissionWindowController: NSWindowController {
 }
 
 struct PermissionView: View {
-    @State private var hasPermission = false
+    @State private var permissionStatus: PermissionChecker.PermissionStatus = .unknown
     
     var body: some View {
         VStack(spacing: 24) {
@@ -54,11 +54,12 @@ struct PermissionView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("設定手順：")
                     .font(.headline)
-                
+
                 Text("1. 以下のボタンをクリックしてシステム設定を開く")
                 Text("2. [プライバシーとセキュリティ] > [アクセシビリティ] を開く")
-                Text("3. ターミナル（または使用しているターミナルアプリ）にチェックを入れる")
-                Text("4. アプリケーションを再起動する")
+                Text("3. STTApp（またはターミナル）にチェックを入れる")
+                Text("4. [権限を確認] ボタンをクリックする")
+                Text("5. [アプリを再起動] ボタンをクリックする")
             }
             .font(.subheadline)
             .padding()
@@ -78,17 +79,39 @@ struct PermissionView: View {
                 Text("権限を確認")
             }
             
-            if hasPermission {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("権限が付与されました！アプリを再起動してください。")
-                        .foregroundColor(.green)
+            if permissionStatus != .unknown {
+                if permissionStatus == .granted {
+                    VStack(spacing: 12) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("権限が付与されました！")
+                                .foregroundColor(.green)
+                                .fontWeight(.medium)
+                        }
+                        
+                        Button(action: restartApp) {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                Text("アプリを再起動")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                } else {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text("権限がまだ付与されていません。システム設定でアプリを許可し、再起動してください。")
+                            .foregroundColor(.orange)
+                    }
                 }
             }
         }
         .padding(32)
-        .frame(width: 600, height: 450)
+        .frame(width: 600)
+        .fixedSize(horizontal: false, vertical: true)
     }
     
     private func openSystemSettings() {
@@ -96,6 +119,17 @@ struct PermissionView: View {
     }
     
     private func checkPermission() {
-        hasPermission = PermissionChecker.shared.checkAccessibilityPermission() == .granted
+        permissionStatus = PermissionChecker.shared.checkAccessibilityPermission()
+    }
+    
+    private func restartApp() {
+        let url = URL(fileURLWithPath: Bundle.main.resourcePath!)
+        let path = url.deletingLastPathComponent().deletingLastPathComponent().path
+        let task = Process()
+        task.launchPath = "/usr/bin/open"
+        task.arguments = [path]
+        task.launch()
+
+        NSApp.terminate(nil)
     }
 }

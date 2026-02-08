@@ -181,13 +181,29 @@ pyrightconfig.json
 *.xcworkspace/
 DerivedData/
 *.dSYM/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+*.moved-aside
+*.pbxuser
 
 # Test files
 test_audio.wav
 test_integration.py
 features/*/tests/
+test_*.py
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+# macOS
+.DS_Store
+._*
+
+# UV
+.python-version
+
+# Temporary files
+/tmp/*.wav
 
 # Cline / Claude
 .cline/

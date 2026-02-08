@@ -2,6 +2,10 @@
 set -e
 
 echo "Creating STTApp.app bundle..."
+echo ""
+echo "注意: 事前に 'make build-server' を実行してwhisper_serverバイナリを作成してください"
+echo "コマンド: cd .. && make build-server"
+echo ""
 
 # 設定
 APP_NAME="STTApp"
@@ -34,7 +38,7 @@ if [ -f "../dist/whisper_server" ]; then
     chmod +x "${RESOURCES_DIR}/whisper_server"
 else
     echo "Warning: whisper_server binary not found in ../dist/"
-    echo "Please run: cd .. && pyinstaller --onefile --name whisper_server features/whisper_transcription/server.py"
+    echo "Please run: cd .. && pyinstaller --onefile --name whisper_server python/whisper_server.py"
 fi
 
 # Info.plistを作成

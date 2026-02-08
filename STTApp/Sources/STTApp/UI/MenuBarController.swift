@@ -1,6 +1,7 @@
 import AppKit
 import os.log
 
+@MainActor
 class MenuBarController: NSObject {
     private var statusItem: NSStatusItem?
     var showSettings: (() -> Void)?

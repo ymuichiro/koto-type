@@ -18,6 +18,11 @@ let package = Package(
             name: "STTApp",
             dependencies: [],
             path: "Sources"
+        ),
+        .testTarget(
+            name: "STTAppTests",
+            dependencies: ["STTApp"],
+            path: "Tests"
         )
     ]
 )
