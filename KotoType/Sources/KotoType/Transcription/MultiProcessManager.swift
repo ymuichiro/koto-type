@@ -4,9 +4,17 @@ final class MultiProcessManager: @unchecked Sendable {
     private var processes: [Int: PythonProcessManager] = [:]
     private var idleProcesses: Set<Int> = []
     private var segmentContextByProcess: [Int: SegmentContext] = [:]
+    private var recoveryInProgress: Set<Int> = []
+    private var scheduledRecoveries: Set<Int> = []
+    private var idleTerminationHistory: [Int: [Date]] = [:]
+    private var recoverySuppressedUntil: [Int: Date] = [:]
     private var processLock = NSLock()
     private var scriptPath: String = ""
     private let maxRetryCount = 2
+    private let maxIdleTerminationsPerWindow = 3
+    private let idleTerminationWindowSeconds: TimeInterval = 30
+    private let idleRecoveryCooldownSeconds: TimeInterval = 60
+    private let idleRecoveryBaseDelaySeconds: TimeInterval = 0.5
     private var isStopping = false
     
     var outputReceived: ((Int, String) -> Void)?
@@ -19,6 +27,10 @@ final class MultiProcessManager: @unchecked Sendable {
         
         self.scriptPath = scriptPath
         self.isStopping = false
+        self.recoveryInProgress.removeAll()
+        self.scheduledRecoveries.removeAll()
+        self.idleTerminationHistory.removeAll()
+        self.recoverySuppressedUntil.removeAll()
         
         for i in 0..<count {
             createProcess(processIndex: i)
@@ -114,6 +126,8 @@ final class MultiProcessManager: @unchecked Sendable {
         }
         segmentContextByProcess.removeValue(forKey: processIndex)
         idleProcesses.insert(processIndex)
+        idleTerminationHistory.removeValue(forKey: processIndex)
+        recoverySuppressedUntil.removeValue(forKey: processIndex)
         processLock.unlock()
 
         DispatchQueue.main.async { [weak self] in
@@ -143,7 +157,7 @@ final class MultiProcessManager: @unchecked Sendable {
                 "MultiProcessManager: process \(processIndex) terminated while idle, recovering",
                 level: .warning
             )
-            recoverProcess(processIndex: processIndex)
+            handleIdleProcessTermination(processIndex: processIndex, status: status)
         }
     }
 
@@ -199,8 +213,17 @@ final class MultiProcessManager: @unchecked Sendable {
         }
         manager.startPython(scriptPath: scriptPath)
         processes[processIndex] = manager
-        idleProcesses.insert(processIndex)
-        Logger.shared.log("MultiProcessManager: process \(processIndex) initialized", level: .debug)
+        if manager.isRunning() {
+            idleProcesses.insert(processIndex)
+            Logger.shared.log("MultiProcessManager: process \(processIndex) initialized", level: .debug)
+            return
+        }
+
+        Logger.shared.log(
+            "MultiProcessManager: process \(processIndex) failed to start; scheduling recovery",
+            level: .error
+        )
+        scheduleRecovery(processIndex: processIndex, delay: idleRecoveryBaseDelaySeconds)
     }
 
     private func recoverProcess(processIndex: Int) {
@@ -210,6 +233,11 @@ final class MultiProcessManager: @unchecked Sendable {
             processLock.unlock()
             return
         }
+        if recoveryInProgress.contains(processIndex) {
+            processLock.unlock()
+            return
+        }
+        recoveryInProgress.insert(processIndex)
 
         oldManager = processes[processIndex]
         idleProcesses.remove(processIndex)
@@ -222,11 +250,88 @@ final class MultiProcessManager: @unchecked Sendable {
 
         processLock.lock()
         if isStopping {
+            recoveryInProgress.remove(processIndex)
             processLock.unlock()
             return
         }
         createProcess(processIndex: processIndex)
+        recoveryInProgress.remove(processIndex)
         processLock.unlock()
+    }
+
+    private func handleIdleProcessTermination(processIndex: Int, status: Int32) {
+        let now = Date()
+        var historyCount = 0
+        var shouldCooldown = false
+        var isBlocked = false
+        var delay = idleRecoveryBaseDelaySeconds
+
+        processLock.lock()
+        var history = idleTerminationHistory[processIndex] ?? []
+        history.removeAll { now.timeIntervalSince($0) > idleTerminationWindowSeconds }
+        history.append(now)
+        idleTerminationHistory[processIndex] = history
+        historyCount = history.count
+
+        if let blockedUntil = recoverySuppressedUntil[processIndex], blockedUntil > now {
+            isBlocked = true
+        } else if historyCount > maxIdleTerminationsPerWindow {
+            shouldCooldown = true
+            let blockedUntil = now.addingTimeInterval(idleRecoveryCooldownSeconds)
+            recoverySuppressedUntil[processIndex] = blockedUntil
+        } else {
+            let exponent = max(0, historyCount - 1)
+            delay = min(idleRecoveryBaseDelaySeconds * pow(2.0, Double(exponent)), 5.0)
+        }
+        processLock.unlock()
+
+        if isBlocked {
+            Logger.shared.log(
+                "MultiProcessManager: recovery suppressed for process \(processIndex); status=\(status)",
+                level: .error
+            )
+            return
+        }
+
+        if shouldCooldown {
+            Logger.shared.log(
+                "MultiProcessManager: process \(processIndex) crashed \(historyCount) times in \(Int(idleTerminationWindowSeconds))s; cooling down for \(Int(idleRecoveryCooldownSeconds))s",
+                level: .error
+            )
+            scheduleRecovery(processIndex: processIndex, delay: idleRecoveryCooldownSeconds)
+            return
+        }
+
+        Logger.shared.log(
+            "MultiProcessManager: scheduling recovery for process \(processIndex) in \(String(format: "%.1f", delay))s after idle termination status \(status)",
+            level: .warning
+        )
+        scheduleRecovery(processIndex: processIndex, delay: delay)
+    }
+
+    private func scheduleRecovery(processIndex: Int, delay: TimeInterval) {
+        processLock.lock()
+        if isStopping || scheduledRecoveries.contains(processIndex) {
+            processLock.unlock()
+            return
+        }
+        scheduledRecoveries.insert(processIndex)
+        processLock.unlock()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+
+            let now = Date()
+            self.processLock.lock()
+            self.scheduledRecoveries.remove(processIndex)
+            let blocked = (self.recoverySuppressedUntil[processIndex] ?? .distantPast) > now
+            self.processLock.unlock()
+
+            if blocked {
+                return
+            }
+            self.recoverProcess(processIndex: processIndex)
+        }
     }
     
     func stop() {
@@ -237,6 +342,10 @@ final class MultiProcessManager: @unchecked Sendable {
         processes.removeAll()
         idleProcesses.removeAll()
         segmentContextByProcess.removeAll()
+        recoveryInProgress.removeAll()
+        scheduledRecoveries.removeAll()
+        idleTerminationHistory.removeAll()
+        recoverySuppressedUntil.removeAll()
         processLock.unlock()
         
         for (index, manager) in allProcesses {
