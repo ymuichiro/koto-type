@@ -9,12 +9,34 @@ echo ""
 
 # 設定
 APP_NAME="STTApp"
-BUILD_DIR=".build/debug"
 APP_VERSION="$(./scripts/version.sh)"
 BUNDLE_NAME="${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_NAME}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+EXECUTABLE_SOURCE=""
+
+if [ -n "${STT_BUILD_CONFIG:-}" ]; then
+    CANDIDATE=".build/${STT_BUILD_CONFIG}/${APP_NAME}"
+    if [ -f "${CANDIDATE}" ]; then
+        EXECUTABLE_SOURCE="${CANDIDATE}"
+    fi
+else
+    for candidate in ".build/release/${APP_NAME}" ".build/debug/${APP_NAME}"; do
+        if [ -f "${candidate}" ]; then
+            EXECUTABLE_SOURCE="${candidate}"
+            break
+        fi
+    done
+fi
+
+if [ -z "${EXECUTABLE_SOURCE}" ]; then
+    echo "❌ Error: STTApp executable not found in .build/{release,debug}"
+    echo "Please run one of the following commands first:"
+    echo "  swift build -c release"
+    echo "  swift build"
+    exit 1
+fi
 
 # 既存のバンドルを削除
 if [ -d "${BUNDLE_NAME}" ]; then
@@ -29,7 +51,7 @@ mkdir -p "${RESOURCES_DIR}"
 
 # 実行ファイルをコピー
 echo "Copying executable..."
-cp "${BUILD_DIR}/${APP_NAME}" "${MACOS_DIR}/${APP_NAME}"
+cp "${EXECUTABLE_SOURCE}" "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 
 # whisper_serverバイナリをコピー
@@ -40,6 +62,7 @@ if [ -f "../dist/whisper_server" ]; then
 else
     echo "Warning: whisper_server binary not found in ../dist/"
     echo "Please run: cd .. && pyinstaller --onefile --name whisper_server python/whisper_server.py"
+    echo "Note: ffmpeg is intentionally not bundled. Users should install ffmpeg in their environment."
 fi
 
 # Info.plistを作成
@@ -86,5 +109,6 @@ codesign --force --deep --sign - "${BUNDLE_NAME}" 2>/dev/null || true
 echo "✅ ${BUNDLE_NAME} created successfully!"
 echo "Bundle location: $(pwd)/${BUNDLE_NAME}"
 echo "Version: ${APP_VERSION}"
+echo "Executable source: ${EXECUTABLE_SOURCE}"
 echo ""
 echo "To launch: open ${BUNDLE_NAME}"

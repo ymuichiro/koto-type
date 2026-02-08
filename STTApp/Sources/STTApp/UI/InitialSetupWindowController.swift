@@ -105,7 +105,7 @@ struct InitialSetupView: View {
                 Text("依存関係不足時の対応")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                Text("ターミナルで `make install-deps` と `make build-server` を実行後、再チェックしてください。")
+                Text("このアプリは FFmpeg を同梱しません。`brew install ffmpeg` を実行し、必要に応じて `make install-deps` / `make build-server` 後に再チェックしてください。")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

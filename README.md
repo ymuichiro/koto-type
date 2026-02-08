@@ -128,6 +128,9 @@ swift run
 
 不足がある場合は画面の案内に従って設定し、「再チェック」後に利用開始できます。
 
+> 注意: ライセンス上の配慮により、配布物には FFmpeg を同梱しません。  
+> ユーザー環境で `ffmpeg` が必要です（例: `brew install ffmpeg`）。
+
 ### 操作
 
 1. アプリを起動すると、メニューバーに「STT」が表示されます
@@ -321,6 +324,7 @@ cd STTApp
 - `main` ブランチへ push すると、GitHub Actions が自動で `v<VERSION>.<run_number>` 形式のタグを作成
 - タグ push を契機に `.github/workflows/release.yml` が実行され、`.dmg` をビルド
 - 生成された `.dmg` は該当タグの GitHub Release に自動添付
+- リリースDMGには FFmpeg を同梱しないため、初回セットアップで環境側 `ffmpeg` を必須チェック
 
 `VERSION` ファイルを更新すると次回以降のタグ・配布物バージョンに反映されます。
 

@@ -55,6 +55,7 @@ Macネイティブの音声文字起こしアプリケーション。OpenAI Whis
 **ライブラリ**:
 - `faster-whisper` (音声認識)
 - `sys` (標準入出力)
+- `ffmpeg` (ユーザー環境にインストールされた実行ファイルを利用)
 
 **機能**:
 - 音声ファイルパスを受け取る
@@ -160,6 +161,7 @@ text = " ".join([segment.text for segment in segments])
 - `main` への push で `v<VERSION>.<run_number>` 形式のタグを自動作成
 - タグ push で GitHub Actions が `.app/.dmg` をビルド
 - `.dmg` をタグ Release に添付し、配布用インストーラーとして公開
+- GPL リスク回避のため FFmpeg は配布物へ同梱せず、初期セットアップで環境側 `ffmpeg` を検証
 
 ## シンプルさを維持するための設計方針
 
