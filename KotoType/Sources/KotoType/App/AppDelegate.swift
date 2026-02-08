@@ -171,7 +171,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         Logger.shared.log("Recording started", level: .info)
-        menuBarController?.updateStatus("Recording...")
         recordingIndicatorWindow?.show()
     }
     
@@ -181,7 +180,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         realtimeRecorder?.stopRecording()
         Logger.shared.log("Recording stopped", level: .info)
         Logger.shared.log("Waiting for transcription to complete...", level: .info)
-        menuBarController?.updateStatus("Processing...")
         recordingIndicatorWindow?.showProcessing()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
@@ -231,7 +229,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         batchTranscriptionManager?.reset()
         lastTranscriptionText = ""
 
-        menuBarController?.updateStatus("Ready")
         recordingIndicatorWindow?.hide()
     }
 
@@ -277,13 +274,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let importedAudioTranscriptionManager else { return }
         isImportingAudio = true
         currentSettings = SettingsManager.shared.load()
-        menuBarController?.updateStatus("Importing...")
         recordingIndicatorWindow?.showProcessing()
 
         importedAudioTranscriptionManager.transcribe(fileURL: fileURL, settings: currentSettings) { [weak self] result in
             guard let self = self else { return }
             self.isImportingAudio = false
-            self.menuBarController?.updateStatus("Ready")
             self.recordingIndicatorWindow?.hide()
             self.resumeRealtimeTranscriptionWorkersAfterImportIfNeeded()
 

@@ -17,7 +17,10 @@ let package = Package(
         .executableTarget(
             name: "KotoType",
             dependencies: [],
-            path: "Sources"
+            path: "Sources",
+            resources: [
+                .process("KotoType/Resources")
+            ]
         ),
         .testTarget(
             name: "KotoTypeTests",

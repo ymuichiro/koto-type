@@ -20,8 +20,11 @@ class MenuBarController: NSObject {
         NSLog("MenuBarController: statusItem visible: \(statusItem?.isVisible ?? false)")
         NSLog("MenuBarController: statusItem button: \(statusItem?.button != nil)")
         statusItem?.isVisible = true
-        statusItem?.button?.title = "KotoType"
-        NSLog("MenuBarController: title set to '\(statusItem?.button?.title ?? "nil")'")
+        let button = statusItem?.button
+        button?.title = ""
+        button?.image = loadMenuBarIconImage()
+        button?.imagePosition = .imageOnly
+        NSLog("MenuBarController: icon image set")
         
         let menu = NSMenu()
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettingsMenu), keyEquivalent: ",")
@@ -63,7 +66,21 @@ class MenuBarController: NSObject {
         NSApplication.shared.terminate(nil)
     }
     
-    func updateStatus(_ status: String) {
-        statusItem?.button?.title = status
+    private func loadMenuBarIconImage() -> NSImage? {
+        let imageName = isDarkMode ? "koto-type_logo_mini_light" : "koto-type_logo_mini_dark"
+        guard
+            let resourceURL = Bundle.module.url(forResource: imageName, withExtension: "png"),
+            let image = NSImage(contentsOf: resourceURL)
+        else {
+            return nil
+        }
+
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = false
+        return image
+    }
+
+    private var isDarkMode: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 }

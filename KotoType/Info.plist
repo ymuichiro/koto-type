@@ -10,6 +10,8 @@
 	<string>KotoType</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>KotoType.icns</string>
 	<key>CFBundleVersion</key>
 	<string>1.0</string>
 	<key>LSUIElement</key>
