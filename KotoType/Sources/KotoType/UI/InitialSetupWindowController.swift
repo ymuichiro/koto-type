@@ -29,6 +29,7 @@ final class InitialSetupWindowController: NSWindowController {
 struct InitialSetupView: View {
     private let diagnosticsService: InitialSetupDiagnosticsService
     private let onComplete: () -> Void
+    private let bannerImage: NSImage?
 
     @State private var report = InitialSetupReport(items: [])
     @State private var isRequestingMicrophone = false
@@ -42,11 +43,23 @@ struct InitialSetupView: View {
     ) {
         self.diagnosticsService = diagnosticsService
         self.onComplete = onComplete
+        self.bannerImage = Self.loadBannerImage()
         _report = State(initialValue: diagnosticsService.evaluate())
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            if let bannerImage {
+                HStack {
+                    Spacer()
+                    Image(nsImage: bannerImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 520)
+                    Spacer()
+                }
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("KotoType 初期セットアップ")
                     .font(.title2)
@@ -196,5 +209,15 @@ struct InitialSetupView: View {
     private func restartApp() {
         guard AppRelauncher.relaunchCurrentApp() else { return }
         NSApp.terminate(nil)
+    }
+
+    private static func loadBannerImage() -> NSImage? {
+        guard
+            let resourceURL = Bundle.module.url(forResource: "koto-tyoe_banner_transparent", withExtension: "png"),
+            let image = NSImage(contentsOf: resourceURL)
+        else {
+            return nil
+        }
+        return image
     }
 }

@@ -2,6 +2,8 @@
 
 <div align="center">
 
+![KotoType Logo](assets/logo/koto-tyoe_banner_transparent.png)
+
 A Mac-native voice-to-text application with high-accuracy transcription powered by OpenAI Whisper.
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/koto-type/releases/latest)

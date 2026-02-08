@@ -14,6 +14,7 @@ BUNDLE_NAME="${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_NAME}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+ICON_SOURCE="../assets/logo/koto-tyoe_logo_dark.png"
 EXECUTABLE_SOURCE=""
 
 if [ -n "${KOTOTYPE_BUILD_CONFIG:-}" ]; then
@@ -66,6 +67,41 @@ else
     exit 1
 fi
 
+# ロゴ画像をコピー（アプリ内表示向け）
+if [ -d "../assets/logo" ]; then
+    echo "Copying logo assets..."
+    cp "../assets/logo/"*.png "${RESOURCES_DIR}/" 2>/dev/null || true
+fi
+
+# SwiftPMリソースバンドルをコピー
+RESOURCE_BUNDLE_PATH="$(find .build -type d -name 'KotoType_KotoType.bundle' | head -n 1)"
+if [ -n "${RESOURCE_BUNDLE_PATH}" ] && [ -d "${RESOURCE_BUNDLE_PATH}" ]; then
+    echo "Copying SwiftPM resource bundle..."
+    cp -R "${RESOURCE_BUNDLE_PATH}" "${RESOURCES_DIR}/"
+fi
+
+# icnsアイコンを生成（Finder / Applications表示用）
+if [ -f "${ICON_SOURCE}" ] && command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+    echo "Generating app icon (.icns)..."
+    ICONSET_ROOT="$(mktemp -d)"
+    ICONSET_DIR="${ICONSET_ROOT}/KotoType.iconset"
+    mkdir -p "${ICONSET_DIR}"
+
+    sips -z 16 16     "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_16x16.png" >/dev/null
+    sips -z 32 32     "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_16x16@2x.png" >/dev/null
+    sips -z 32 32     "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_32x32.png" >/dev/null
+    sips -z 64 64     "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_32x32@2x.png" >/dev/null
+    sips -z 128 128   "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_128x128.png" >/dev/null
+    sips -z 256 256   "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_128x128@2x.png" >/dev/null
+    sips -z 256 256   "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_256x256.png" >/dev/null
+    sips -z 512 512   "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_256x256@2x.png" >/dev/null
+    sips -z 512 512   "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_512x512.png" >/dev/null
+    sips -z 1024 1024 "${ICON_SOURCE}" --out "${ICONSET_DIR}/icon_512x512@2x.png" >/dev/null
+
+    iconutil -c icns "${ICONSET_DIR}" -o "${RESOURCES_DIR}/KotoType.icns"
+    rm -rf "${ICONSET_ROOT}"
+fi
+
 # Info.plistを作成
 echo "Creating Info.plist..."
 cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
@@ -81,6 +117,8 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
 	<string>KotoType</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>KotoType.icns</string>
 	<key>CFBundleVersion</key>
 	<string>1.0.0</string>
 	<key>CFBundleShortVersionString</key>
