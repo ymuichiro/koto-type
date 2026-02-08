@@ -72,8 +72,9 @@ final class PythonProcessManager: @unchecked Sendable {
                 )
                 return
             }
+            let reason = terminatedProcess.terminationReason == .exit ? "exit" : "uncaught-signal"
             Logger.shared.log(
-                "Python process terminated with status: \(terminatedProcess.terminationStatus)",
+                "Python process terminated with status: \(terminatedProcess.terminationStatus), reason: \(reason)",
                 level: .warning
             )
             self.processTerminated?(terminatedProcess.terminationStatus)
