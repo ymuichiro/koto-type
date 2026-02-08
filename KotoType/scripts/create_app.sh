@@ -18,6 +18,31 @@ validate_app_bundle_layout() {
     fi
 }
 
+validate_required_resources() {
+    local bundle_path="$1"
+    local resources_dir="${bundle_path}/Contents/Resources"
+    local required_files=(
+        "whisper_server"
+        "koto-tyoe_banner_transparent.png"
+        "koto-type_logo_mini_dark.png"
+        "koto-type_logo_mini_light.png"
+        "koto-tyoe_logo_dark.png"
+        "koto-tyoe_logo_light.png"
+    )
+    local missing=0
+
+    for relpath in "${required_files[@]}"; do
+        if [ ! -f "${resources_dir}/${relpath}" ]; then
+            echo "❌ Error: Missing required resource: ${resources_dir}/${relpath}"
+            missing=1
+        fi
+    done
+
+    if [ "${missing}" -ne 0 ]; then
+        exit 1
+    fi
+}
+
 strip_code_signature_if_present() {
     local target_path="$1"
 
@@ -174,6 +199,8 @@ EOF
 
 echo "Validating app bundle layout..."
 validate_app_bundle_layout "${BUNDLE_NAME}"
+echo "Validating required app resources..."
+validate_required_resources "${BUNDLE_NAME}"
 
 echo "✅ ${BUNDLE_NAME} created successfully!"
 echo "Bundle location: $(pwd)/${BUNDLE_NAME}"
