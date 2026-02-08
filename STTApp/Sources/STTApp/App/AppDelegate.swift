@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import os.log
+import UniformTypeIdentifiers
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -10,9 +11,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var multiProcessManager: MultiProcessManager?
     var batchTranscriptionManager: BatchTranscriptionManager?
     var settingsWindowController: SettingsWindowController?
+    var historyWindowController: HistoryWindowController?
     var recordingIndicatorWindow: RecordingIndicatorWindow?
     var permissionWindowController: PermissionWindowController?
     var isRecording = false
+    private var isImportingAudio = false
+    private var didSuspendRealtimeWorkersForImport = false
+    private var importedAudioTranscriptionManager: ImportedAudioTranscriptionManager?
+    private var serverScriptPath: String = ""
     private var currentSettings: AppSettings = AppSettings()
     private var lastTranscriptionText: String = ""
     private var pendingSegmentFiles: [Int: URL] = [:]
@@ -61,19 +67,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.shared.log("Accumulated ordered transcription: '\(self.lastTranscriptionText)'", level: .info)
         }
         settingsWindowController = SettingsWindowController()
+        historyWindowController = HistoryWindowController()
         recordingIndicatorWindow = RecordingIndicatorWindow()
         Logger.shared.log("RecordingIndicatorWindow created", level: .debug)
         
         menuBarController?.showSettings = { [weak self] in
             self?.settingsWindowController?.showSettings()
         }
+        menuBarController?.showHistory = { [weak self] in
+            self?.historyWindowController?.showHistory()
+        }
+        menuBarController?.importAudioFile = { [weak self] in
+            self?.presentImportAudioPanel()
+        }
+        settingsWindowController?.onImportAudioRequested = { [weak self] in
+            self?.presentImportAudioPanel()
+        }
+        settingsWindowController?.onShowHistoryRequested = { [weak self] in
+            self?.historyWindowController?.showHistory()
+        }
         
         let scriptPath = BackendLocator.serverScriptPath()
+        serverScriptPath = scriptPath
         Logger.shared.log("Starting Python process at: \(scriptPath)", level: .info)
 
         currentSettings = SettingsManager.shared.load()
         multiProcessManager?.initialize(count: currentSettings.parallelism, scriptPath: scriptPath)
         Logger.shared.log("MultiProcessManager initialized with \(currentSettings.parallelism) processes", level: .info)
+        _ = LaunchAtLoginManager.shared.setEnabled(currentSettings.launchAtLogin)
 
         multiProcessManager?.outputReceived = { [weak self] processIndex, output in
             guard self != nil else { return }
@@ -116,6 +137,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func startRecording() {
+        guard !isImportingAudio else {
+            Logger.shared.log("Recording request ignored because imported audio transcription is running", level: .warning)
+            return
+        }
         isRecording = true
         lastTranscriptionText = ""
         batchTranscriptionManager?.reset()
@@ -191,6 +216,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.shared.log("Typing text into active window: '\(finalText)'", level: .info)
             KeystrokeSimulator.typeText(finalText)
             Logger.shared.log("Text typing completed", level: .info)
+            TranscriptionHistoryManager.shared.addEntry(
+                text: finalText,
+                source: .liveRecording
+            )
         }
 
         cleanupAllPendingSegmentFiles()
@@ -199,6 +228,97 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBarController?.updateStatus("Ready")
         recordingIndicatorWindow?.hide()
+    }
+
+    private func presentImportAudioPanel() {
+        guard !isRecording else {
+            Logger.shared.log("Cannot import audio while recording", level: .warning)
+            return
+        }
+
+        guard !isImportingAudio else {
+            Logger.shared.log("Import request ignored because transcription is already running", level: .warning)
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "wav"),
+            UTType(filenameExtension: "mp3"),
+        ].compactMap { $0 }
+        panel.prompt = "文字起こし"
+        panel.title = "音声ファイルを選択"
+        panel.message = "wav または mp3 ファイルを選択してください"
+        NSApp.activate(ignoringOtherApps: true)
+
+        panel.begin { [weak self] response in
+            guard response == .OK, let selectedURL = panel.url else { return }
+            Task { @MainActor [weak self] in
+                self?.transcribeImportedAudioFile(selectedURL)
+            }
+        }
+    }
+
+    private func transcribeImportedAudioFile(_ fileURL: URL) {
+        guard !isImportingAudio else { return }
+        suspendRealtimeTranscriptionWorkersForImportIfNeeded()
+        if importedAudioTranscriptionManager == nil {
+            importedAudioTranscriptionManager = ImportedAudioTranscriptionManager()
+        }
+        importedAudioTranscriptionManager?.configure(scriptPath: serverScriptPath)
+        guard let importedAudioTranscriptionManager else { return }
+        isImportingAudio = true
+        currentSettings = SettingsManager.shared.load()
+        menuBarController?.updateStatus("Importing...")
+        recordingIndicatorWindow?.showProcessing()
+
+        importedAudioTranscriptionManager.transcribe(fileURL: fileURL, settings: currentSettings) { [weak self] result in
+            guard let self = self else { return }
+            self.isImportingAudio = false
+            self.menuBarController?.updateStatus("Ready")
+            self.recordingIndicatorWindow?.hide()
+            self.resumeRealtimeTranscriptionWorkersAfterImportIfNeeded()
+
+            switch result {
+            case let .success(output):
+                let text = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else {
+                    Logger.shared.log("Imported audio transcription returned empty text", level: .warning)
+                    return
+                }
+                TranscriptionHistoryManager.shared.addEntry(
+                    text: text,
+                    source: .importedFile,
+                    audioFilePath: fileURL.path
+                )
+                self.historyWindowController?.showHistory()
+                Logger.shared.log("Imported audio transcription completed and saved to history", level: .info)
+            case let .failure(error):
+                Logger.shared.log("Imported audio transcription failed: \(error)", level: .error)
+            }
+        }
+    }
+
+    private func suspendRealtimeTranscriptionWorkersForImportIfNeeded() {
+        guard !didSuspendRealtimeWorkersForImport else { return }
+        guard multiProcessManager?.getProcessCount() ?? 0 > 0 else { return }
+
+        Logger.shared.log("Suspending realtime transcription workers for file import", level: .info)
+        multiProcessManager?.stop()
+        didSuspendRealtimeWorkersForImport = true
+    }
+
+    private func resumeRealtimeTranscriptionWorkersAfterImportIfNeeded() {
+        guard didSuspendRealtimeWorkersForImport else { return }
+        guard !serverScriptPath.isEmpty else { return }
+
+        currentSettings = SettingsManager.shared.load()
+        multiProcessManager?.initialize(count: currentSettings.parallelism, scriptPath: serverScriptPath)
+        Logger.shared.log("Resumed realtime transcription workers after file import", level: .info)
+        didSuspendRealtimeWorkersForImport = false
     }
 
     private func cleanupSegmentFile(index: Int) {
@@ -229,6 +349,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyManager?.cleanup()
         multiProcessManager?.stop()
+        importedAudioTranscriptionManager?.stop()
     }
 }
 

@@ -7,6 +7,8 @@ class SettingsWindowController: NSWindowController {
     private var hostingController: NSHostingController<SettingsView>?
     
     var onSettingsChanged: (() -> Void)?
+    var onImportAudioRequested: (() -> Void)?
+    var onShowHistoryRequested: (() -> Void)?
     
     init() {
         let window = NSWindow(
@@ -47,6 +49,12 @@ class SettingsWindowController: NSWindowController {
             },
             onSettingsChanged: {
                 Logger.shared.log("SettingsWindowController: onSettingsChanged called")
+            },
+            onImportAudioRequested: { [weak self] in
+                self?.onImportAudioRequested?()
+            },
+            onShowHistoryRequested: { [weak self] in
+                self?.onShowHistoryRequested?()
             }
         )
         
@@ -71,6 +79,12 @@ class SettingsWindowController: NSWindowController {
             },
             onSettingsChanged: {
                 Logger.shared.log("SettingsWindowController: onSettingsChanged called")
+            },
+            onImportAudioRequested: { [weak self] in
+                self?.onImportAudioRequested?()
+            },
+            onShowHistoryRequested: { [weak self] in
+                self?.onShowHistoryRequested?()
             }
         )
         

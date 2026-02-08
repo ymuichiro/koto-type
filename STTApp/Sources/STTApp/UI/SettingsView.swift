@@ -16,11 +16,14 @@ struct SettingsView: View {
     @State private var silenceThreshold: Double
     @State private var silenceDuration: Double
     @State private var parallelism: Int
+    @State private var launchAtLogin: Bool
     @State private var dictionaryWords: [String]
     @Binding var isPresented: Bool
     
     let onHotkeyChanged: (HotkeyConfiguration) -> Void
     let onSettingsChanged: (() -> Void)?
+    let onImportAudioRequested: (() -> Void)?
+    let onShowHistoryRequested: (() -> Void)?
     
     @State private var pendingHotkeyConfig: HotkeyConfiguration
     @State private var pendingLanguage: String
@@ -36,6 +39,7 @@ struct SettingsView: View {
     @State private var pendingSilenceThreshold: Double
     @State private var pendingSilenceDuration: Double
     @State private var pendingParallelism: Int
+    @State private var pendingLaunchAtLogin: Bool
     @State private var pendingDictionaryWords: [String]
     @State private var pendingDictionaryEntry: String
     
@@ -50,10 +54,18 @@ struct SettingsView: View {
         ("de", "ドイツ語"),
     ]
     
-    init(isPresented: Binding<Bool>, onHotkeyChanged: @escaping (HotkeyConfiguration) -> Void, onSettingsChanged: (() -> Void)? = nil) {
+    init(
+        isPresented: Binding<Bool>,
+        onHotkeyChanged: @escaping (HotkeyConfiguration) -> Void,
+        onSettingsChanged: (() -> Void)? = nil,
+        onImportAudioRequested: (() -> Void)? = nil,
+        onShowHistoryRequested: (() -> Void)? = nil
+    ) {
         self._isPresented = isPresented
         self.onHotkeyChanged = onHotkeyChanged
         self.onSettingsChanged = onSettingsChanged
+        self.onImportAudioRequested = onImportAudioRequested
+        self.onShowHistoryRequested = onShowHistoryRequested
         
         let settings = SettingsManager.shared.load()
         let userDictionaryWords = UserDictionaryManager.shared.loadWords()
@@ -71,6 +83,7 @@ struct SettingsView: View {
         self._silenceThreshold = State(initialValue: settings.silenceThreshold)
         self._silenceDuration = State(initialValue: settings.silenceDuration)
         self._parallelism = State(initialValue: settings.parallelism)
+        self._launchAtLogin = State(initialValue: settings.launchAtLogin)
         self._dictionaryWords = State(initialValue: userDictionaryWords)
         self.hotkeyConfig = settings.hotkeyConfig
         self.language = settings.language
@@ -86,6 +99,7 @@ struct SettingsView: View {
         self.silenceThreshold = settings.silenceThreshold
         self.silenceDuration = settings.silenceDuration
         self.parallelism = settings.parallelism
+        self.launchAtLogin = settings.launchAtLogin
         self.dictionaryWords = userDictionaryWords
         
         self._pendingHotkeyConfig = State(initialValue: settings.hotkeyConfig)
@@ -102,12 +116,18 @@ struct SettingsView: View {
         self._pendingSilenceThreshold = State(initialValue: settings.silenceThreshold)
         self._pendingSilenceDuration = State(initialValue: settings.silenceDuration)
         self._pendingParallelism = State(initialValue: settings.parallelism)
+        self._pendingLaunchAtLogin = State(initialValue: settings.launchAtLogin)
         self._pendingDictionaryWords = State(initialValue: userDictionaryWords)
         self._pendingDictionaryEntry = State(initialValue: "")
     }
     
     var body: some View {
         TabView {
+            generalSettings
+                .tabItem {
+                    Label("一般", systemImage: "gearshape")
+                }
+
             hotkeySettings
                 .tabItem {
                     Label("ホットキー", systemImage: "keyboard")
@@ -129,6 +149,51 @@ struct SettingsView: View {
                 }
         }
         .frame(width: 600, height: 600)
+    }
+
+    private var generalSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("一般設定")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("ログイン時に自動起動する", isOn: $pendingLaunchAtLogin)
+                Text("有効にすると、macOSログイン時にSTT Simpleが自動で起動します")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("クイック操作")
+                    .font(.subheadline)
+
+                Button("音声ファイルを取り込む...") {
+                    onImportAudioRequested?()
+                }
+                .disabled(onImportAudioRequested == nil)
+
+                Button("文字起こし履歴を開く...") {
+                    onShowHistoryRequested?()
+                }
+                .disabled(onShowHistoryRequested == nil)
+            }
+
+            Spacer()
+
+            HStack {
+                Spacer()
+                Button("保存") {
+                    applySettings()
+                }
+                .keyboardShortcut(.defaultAction)
+                Button("キャンセル") {
+                    isPresented = false
+                }
+            }
+        }
+        .padding()
     }
     
     private var hotkeySettings: some View {
@@ -506,7 +571,8 @@ struct SettingsView: View {
             batchInterval: batchInterval,
             silenceThreshold: silenceThreshold,
             silenceDuration: silenceDuration,
-            parallelism: parallelism
+            parallelism: parallelism,
+            launchAtLogin: launchAtLogin
         )
         SettingsManager.shared.save(settings)
         UserDictionaryManager.shared.saveWords(dictionaryWords)
@@ -528,8 +594,10 @@ struct SettingsView: View {
         silenceThreshold = pendingSilenceThreshold
         silenceDuration = pendingSilenceDuration
         parallelism = pendingParallelism
+        launchAtLogin = pendingLaunchAtLogin
         dictionaryWords = pendingDictionaryWords
 
+        _ = LaunchAtLoginManager.shared.setEnabled(launchAtLogin)
         saveSettings()
         let reloadedWords = UserDictionaryManager.shared.loadWords()
         dictionaryWords = reloadedWords

@@ -16,6 +16,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.task, "transcribe")
         XCTAssertEqual(settings.bestOf, 5)
         XCTAssertEqual(settings.vadThreshold, 0.5)
+        XCTAssertEqual(settings.launchAtLogin, false)
     }
 
     func testCustomInitialization() throws {
@@ -36,7 +37,8 @@ final class AppSettingsTests: XCTestCase {
             compressionRatioThreshold: 3.0,
             task: "translate",
             bestOf: 3,
-            vadThreshold: 0.3
+            vadThreshold: 0.3,
+            launchAtLogin: true
         )
         
         XCTAssertEqual(settings.hotkeyConfig.keyCode, 36)
@@ -49,6 +51,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.task, "translate")
         XCTAssertEqual(settings.bestOf, 3)
         XCTAssertEqual(settings.vadThreshold, 0.3)
+        XCTAssertEqual(settings.launchAtLogin, true)
     }
 
     func testCodingAndDecoding() throws {
@@ -69,7 +72,8 @@ final class AppSettingsTests: XCTestCase {
             compressionRatioThreshold: 2.5,
             task: "transcribe",
             bestOf: 6,
-            vadThreshold: 0.4
+            vadThreshold: 0.4,
+            launchAtLogin: true
         )
         
         let encoder = JSONEncoder()
@@ -92,6 +96,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(decodedSettings.task, originalSettings.task)
         XCTAssertEqual(decodedSettings.bestOf, originalSettings.bestOf)
         XCTAssertEqual(decodedSettings.vadThreshold, originalSettings.vadThreshold)
+        XCTAssertEqual(decodedSettings.launchAtLogin, originalSettings.launchAtLogin)
     }
 
     func testModifyingSettings() throws {
@@ -111,6 +116,9 @@ final class AppSettingsTests: XCTestCase {
         
         settings.task = "translate"
         XCTAssertEqual(settings.task, "translate")
+
+        settings.launchAtLogin = true
+        XCTAssertEqual(settings.launchAtLogin, true)
     }
 
     func testLanguageSettings() throws {

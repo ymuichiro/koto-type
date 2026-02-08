@@ -5,6 +5,8 @@ import os.log
 class MenuBarController: NSObject {
     private var statusItem: NSStatusItem?
     var showSettings: (() -> Void)?
+    var showHistory: (() -> Void)?
+    var importAudioFile: (() -> Void)?
     
     override init() {
         super.init()
@@ -25,6 +27,14 @@ class MenuBarController: NSObject {
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettingsMenu), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let importAudioItem = NSMenuItem(title: "Import Audio File...", action: #selector(importAudioFileMenu), keyEquivalent: "i")
+        importAudioItem.target = self
+        menu.addItem(importAudioItem)
+
+        let historyItem = NSMenuItem(title: "History...", action: #selector(showHistoryMenu), keyEquivalent: "h")
+        historyItem.target = self
+        menu.addItem(historyItem)
         
         menu.addItem(NSMenuItem.separator())
         
@@ -39,6 +49,14 @@ class MenuBarController: NSObject {
     
     @objc private func showSettingsMenu() {
         showSettings?()
+    }
+
+    @objc private func showHistoryMenu() {
+        showHistory?()
+    }
+
+    @objc private func importAudioFileMenu() {
+        importAudioFile?()
     }
     
     @objc private func quit() {

@@ -45,6 +45,9 @@ Macネイティブの音声文字起こしアプリケーション。OpenAI Whis
 - 録音の開始・停止（AVFoundation）
 - Pythonプロセス起動・通信（Process）
 - 他アプリへのテキスト入力（CGEvent）
+- 音声ファイル（`wav` / `mp3`）取り込み文字起こし
+- 文字起こし履歴の保存・参照
+- ログイン時自動起動（ON/OFF）
 
 ### 2. Python スクリプト
 
@@ -135,6 +138,14 @@ text = " ".join([segment.text for segment in segments])
 6. **入力**:
    - Swiftが結果を受け取り
    - CGEventで現在のカーソル位置にテキスト入力
+
+7. **履歴管理**:
+   - 録音/取り込み結果をApplication Support配下へJSON保存
+   - メニューから履歴ウィンドウで参照・コピー
+
+8. **起動設定**:
+   - Settingsのトグルでログイン時自動起動を切り替え
+   - `ServiceManagement`で登録状態を反映
 
 ## シンプルさを維持するための設計方針
 

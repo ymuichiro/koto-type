@@ -15,6 +15,7 @@ struct AppSettings: Codable {
     var silenceThreshold: Double
     var silenceDuration: Double
     var parallelism: Int
+    var launchAtLogin: Bool
 
     init(
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
@@ -30,7 +31,8 @@ struct AppSettings: Codable {
         batchInterval: Double = 10.0,
         silenceThreshold: Double = -40.0,
         silenceDuration: Double = 0.5,
-        parallelism: Int = 2
+        parallelism: Int = 2,
+        launchAtLogin: Bool = false
     ) {
         self.hotkeyConfig = hotkeyConfig
         self.language = language
@@ -46,6 +48,7 @@ struct AppSettings: Codable {
         self.silenceThreshold = silenceThreshold
         self.silenceDuration = silenceDuration
         self.parallelism = parallelism
+        self.launchAtLogin = launchAtLogin
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +67,7 @@ struct AppSettings: Codable {
         silenceThreshold = try container.decodeIfPresent(Double.self, forKey: .silenceThreshold) ?? -40.0
         silenceDuration = try container.decodeIfPresent(Double.self, forKey: .silenceDuration) ?? 0.5
         parallelism = try container.decodeIfPresent(Int.self, forKey: .parallelism) ?? 2
+        launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
     }
 }
 
@@ -83,7 +87,7 @@ final class SettingsManager: @unchecked Sendable {
     
     func save(_ settings: AppSettings) {
         Logger.shared.log("SettingsManager.save: saving to \(settingsURL.path)")
-        Logger.shared.log("SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold)")
+        Logger.shared.log("SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold), launchAtLogin=\(settings.launchAtLogin)")
         do {
             let data = try JSONEncoder().encode(settings)
             try data.write(to: settingsURL)
@@ -100,7 +104,7 @@ final class SettingsManager: @unchecked Sendable {
             Logger.shared.log("No saved settings found, returning defaults")
             return AppSettings()
         }
-        Logger.shared.log("SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold)")
+        Logger.shared.log("SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold), launchAtLogin=\(settings.launchAtLogin)")
         return settings
     }
 }

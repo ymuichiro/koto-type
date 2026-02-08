@@ -41,6 +41,7 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertEqual(settings.task, "transcribe")
         XCTAssertEqual(settings.bestOf, 5)
         XCTAssertEqual(settings.vadThreshold, 0.5)
+        XCTAssertEqual(settings.launchAtLogin, false)
     }
 
     func testSaveAndLoad() throws {
@@ -59,6 +60,7 @@ final class SettingsManagerTests: XCTestCase {
         modifiedSettings.task = "translate"
         modifiedSettings.bestOf = 3
         modifiedSettings.vadThreshold = 0.3
+        modifiedSettings.launchAtLogin = true
         
         settingsManager.save(modifiedSettings)
         let loadedSettings = settingsManager.load()
@@ -73,6 +75,7 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertEqual(loadedSettings.task, "translate")
         XCTAssertEqual(loadedSettings.bestOf, 3)
         XCTAssertEqual(loadedSettings.vadThreshold, 0.3)
+        XCTAssertEqual(loadedSettings.launchAtLogin, true)
         
         settingsManager.save(originalSettings)
     }
