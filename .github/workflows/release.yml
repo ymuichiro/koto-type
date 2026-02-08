@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag name (e.g. v1.0.0.123)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,8 +19,27 @@ jobs:
     runs-on: macos-latest
     
     steps:
+      - name: Resolve release tag
+        id: release_tag
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if [ -z "${TAG}" ]; then
+            echo "Release tag is empty."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "STT_VERSION=${TAG#v}" >> "${GITHUB_ENV}"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout release ref
+        run: |
+          TAG="${{ steps.release_tag.outputs.tag }}"
+          git fetch --force --tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          git checkout --detach "refs/tags/${TAG}"
       
       - name: Install UV
         run: |
@@ -26,10 +51,6 @@ jobs:
           uv venv
           source .venv/bin/activate
           uv sync
-
-      - name: Resolve version from tag
-        run: |
-          echo "STT_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
       
       - name: Test Python
         run: |
@@ -67,12 +88,13 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: STTApp-dmg-${{ github.ref_name }}
+          name: STTApp-dmg-${{ steps.release_tag.outputs.tag }}
           path: STTApp/*.dmg
       
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
           files: STTApp/*.dmg
           draft: false
           prerelease: false

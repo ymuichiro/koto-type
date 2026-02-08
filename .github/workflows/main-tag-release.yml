@@ -11,6 +11,8 @@ permissions:
 jobs:
   create-tag:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,3 +38,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${TAG}" "${GITHUB_SHA}"
           git push origin "${TAG}"
+
+  release:
+    needs: create-tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.create-tag.outputs.tag }}
+    secrets: inherit
