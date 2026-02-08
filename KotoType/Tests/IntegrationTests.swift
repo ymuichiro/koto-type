@@ -93,7 +93,7 @@ final class IntegrationTests: XCTestCase {
         realtimeRecorder.onFileCreated = { [weak self] url, index in
             guard let self = self else { return }
             self.batchTranscriptionManager.addSegment(url: url, index: index)
-            self.multiProcessManager.processFile(url: url, index: index, settings: AppSettings())
+            self.multiProcessManager?.processFile(url: url, index: index, settings: AppSettings())
         }
 
         batchTranscriptionManager.onTranscriptionComplete = { text in

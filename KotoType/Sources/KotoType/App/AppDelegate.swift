@@ -366,6 +366,11 @@ struct Main {
             print(AccessibilityDiagnostics.renderJSON(snapshot))
             return
         }
+        if CommandLine.arguments.contains("--diagnose-initial-setup") {
+            let snapshot = AccessibilityDiagnostics.collectInitialSetup()
+            print(AccessibilityDiagnostics.renderJSON(snapshot))
+            return
+        }
 
         print("Main: Starting application")
         let app = NSApplication.shared

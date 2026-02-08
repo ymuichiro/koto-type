@@ -11,6 +11,19 @@ struct AccessibilityDiagnosticsSnapshot: Codable, Equatable {
     let permissionCheckerStatus: String
 }
 
+struct InitialSetupDiagnosticsItemSnapshot: Codable, Equatable {
+    let id: String
+    let title: String
+    let detail: String
+    let status: String
+    let required: Bool
+}
+
+struct InitialSetupDiagnosticsSnapshot: Codable, Equatable {
+    let canStartApplication: Bool
+    let items: [InitialSetupDiagnosticsItemSnapshot]
+}
+
 enum AccessibilityDiagnostics {
     static func collect(
         executablePath: String = CommandLine.arguments.first ?? "",
@@ -33,10 +46,37 @@ enum AccessibilityDiagnostics {
     }
 
     static func renderJSON(_ snapshot: AccessibilityDiagnosticsSnapshot) -> String {
+        renderCodableJSON(snapshot)
+    }
+
+    static func collectInitialSetup(
+        report: InitialSetupReport = InitialSetupDiagnosticsService().evaluate()
+    ) -> InitialSetupDiagnosticsSnapshot {
+        let items = report.items.map { item in
+            InitialSetupDiagnosticsItemSnapshot(
+                id: item.id,
+                title: item.title,
+                detail: item.detail,
+                status: item.status == .passed ? "passed" : "failed",
+                required: item.required
+            )
+        }
+
+        return InitialSetupDiagnosticsSnapshot(
+            canStartApplication: report.canStartApplication,
+            items: items
+        )
+    }
+
+    static func renderJSON(_ snapshot: InitialSetupDiagnosticsSnapshot) -> String {
+        renderCodableJSON(snapshot)
+    }
+
+    private static func renderCodableJSON<T: Encodable>(_ value: T) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
-        guard let data = try? encoder.encode(snapshot),
+        guard let data = try? encoder.encode(value),
               let json = String(data: data, encoding: .utf8) else {
             return "{\"error\":\"failed to encode diagnostics\"}"
         }
