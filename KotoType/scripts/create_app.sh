@@ -42,7 +42,6 @@ validate_required_resources() {
         exit 1
     fi
 }
-
 strip_code_signature_if_present() {
     local target_path="$1"
 
