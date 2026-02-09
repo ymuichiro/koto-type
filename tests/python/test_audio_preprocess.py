@@ -206,6 +206,16 @@ class AudioPreprocessTests(unittest.TestCase):
         self.assertEqual(whisper_server.parse_optional_float("1.5"), 1.5)
         self.assertIsNone(whisper_server.parse_optional_float("bad"))
 
+    def test_should_retry_without_vad(self):
+        err = Exception(
+            "[ONNXRuntimeError] : 3 : NO_SUCHFILE : "
+            "Load model from /tmp/faster_whisper/assets/silero_vad_v6.onnx failed"
+        )
+        self.assertTrue(whisper_server.should_retry_without_vad(err))
+
+        unrelated = Exception("some other transcription error")
+        self.assertFalse(whisper_server.should_retry_without_vad(unrelated))
+
 
 class FakeFFmpegModule:
     def __init__(self, fail_on_denoise=False):

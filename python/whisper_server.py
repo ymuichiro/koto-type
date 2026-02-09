@@ -480,6 +480,13 @@ def parse_optional_float(value):
         return None
 
 
+def should_retry_without_vad(error):
+    message = str(error)
+    return "silero_vad_v6.onnx" in message and (
+        "NO_SUCHFILE" in message or "File doesn't exist" in message
+    )
+
+
 def post_process_text(text, language="ja", auto_punctuation=True):
     if not text:
         return text
@@ -778,31 +785,78 @@ def main():
                 f"Transcription parameters: audio={transcription_audio_path}, language={actual_language}, task={task}, temperature={temperature}, beam_size={beam_size}, best_of={best_of}, vad_parameters={vad_parameters}, auto_punctuation={auto_punctuation}, initial_prompt={initial_prompt[:50] if initial_prompt else None}..."
             )
 
+            transcribe_kwargs = {
+                "audio": transcription_audio_path,
+                "language": actual_language,
+                "task": task,
+                "temperature": temperature,
+                "beam_size": beam_size,
+                "best_of": best_of,
+                "word_timestamps": False,
+                "initial_prompt": initial_prompt,
+                "no_speech_threshold": no_speech_threshold,
+                "compression_ratio_threshold": compression_ratio_threshold,
+            }
+
             try:
                 segments, info = model.transcribe(
-                    transcription_audio_path,
-                    language=actual_language,
-                    task=task,
-                    temperature=temperature,
-                    beam_size=beam_size,
-                    best_of=best_of,
+                    transcribe_kwargs["audio"],
+                    language=transcribe_kwargs["language"],
+                    task=transcribe_kwargs["task"],
+                    temperature=transcribe_kwargs["temperature"],
+                    beam_size=transcribe_kwargs["beam_size"],
+                    best_of=transcribe_kwargs["best_of"],
                     vad_filter=True,
                     vad_parameters=vad_parameters,
-                    word_timestamps=False,
-                    initial_prompt=initial_prompt,
-                    no_speech_threshold=no_speech_threshold,
-                    compression_ratio_threshold=compression_ratio_threshold,
+                    word_timestamps=transcribe_kwargs["word_timestamps"],
+                    initial_prompt=transcribe_kwargs["initial_prompt"],
+                    no_speech_threshold=transcribe_kwargs["no_speech_threshold"],
+                    compression_ratio_threshold=transcribe_kwargs[
+                        "compression_ratio_threshold"
+                    ],
                 )
             except Exception as transcribe_error:
                 log(f"Transcription error: {str(transcribe_error)}")
                 log(f"Transcription error traceback: {traceback.format_exc()}")
-                # エラーが発生した場合は空の結果を返す
-                segments = []
 
-                class DummyInfo:
-                    language = actual_language or "ja"
+                fallback_succeeded = False
+                if should_retry_without_vad(transcribe_error):
+                    log(
+                        "Retrying transcription with vad_filter=False due to missing VAD asset"
+                    )
+                    try:
+                        segments, info = model.transcribe(
+                            transcribe_kwargs["audio"],
+                            language=transcribe_kwargs["language"],
+                            task=transcribe_kwargs["task"],
+                            temperature=transcribe_kwargs["temperature"],
+                            beam_size=transcribe_kwargs["beam_size"],
+                            best_of=transcribe_kwargs["best_of"],
+                            vad_filter=False,
+                            word_timestamps=transcribe_kwargs["word_timestamps"],
+                            initial_prompt=transcribe_kwargs["initial_prompt"],
+                            no_speech_threshold=transcribe_kwargs[
+                                "no_speech_threshold"
+                            ],
+                            compression_ratio_threshold=transcribe_kwargs[
+                                "compression_ratio_threshold"
+                            ],
+                        )
+                        fallback_succeeded = True
+                    except Exception as fallback_error:
+                        log(f"Fallback transcription error: {str(fallback_error)}")
+                        log(
+                            f"Fallback transcription traceback: {traceback.format_exc()}"
+                        )
 
-                info = DummyInfo()
+                if not fallback_succeeded:
+                    # エラーが発生した場合は空の結果を返す
+                    segments = []
+
+                    class DummyInfo:
+                        language = actual_language or "ja"
+
+                    info = DummyInfo()
 
             detected_language = (
                 info.language if actual_language is None else actual_language
