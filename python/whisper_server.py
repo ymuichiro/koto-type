@@ -487,6 +487,98 @@ def should_retry_without_vad(error):
     )
 
 
+def transcribe_once(model, transcribe_kwargs, vad_filter, vad_parameters=None):
+    kwargs = {
+        "language": transcribe_kwargs["language"],
+        "task": transcribe_kwargs["task"],
+        "temperature": transcribe_kwargs["temperature"],
+        "beam_size": transcribe_kwargs["beam_size"],
+        "best_of": transcribe_kwargs["best_of"],
+        "vad_filter": vad_filter,
+        "word_timestamps": transcribe_kwargs["word_timestamps"],
+        "initial_prompt": transcribe_kwargs["initial_prompt"],
+        "no_speech_threshold": transcribe_kwargs["no_speech_threshold"],
+        "compression_ratio_threshold": transcribe_kwargs["compression_ratio_threshold"],
+    }
+    if vad_filter and vad_parameters is not None:
+        kwargs["vad_parameters"] = vad_parameters
+
+    return model.transcribe(
+        transcribe_kwargs["audio"],
+        **kwargs,
+    )
+
+
+def transcribe_with_vad_fallback(
+    model,
+    transcribe_kwargs,
+    vad_parameters,
+    log,
+    fallback_on_empty_vad=True,
+):
+    def build_text(segments):
+        return " ".join(getattr(segment, "text", "") for segment in segments).strip()
+
+    class DummyInfo:
+        language = transcribe_kwargs["language"] or "ja"
+
+    try:
+        segments_iter, info = transcribe_once(
+            model=model,
+            transcribe_kwargs=transcribe_kwargs,
+            vad_filter=True,
+            vad_parameters=vad_parameters,
+        )
+        segments = list(segments_iter)
+    except Exception as transcribe_error:
+        log(f"Transcription error: {str(transcribe_error)}")
+        log(f"Transcription error traceback: {traceback.format_exc()}")
+
+        if should_retry_without_vad(transcribe_error):
+            log("Retrying transcription with vad_filter=False due to missing VAD asset")
+            try:
+                segments_iter, info = transcribe_once(
+                    model=model,
+                    transcribe_kwargs=transcribe_kwargs,
+                    vad_filter=False,
+                )
+                return list(segments_iter), info
+            except Exception as fallback_error:
+                log(f"Fallback transcription error: {str(fallback_error)}")
+                log(f"Fallback transcription traceback: {traceback.format_exc()}")
+
+        return [], DummyInfo()
+
+    raw_text = build_text(segments)
+    if raw_text or not fallback_on_empty_vad:
+        return segments, info
+
+    log(
+        "VAD-enabled transcription returned empty text, "
+        "retrying once with vad_filter=False"
+    )
+    try:
+        fallback_segments_iter, fallback_info = transcribe_once(
+            model=model,
+            transcribe_kwargs=transcribe_kwargs,
+            vad_filter=False,
+        )
+        fallback_segments = list(fallback_segments_iter)
+        fallback_text = build_text(fallback_segments)
+        if fallback_text:
+            log(
+                "Recovered non-empty transcription with vad_filter=False "
+                f"(segments={len(fallback_segments)})"
+            )
+            return fallback_segments, fallback_info
+        log("Fallback transcription with vad_filter=False also returned empty")
+    except Exception as fallback_error:
+        log(f"Fallback transcription error: {str(fallback_error)}")
+        log(f"Fallback transcription traceback: {traceback.format_exc()}")
+
+    return segments, info
+
+
 def post_process_text(text, language="ja", auto_punctuation=True):
     if not text:
         return text
@@ -798,65 +890,16 @@ def main():
                 "compression_ratio_threshold": compression_ratio_threshold,
             }
 
-            try:
-                segments, info = model.transcribe(
-                    transcribe_kwargs["audio"],
-                    language=transcribe_kwargs["language"],
-                    task=transcribe_kwargs["task"],
-                    temperature=transcribe_kwargs["temperature"],
-                    beam_size=transcribe_kwargs["beam_size"],
-                    best_of=transcribe_kwargs["best_of"],
-                    vad_filter=True,
-                    vad_parameters=vad_parameters,
-                    word_timestamps=transcribe_kwargs["word_timestamps"],
-                    initial_prompt=transcribe_kwargs["initial_prompt"],
-                    no_speech_threshold=transcribe_kwargs["no_speech_threshold"],
-                    compression_ratio_threshold=transcribe_kwargs[
-                        "compression_ratio_threshold"
-                    ],
-                )
-            except Exception as transcribe_error:
-                log(f"Transcription error: {str(transcribe_error)}")
-                log(f"Transcription error traceback: {traceback.format_exc()}")
-
-                fallback_succeeded = False
-                if should_retry_without_vad(transcribe_error):
-                    log(
-                        "Retrying transcription with vad_filter=False due to missing VAD asset"
-                    )
-                    try:
-                        segments, info = model.transcribe(
-                            transcribe_kwargs["audio"],
-                            language=transcribe_kwargs["language"],
-                            task=transcribe_kwargs["task"],
-                            temperature=transcribe_kwargs["temperature"],
-                            beam_size=transcribe_kwargs["beam_size"],
-                            best_of=transcribe_kwargs["best_of"],
-                            vad_filter=False,
-                            word_timestamps=transcribe_kwargs["word_timestamps"],
-                            initial_prompt=transcribe_kwargs["initial_prompt"],
-                            no_speech_threshold=transcribe_kwargs[
-                                "no_speech_threshold"
-                            ],
-                            compression_ratio_threshold=transcribe_kwargs[
-                                "compression_ratio_threshold"
-                            ],
-                        )
-                        fallback_succeeded = True
-                    except Exception as fallback_error:
-                        log(f"Fallback transcription error: {str(fallback_error)}")
-                        log(
-                            f"Fallback transcription traceback: {traceback.format_exc()}"
-                        )
-
-                if not fallback_succeeded:
-                    # エラーが発生した場合は空の結果を返す
-                    segments = []
-
-                    class DummyInfo:
-                        language = actual_language or "ja"
-
-                    info = DummyInfo()
+            segments, info = transcribe_with_vad_fallback(
+                model=model,
+                transcribe_kwargs=transcribe_kwargs,
+                vad_parameters=vad_parameters,
+                log=log,
+                fallback_on_empty_vad=parse_bool(
+                    os.environ.get("KOTOTYPE_RETRY_WITHOUT_VAD_ON_EMPTY", "1"),
+                    default=True,
+                ),
+            )
 
             detected_language = (
                 info.language if actual_language is None else actual_language

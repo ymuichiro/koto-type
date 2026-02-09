@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "python"))
@@ -217,6 +218,114 @@ class AudioPreprocessTests(unittest.TestCase):
         self.assertFalse(whisper_server.should_retry_without_vad(unrelated))
 
 
+class TranscriptionFallbackTests(unittest.TestCase):
+    def test_retry_without_vad_when_vad_result_is_empty(self):
+        model = FakeTranscribeModel(
+            responses=[
+                ([], SimpleNamespace(language="ja")),
+                ([SimpleNamespace(text="こんにちは")], SimpleNamespace(language="ja")),
+            ]
+        )
+        logs = []
+        segments, info = whisper_server.transcribe_with_vad_fallback(
+            model=model,
+            transcribe_kwargs={
+                "audio": "dummy.wav",
+                "language": "ja",
+                "task": "transcribe",
+                "temperature": 0.0,
+                "beam_size": 5,
+                "best_of": 5,
+                "word_timestamps": False,
+                "initial_prompt": None,
+                "no_speech_threshold": 0.6,
+                "compression_ratio_threshold": 2.4,
+            },
+            vad_parameters={"threshold": 0.57},
+            log=logs.append,
+            fallback_on_empty_vad=True,
+        )
+
+        self.assertEqual(info.language, "ja")
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].text, "こんにちは")
+        self.assertEqual(model.vad_filter_history, [True, False])
+        self.assertTrue(
+            any(
+                "vad-enabled transcription returned empty" in message.lower()
+                for message in logs
+            )
+        )
+
+    def test_retry_without_vad_when_vad_segments_have_empty_text(self):
+        model = FakeTranscribeModel(
+            responses=[
+                ([SimpleNamespace(text="  ")], SimpleNamespace(language="ja")),
+                ([SimpleNamespace(text="テスト成功")], SimpleNamespace(language="ja")),
+            ]
+        )
+        segments, _ = whisper_server.transcribe_with_vad_fallback(
+            model=model,
+            transcribe_kwargs={
+                "audio": "dummy.wav",
+                "language": "ja",
+                "task": "transcribe",
+                "temperature": 0.0,
+                "beam_size": 5,
+                "best_of": 5,
+                "word_timestamps": False,
+                "initial_prompt": None,
+                "no_speech_threshold": 0.6,
+                "compression_ratio_threshold": 2.4,
+            },
+            vad_parameters={"threshold": 0.57},
+            log=lambda _: None,
+            fallback_on_empty_vad=True,
+        )
+
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].text, "テスト成功")
+        self.assertEqual(model.vad_filter_history, [True, False])
+
+    def test_retry_without_vad_when_vad_asset_missing(self):
+        missing_vad_error = Exception(
+            "[ONNXRuntimeError] : 3 : NO_SUCHFILE : "
+            "Load model from /tmp/faster_whisper/assets/silero_vad_v6.onnx failed"
+        )
+        model = FakeTranscribeModel(
+            responses=[
+                missing_vad_error,
+                ([SimpleNamespace(text="fallback success")], SimpleNamespace(language="ja")),
+            ]
+        )
+        logs = []
+        segments, _ = whisper_server.transcribe_with_vad_fallback(
+            model=model,
+            transcribe_kwargs={
+                "audio": "dummy.wav",
+                "language": "ja",
+                "task": "transcribe",
+                "temperature": 0.0,
+                "beam_size": 5,
+                "best_of": 5,
+                "word_timestamps": False,
+                "initial_prompt": None,
+                "no_speech_threshold": 0.6,
+                "compression_ratio_threshold": 2.4,
+            },
+            vad_parameters={"threshold": 0.57},
+            log=logs.append,
+            fallback_on_empty_vad=True,
+        )
+
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].text, "fallback success")
+        self.assertEqual(model.vad_filter_history, [True, False])
+        self.assertTrue(
+            any("missing vad asset" in message.lower() for message in logs)
+        )
+
+
 class FakeFFmpegModule:
     def __init__(self, fail_on_denoise=False):
         self.fail_on_denoise = fail_on_denoise
@@ -249,6 +358,23 @@ class FakeFFmpegPipeline:
         if self.output_path is not None:
             Path(self.output_path).write_bytes(b"processed")
         return None
+
+
+class FakeTranscribeModel:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.vad_filter_history = []
+
+    def transcribe(self, audio, **kwargs):
+        self.vad_filter_history.append(kwargs.get("vad_filter"))
+        if not self._responses:
+            raise AssertionError("FakeTranscribeModel has no more responses")
+
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+
+        return response
 
 
 if __name__ == "__main__":

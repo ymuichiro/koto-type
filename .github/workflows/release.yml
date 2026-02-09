@@ -67,6 +67,11 @@ jobs:
       - name: Build Python Server Binary
         run: |
           make build-server
+
+      - name: Smoke Test Python Server Binary
+        run: |
+          source .venv/bin/activate
+          .venv/bin/python tests/python/smoke_whisper_server_binary.py dist/whisper_server
       
       - name: Create App Bundle
         run: |
