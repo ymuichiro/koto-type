@@ -609,19 +609,21 @@ def post_process_text(text, language="ja", auto_punctuation=True):
     if language == "ja":
         text = text.translate(str.maketrans({",": "、", ".": "。", "!": "！", "?": "？"}))
         text = re.sub(r"\s*([、。！？])\s*", r"\1", text)
-        text = re.sub(r"([、。！？])\1+", r"\1", text)
-        text = re.sub(
-            r"(?<!^)(そして|しかし|ただし|また|さらに|なので|だから)",
-            r"、\1",
-            text,
-        )
+        text = re.sub(r"、{2,}", "、", text)
+        text = re.sub(r"。{2,}", "。", text)
+        text = re.sub(r"！{2,}", "！", text)
+        text = re.sub(r"？{2,}", "？", text)
         text = text.replace("、。", "。")
 
         if text and not text.endswith(("。", "！", "？", "!", "?")):
             text += "。"
     else:
-        text = re.sub(r"\s*([,.!?])\s*", r"\1 ", text).strip()
+        text = text.translate(str.maketrans({"、": ",", "。": ".", "！": "!", "？": "?"}))
+        text = re.sub(r"\s+([,.!?])", r"\1", text)
+        text = re.sub(r",{2,}", ",", text)
+        text = re.sub(r"([!?])\1+", r"\1", text)
         text = re.sub(r"\s{2,}", " ", text)
+        text = text.strip()
         if text and not text.endswith((".", "!", "?")):
             text += "."
 
@@ -797,7 +799,7 @@ def main():
 
             parts = line.strip().split("|")
             audio_path = parts[0]
-            language = parts[1] if len(parts) > 1 else "ja"
+            language = parts[1] if len(parts) > 1 else "auto"
             temperature = float(parts[2]) if len(parts) > 2 else 0.0
             beam_size = int(parts[3]) if len(parts) > 3 else 5
             no_speech_threshold = float(parts[4]) if len(parts) > 4 else 0.6

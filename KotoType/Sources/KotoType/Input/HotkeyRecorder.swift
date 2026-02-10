@@ -2,11 +2,19 @@ import AppKit
 import SwiftUI
 
 final class HotkeyRecorder: NSView {
+    enum ModifierCaptureDecision: Equatable {
+        case none
+        case updateCurrent
+        case commitPreviousAndLock
+        case resetLock
+    }
+
     private var onChange: ((HotkeyConfiguration) -> Void)?
     var currentConfig: HotkeyConfiguration = HotkeyConfiguration()
     private var modifiers: NSEvent.ModifierFlags = []
     private var pressedKeyCode: UInt32 = 0
     private var regularKeyPressed = false
+    private var modifierReleaseCommitted = false
     
     init(initialConfig: HotkeyConfiguration = HotkeyConfiguration(), onChange: @escaping (HotkeyConfiguration) -> Void) {
         self.currentConfig = initialConfig
@@ -32,6 +40,7 @@ final class HotkeyRecorder: NSView {
         pressedKeyCode = 0
         modifiers = []
         regularKeyPressed = false
+        modifierReleaseCommitted = false
         needsDisplay = true
     }
     
@@ -47,6 +56,7 @@ final class HotkeyRecorder: NSView {
             modifiers = event.modifierFlags
             pressedKeyCode = UInt32(keyCode)
             regularKeyPressed = true
+            modifierReleaseCommitted = false
             updateConfig()
         }
     }
@@ -59,45 +69,105 @@ final class HotkeyRecorder: NSView {
     }
     
     override func flagsChanged(with event: NSEvent) {
-        let previousModifiers = modifiers
+        let previousModifiers = Self.relevantModifiers(from: modifiers)
         modifiers = event.modifierFlags
-        
-        let previousHasModifiers = previousModifiers.contains(.command) ||
-                                  previousModifiers.contains(.option) ||
-                                  previousModifiers.contains(.control) ||
-                                  previousModifiers.contains(.shift)
-        
-        let currentHasModifiers = modifiers.contains(.command) ||
-                                 modifiers.contains(.option) ||
-                                 modifiers.contains(.control) ||
-                                 modifiers.contains(.shift)
-        
-        if !regularKeyPressed && currentHasModifiers {
-            updateConfig()
+        let currentModifiers = Self.relevantModifiers(from: modifiers)
+
+        switch Self.modifierCaptureDecision(
+            previous: previousModifiers,
+            current: currentModifiers,
+            regularKeyPressed: regularKeyPressed,
+            modifierReleaseCommitted: modifierReleaseCommitted
+        ) {
+        case .updateCurrent:
+            applyConfig(Self.configuration(from: currentModifiers, keyCode: pressedKeyCode))
+        case .commitPreviousAndLock:
+            applyConfig(Self.configuration(from: previousModifiers, keyCode: pressedKeyCode))
+            modifierReleaseCommitted = true
+        case .resetLock:
+            modifierReleaseCommitted = false
+        case .none:
+            break
         }
-        
-        if regularKeyPressed && previousHasModifiers && !currentHasModifiers {
+
+        if regularKeyPressed && !previousModifiers.isEmpty && currentModifiers.isEmpty {
             regularKeyPressed = false
         }
     }
     
     private func updateConfig() {
-        var config = HotkeyConfiguration()
-        
-        if modifiers.contains(.command) { config.useCommand = true }
-        if modifiers.contains(.option) { config.useOption = true }
-        if modifiers.contains(.control) { config.useControl = true }
-        if modifiers.contains(.shift) { config.useShift = true }
-        
-        if pressedKeyCode > 0 {
-            config.keyCode = pressedKeyCode
-        }
-        
+        let config = Self.configuration(from: Self.relevantModifiers(from: modifiers), keyCode: pressedKeyCode)
+        applyConfig(config)
+    }
+
+    private func applyConfig(_ config: HotkeyConfiguration) {
         if config != currentConfig {
             currentConfig = config
             onChange?(config)
             needsDisplay = true
         }
+    }
+
+    static func configuration(from modifiers: NSEvent.ModifierFlags, keyCode: UInt32) -> HotkeyConfiguration {
+        var config = HotkeyConfiguration(
+            useCommand: false,
+            useOption: false,
+            useControl: false,
+            useShift: false,
+            keyCode: 0
+        )
+
+        if modifiers.contains(.command) { config.useCommand = true }
+        if modifiers.contains(.option) { config.useOption = true }
+        if modifiers.contains(.control) { config.useControl = true }
+        if modifiers.contains(.shift) { config.useShift = true }
+
+        if keyCode > 0 {
+            config.keyCode = keyCode
+        }
+
+        return config
+    }
+
+    static func modifierCaptureDecision(
+        previous: NSEvent.ModifierFlags,
+        current: NSEvent.ModifierFlags,
+        regularKeyPressed: Bool,
+        modifierReleaseCommitted: Bool
+    ) -> ModifierCaptureDecision {
+        if regularKeyPressed {
+            if !previous.isEmpty && current.isEmpty {
+                return .resetLock
+            }
+            return .none
+        }
+
+        if current.isEmpty {
+            return .resetLock
+        }
+
+        if modifierReleaseCommitted {
+            return .none
+        }
+
+        if modifierCount(current) < modifierCount(previous) {
+            return .commitPreviousAndLock
+        }
+
+        return .updateCurrent
+    }
+
+    static func relevantModifiers(from modifiers: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
+        modifiers.intersection([.command, .option, .control, .shift])
+    }
+
+    static func modifierCount(_ modifiers: NSEvent.ModifierFlags) -> Int {
+        var count = 0
+        if modifiers.contains(.command) { count += 1 }
+        if modifiers.contains(.option) { count += 1 }
+        if modifiers.contains(.control) { count += 1 }
+        if modifiers.contains(.shift) { count += 1 }
+        return count
     }
     
     private func isValidKeyCode(_ keyCode: UInt32) -> Bool {

@@ -129,7 +129,7 @@ final class PythonProcessManager: @unchecked Sendable {
     
     func sendInput(
         _ text: String,
-        language: String = "ja",
+        language: String = "auto",
         temperature: Double = 0.0,
         beamSize: Int = 5,
         noSpeechThreshold: Double = 0.6,

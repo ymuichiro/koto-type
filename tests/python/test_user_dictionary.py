@@ -58,8 +58,7 @@ class UserDictionaryTests(unittest.TestCase):
             language="ja",
             auto_punctuation=True,
         )
-        self.assertTrue(processed.endswith("。"))
-        self.assertIn("、そして", processed)
+        self.assertEqual(processed, "今日は晴れです そして散歩に行きます。")
 
     def test_post_process_text_with_auto_punctuation_disabled(self):
         text = "今日は晴れです そして散歩に行きます"
@@ -69,6 +68,31 @@ class UserDictionaryTests(unittest.TestCase):
             auto_punctuation=False,
         )
         self.assertEqual(processed, "今日は晴れです そして散歩に行きます")
+
+    def test_post_process_text_does_not_duplicate_japanese_comma(self):
+        text = "こういったものは除外するか、またはそもそも入らないようにしたい"
+        processed = whisper_server.post_process_text(
+            text,
+            language="ja",
+            auto_punctuation=True,
+        )
+        self.assertEqual(
+            processed,
+            "こういったものは除外するか、またはそもそも入らないようにしたい。",
+        )
+
+    def test_post_process_text_english_preserves_decimals_and_email(self):
+        text = "The value is 3.14 and contact is a.b@example.com now"
+        processed = whisper_server.post_process_text(
+            text,
+            language="en",
+            auto_punctuation=True,
+        )
+        self.assertIn("3.14", processed)
+        self.assertIn("a.b@example.com", processed)
+        self.assertNotIn("3. 14", processed)
+        self.assertNotIn("a. b@example. com", processed)
+        self.assertTrue(processed.endswith("."))
 
 
 if __name__ == "__main__":

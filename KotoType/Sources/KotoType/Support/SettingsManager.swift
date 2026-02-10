@@ -23,7 +23,7 @@ struct AppSettings: Codable {
 
     init(
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
-        language: String = "ja",
+        language: String = "auto",
         autoPunctuation: Bool = true,
         temperature: Double = 0.0,
         beamSize: Int = 5,
@@ -66,7 +66,7 @@ struct AppSettings: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         hotkeyConfig = try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .hotkeyConfig) ?? HotkeyConfiguration()
-        language = try container.decodeIfPresent(String.self, forKey: .language) ?? "ja"
+        language = try container.decodeIfPresent(String.self, forKey: .language) ?? "auto"
         autoPunctuation = try container.decodeIfPresent(Bool.self, forKey: .autoPunctuation) ?? true
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0.0
         beamSize = try container.decodeIfPresent(Int.self, forKey: .beamSize) ?? 5

@@ -7,7 +7,7 @@ final class AppSettingsTests: XCTestCase {
         let settings = AppSettings()
         
         XCTAssertEqual(settings.hotkeyConfig.keyCode, HotkeyConfiguration.default.keyCode)
-        XCTAssertEqual(settings.language, "ja")
+        XCTAssertEqual(settings.language, "auto")
         XCTAssertEqual(settings.autoPunctuation, true)
         XCTAssertEqual(settings.temperature, 0.0)
         XCTAssertEqual(settings.beamSize, 5)
@@ -185,7 +185,7 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testLanguageSettings() throws {
-        let languages = ["ja", "en", "es", "fr", "de", "zh"]
+        let languages = ["auto", "ja", "en", "es", "fr", "de", "zh"]
         
         for lang in languages {
             let settings = AppSettings(language: lang)

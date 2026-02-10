@@ -32,7 +32,7 @@ final class SettingsManagerTests: XCTestCase {
     func testDefaultSettings() throws {
         let settings = settingsManager.load()
         
-        XCTAssertEqual(settings.language, "ja")
+        XCTAssertEqual(settings.language, "auto")
         XCTAssertEqual(settings.autoPunctuation, true)
         XCTAssertEqual(settings.temperature, 0.0)
         XCTAssertEqual(settings.beamSize, 5)
