@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ymuichiro.github.io/koto-type/sitemap.xml

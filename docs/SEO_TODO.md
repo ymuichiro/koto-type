@@ -29,15 +29,15 @@ Current status of `/docs/index.html`:
 
 ## P1 (strongly recommended)
 
-- [ ] Add `meta name="theme-color"` for browser UI consistency
-- [ ] Add JSON-LD structured data (`SoftwareApplication`)
+- [x] Add `meta name="theme-color"` for browser UI consistency
+- [x] Add JSON-LD structured data (`SoftwareApplication`)
   - Fields: `name`, `applicationCategory`, `operatingSystem`, `offers`, `url`, `description`, `image`
-- [ ] Add `sitemap.xml`
+- [x] Add `sitemap.xml`
   - For single-page site, include root URL + `lastmod`
-- [ ] Add `robots.txt`
+- [x] Add `robots.txt`
   - Allow crawl and point to sitemap:
   - `Sitemap: https://<YOUR_PAGES_DOMAIN>/sitemap.xml`
-- [ ] Ensure all social/meta image URLs are absolute HTTPS URLs
+- [x] Ensure all social/meta image URLs are absolute HTTPS URLs
 
 ## P2 (optional but useful)
 
