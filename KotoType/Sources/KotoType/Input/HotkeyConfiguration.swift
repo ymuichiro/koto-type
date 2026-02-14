@@ -43,7 +43,7 @@ struct HotkeyConfiguration: Codable, Equatable, Hashable {
         case 0x07: return "X"
         case 0x08: return "C"
         case 0x09: return "V"
-        case 0x0A: return "日本語"
+        case 0x0A: return "Kana"
         case 0x0B: return "B"
         case 0x0C: return "Q"
         case 0x0D: return "W"

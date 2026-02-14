@@ -51,18 +51,18 @@ final class InitialSetupDiagnosticsService: @unchecked Sendable {
         let bundleExecutionLocation = Self.bundleExecutionLocation(for: runtime.currentBundlePath())
         let accessibilityDetail: String
         if accessibilityStatus == .granted {
-            accessibilityDetail = "許可済み"
+            accessibilityDetail = "Granted"
         } else if bundleExecutionLocation == .appTranslocation {
-            accessibilityDetail = "現在AppTranslocationから実行中のため権限が反映されない可能性があります。Applications フォルダ（/Applications または ~/Applications）に移動して起動し直してください"
+            accessibilityDetail = "Running from App Translocation may prevent permission changes from applying. Move the app to Applications (/Applications or ~/Applications) and relaunch."
         } else if bundleExecutionLocation == .outsideApplications {
-            accessibilityDetail = "権限の再発防止のため、Applications フォルダ（/Applications または ~/Applications）から起動してください"
+            accessibilityDetail = "To avoid recurring permission issues, launch the app from Applications (/Applications or ~/Applications)."
         } else {
-            accessibilityDetail = "キーボード入力シミュレーションに必要です"
+            accessibilityDetail = "Required to simulate keyboard input"
         }
         items.append(
             InitialSetupCheckItem(
                 id: "accessibility",
-                title: "アクセシビリティ権限",
+                title: "Accessibility Permission",
                 detail: accessibilityDetail,
                 status: accessibilityStatus == .granted ? .passed : .failed,
                 required: true
@@ -73,10 +73,10 @@ final class InitialSetupDiagnosticsService: @unchecked Sendable {
         items.append(
             InitialSetupCheckItem(
                 id: "microphone",
-                title: "マイク権限",
+                title: "Microphone Permission",
                 detail: microphoneStatus == .granted
-                    ? "許可済み"
-                    : "録音機能に必要です",
+                    ? "Granted"
+                    : "Required for recording",
                 status: microphoneStatus == .granted ? .passed : .failed,
                 required: true
             )
@@ -87,7 +87,7 @@ final class InitialSetupDiagnosticsService: @unchecked Sendable {
             InitialSetupCheckItem(
                 id: "ffmpeg",
                 title: "FFmpeg",
-                detail: ffmpegPath.map { "検出済み: \($0)" } ?? "ffmpeg コマンドが見つかりません",
+                detail: ffmpegPath.map { "Detected: \($0)" } ?? "ffmpeg command not found",
                 status: ffmpegPath == nil ? .failed : .passed,
                 required: true
             )

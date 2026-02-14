@@ -8,9 +8,9 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable {
         var displayName: String {
             switch self {
             case .liveRecording:
-                return "リアルタイム録音"
+                return "Live Recording"
             case .importedFile:
-                return "音声ファイル"
+                return "Audio File"
             }
         }
     }

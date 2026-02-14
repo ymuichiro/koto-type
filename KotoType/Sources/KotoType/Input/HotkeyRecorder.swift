@@ -182,7 +182,7 @@ final class HotkeyRecorder: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         
-        let text = currentConfig.description.isEmpty ? "ホットキーを入力..." : currentConfig.description
+        let text = currentConfig.description.isEmpty ? "Press hotkey..." : currentConfig.description
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 14),
             .foregroundColor: currentConfig.description.isEmpty ? NSColor.placeholderTextColor : NSColor.labelColor

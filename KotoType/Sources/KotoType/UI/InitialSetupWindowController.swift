@@ -18,7 +18,7 @@ final class InitialSetupWindowController: NSWindowController {
             defer: false
         )
         window.center()
-        window.title = "初期セットアップ"
+        window.title = "Initial Setup"
         window.minSize = NSSize(width: 700, height: 620)
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
@@ -63,10 +63,10 @@ struct InitialSetupView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("KotoType 初期セットアップ")
+                Text("KotoType Initial Setup")
                     .font(.title2)
                     .fontWeight(.bold)
-                Text("利用開始前に必要な権限とFFmpegの有無を確認します。")
+                Text("Before you start, confirm required permissions and FFmpeg availability.")
                     .foregroundColor(.secondary)
             }
 
@@ -79,7 +79,7 @@ struct InitialSetupView: View {
                             Text(item.title)
                                 .font(.headline)
                             if item.required {
-                                Text("必須")
+                                Text("Required")
                                     .font(.caption2)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
@@ -98,12 +98,12 @@ struct InitialSetupView: View {
             .frame(height: 320)
 
             HStack(spacing: 10) {
-                Button("アクセシビリティを許可") {
+                Button("Grant Accessibility") {
                     diagnosticsService.requestAccessibilityPermission()
                     openAccessibilitySettings()
                     startAccessibilityPolling()
                 }
-                Button("マイクを許可") {
+                Button("Grant Microphone") {
                     isRequestingMicrophone = true
                     diagnosticsService.requestMicrophonePermission { _ in
                         Task { @MainActor in
@@ -113,37 +113,37 @@ struct InitialSetupView: View {
                     }
                 }
                 .disabled(isRequestingMicrophone)
-                Button("システム設定を開く") {
+                Button("Open System Settings") {
                     openAccessibilitySettings()
                 }
                 Spacer()
-                Button("再チェック") {
+                Button("Re-check") {
                     refreshChecks()
                     shouldShowAccessibilityRestartHint = !isAccessibilityGranted
                 }
                 if !isAccessibilityGranted {
-                    Button("アプリを再起動") {
+                    Button("Restart App") {
                         restartApp()
                     }
                 }
             }
 
             if isWaitingForAccessibilityUpdate {
-                Text("アクセシビリティ権限の反映を確認中です...")
+                Text("Checking whether accessibility permission changes have taken effect...")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else if shouldShowAccessibilityRestartHint && !isAccessibilityGranted {
-                Text("アクセシビリティ権限は反映まで数秒かかるか、再起動が必要な場合があります。許可後に「アプリを再起動」を実行してください。")
+                Text("Accessibility permission changes may take a few seconds to apply or may require a restart. After granting permission, click "Restart App".")
                     .font(.caption)
                     .foregroundColor(.orange)
             }
 
             if !isAccessibilityGranted {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("アクセシビリティ権限のトラブルシューティング")
+                    Text("Accessibility Permission Troubleshooting")
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                    Text("権限が反映されない場合は、以下のコマンドで KotoType のアクセシビリティ権限をリセットしてから再起動してください。")
+                    Text("If permission changes do not apply, reset KotoType accessibility permission with the command below, then restart the app.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(Self.accessibilityResetCommand)
@@ -154,13 +154,13 @@ struct InitialSetupView: View {
                         .cornerRadius(6)
 
                     HStack(spacing: 10) {
-                        Button("コマンドをコピー") {
+                        Button("Copy command") {
                             copyAccessibilityResetCommand()
                         }
                         .buttonStyle(.bordered)
 
                         if hasCopiedAccessibilityResetCommand {
-                            Text("コピーしました。ターミナルで実行してください。")
+                            Text("Copied. Run it in Terminal.")
                                 .font(.caption)
                                 .foregroundColor(.green)
                         }
@@ -172,17 +172,17 @@ struct InitialSetupView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("補足")
+                Text("Notes")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                Text("このアプリは FFmpeg を同梱しません。`brew install ffmpeg` 後に再チェックしてください。Pythonバックエンドや依存関係は初回起動時に自動準備されるか、リリース版では同梱されます。")
+                Text("This app does not bundle FFmpeg. Install it with `brew install ffmpeg`, then run Re-check. The Python backend and dependencies are prepared automatically on first launch in development, or bundled in release builds.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             HStack {
                 Spacer()
-                Button("セットアップ完了して開始") {
+                Button("Finish setup and start") {
                     onComplete()
                 }
                 .buttonStyle(.borderedProminent)

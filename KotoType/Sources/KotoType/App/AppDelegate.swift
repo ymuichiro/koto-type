@@ -271,9 +271,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             UTType(filenameExtension: "wav"),
             UTType(filenameExtension: "mp3"),
         ].compactMap { $0 }
-        panel.prompt = "文字起こし"
-        panel.title = "音声ファイルを選択"
-        panel.message = "wav または mp3 ファイルを選択してください"
+        panel.prompt = "Transcribe"
+        panel.title = "Select Audio File"
+        panel.message = "Please select a wav or mp3 file"
         NSApp.activate(ignoringOtherApps: true)
 
         panel.begin { [weak self] response in

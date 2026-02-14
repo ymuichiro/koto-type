@@ -13,7 +13,7 @@ final class PermissionWindowController: NSWindowController {
             defer: false
         )
         window.center()
-        window.title = "アクセシビリティ権限の設定"
+        window.title = "Accessibility Permission Setup"
         window.contentViewController = hostingController
         self.init(window: window)
     }
@@ -28,38 +28,38 @@ struct PermissionView: View {
                 .font(.system(size: 64))
                 .foregroundColor(.blue)
             
-            Text("アクセシビリティ権限が必要です")
+            Text("Accessibility permission is required")
                 .font(.title)
                 .fontWeight(.bold)
             
             VStack(alignment: .leading, spacing: 12) {
-                Text("このアプリケーションを動作させるには、以下の権限が必要です：")
+                Text("To use this application, the following permissions are required:")
                     .font(.body)
                 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("アクセシビリティ - キーボード入力のシミュレート")
+                        Text("Accessibility - Simulate keyboard input")
                     }
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("マイク - 音声録音")
+                        Text("Microphone - Audio recording")
                     }
                 }
                 .font(.subheadline)
             }
             
             VStack(alignment: .leading, spacing: 8) {
-                Text("設定手順：")
+                Text("Setup steps:")
                     .font(.headline)
 
-                Text("1. 以下のボタンをクリックしてシステム設定を開く")
-                Text("2. [プライバシーとセキュリティ] > [アクセシビリティ] を開く")
-                Text("3. KotoType（またはターミナル）にチェックを入れる")
-                Text("4. [権限を確認] ボタンをクリックする")
-                Text("5. [アプリを再起動] ボタンをクリックする")
+                Text("1. Click the button below to open System Settings")
+                Text("2. Open [Privacy & Security] > [Accessibility]")
+                Text("3. Enable KotoType (or Terminal)")
+                Text("4. Click [Check Permission]")
+                Text("5. Click [Restart App]")
             }
             .font(.subheadline)
             .padding()
@@ -69,14 +69,14 @@ struct PermissionView: View {
             Button(action: openSystemSettings) {
                 HStack {
                     Image(systemName: "gear")
-                    Text("システム設定を開く")
+                    Text("Open System Settings")
                 }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             
             Button(action: checkPermission) {
-                Text("権限を確認")
+                Text("Check Permission")
             }
             
             if permissionStatus != .unknown {
@@ -85,7 +85,7 @@ struct PermissionView: View {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
-                            Text("権限が付与されました！")
+                            Text("Permission granted!")
                                 .foregroundColor(.green)
                                 .fontWeight(.medium)
                         }
@@ -93,7 +93,7 @@ struct PermissionView: View {
                         Button(action: restartApp) {
                             HStack {
                                 Image(systemName: "arrow.clockwise")
-                                Text("アプリを再起動")
+                                Text("Restart App")
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -103,7 +103,7 @@ struct PermissionView: View {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
-                        Text("権限がまだ付与されていません。システム設定でアプリを許可し、再起動してください。")
+                        Text("Permission has not been granted yet. Allow the app in System Settings and restart.")
                             .foregroundColor(.orange)
                     }
                 }

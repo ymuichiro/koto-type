@@ -52,14 +52,14 @@ struct SettingsView: View {
     @State private var pendingDictionaryEntry: String
     
     let availableLanguages = [
-        ("auto", "自動判定"),
-        ("ja", "日本語"),
-        ("en", "英語"),
-        ("zh", "中国語"),
-        ("ko", "韓国語"),
-        ("es", "スペイン語"),
-        ("fr", "フランス語"),
-        ("de", "ドイツ語"),
+        ("auto", "Auto Detect"),
+        ("ja", "Japanese"),
+        ("en", "English"),
+        ("zh", "Chinese"),
+        ("ko", "Korean"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
     ]
     
     init(
@@ -145,27 +145,27 @@ struct SettingsView: View {
         TabView {
             generalSettings
                 .tabItem {
-                    Label("一般", systemImage: "gearshape")
+                    Label("General", systemImage: "gearshape")
                 }
 
             hotkeySettings
                 .tabItem {
-                    Label("ホットキー", systemImage: "keyboard")
+                    Label("Hotkey", systemImage: "keyboard")
                 }
             
             transcriptionSettings
                 .tabItem {
-                    Label("文字起こし", systemImage: "waveform")
+                    Label("Transcription", systemImage: "waveform")
                 }
             
             batchSettings
                 .tabItem {
-                    Label("バッチ処理", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Batch", systemImage: "arrow.triangle.2.circlepath")
                 }
             
             debugSettings
                 .tabItem {
-                    Label("デバッグ", systemImage: "ladybug")
+                    Label("Debug", systemImage: "ladybug")
                 }
         }
         .frame(width: 600, height: 600)
@@ -173,12 +173,12 @@ struct SettingsView: View {
 
     private var generalSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("一般設定")
+            Text("General Settings")
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 8) {
-                Toggle("ログイン時に自動起動する", isOn: $pendingLaunchAtLogin)
-                Text("有効にすると、macOSログイン時にKotoTypeが自動で起動します")
+                Toggle("Launch at login", isOn: $pendingLaunchAtLogin)
+                Text("When enabled, KotoType launches automatically when you sign in to macOS.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -186,15 +186,15 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("クイック操作")
+                Text("Quick Actions")
                     .font(.subheadline)
 
-                Button("音声ファイルを取り込む...") {
+                Button("Import audio file...") {
                     onImportAudioRequested?()
                 }
                 .disabled(onImportAudioRequested == nil)
 
-                Button("文字起こし履歴を開く...") {
+                Button("Open transcription history...") {
                     onShowHistoryRequested?()
                 }
                 .disabled(onShowHistoryRequested == nil)
@@ -204,11 +204,11 @@ struct SettingsView: View {
 
             HStack {
                 Spacer()
-                Button("保存") {
+                Button("Save") {
                     applySettings()
                 }
                 .keyboardShortcut(.defaultAction)
-                Button("キャンセル") {
+                Button("Cancel") {
                     isPresented = false
                 }
             }
@@ -218,11 +218,11 @@ struct SettingsView: View {
     
     private var hotkeySettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("ホットキー設定")
+            Text("Hotkey Settings")
                 .font(.headline)
             
             VStack(alignment: .leading, spacing: 8) {
-                Text("録音の開始・終了:")
+                Text("Start / stop recording:")
                     .font(.subheadline)
                 
                 HotkeyRecorderView(initialConfig: hotkeyConfig, onChange: { config in
@@ -230,22 +230,22 @@ struct SettingsView: View {
                 })
                 .frame(height: 40)
                 
-                Text("現在: \(hotkeyConfig.description.isEmpty ? "未設定" : hotkeyConfig.description)")
+                Text("Current: \(hotkeyConfig.description.isEmpty ? "Not set" : hotkeyConfig.description)")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                Text("変更中: \(pendingHotkeyConfig.description.isEmpty ? "未設定" : pendingHotkeyConfig.description)")
+                Text("Pending: \(pendingHotkeyConfig.description.isEmpty ? "Not set" : pendingHotkeyConfig.description)")
                     .font(.caption)
                     .foregroundColor(.orange)
             }
             
             Divider()
             
-            Text("プリセット:")
+            Text("Presets:")
                 .font(.subheadline)
             
             VStack(alignment: .leading, spacing: 8) {
-                Button("⌘+⌥ (デフォルト)") {
+                Button("⌘+⌥ (Default)") {
                     pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: true, useControl: false, useShift: false, keyCode: 0)
                 }
                 Button("⌃+⌥+Space") {
@@ -261,11 +261,11 @@ struct SettingsView: View {
             
             HStack {
                 Spacer()
-                Button("保存") {
+                Button("Save") {
                     applySettings()
                 }
                 .keyboardShortcut(.defaultAction)
-                Button("キャンセル") {
+                Button("Cancel") {
                     isPresented = false
                 }
             }
@@ -276,11 +276,11 @@ struct SettingsView: View {
     private var transcriptionSettings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("文字起こし設定")
+                Text("Transcription Settings")
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("言語:")
+                    Text("Language:")
                         .font(.subheadline)
 
                     Picker("", selection: $pendingLanguage) {
@@ -292,31 +292,31 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("タスク:")
+                    Text("Task:")
                         .font(.subheadline)
 
                     Picker("", selection: $pendingTask) {
-                        Text("文字起こし").tag("transcribe")
-                        Text("翻訳").tag("translate")
+                        Text("Transcribe").tag("transcribe")
+                        Text("Translate").tag("translate")
                     }
                     .pickerStyle(.segmented)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("句読点を自動補正する", isOn: $pendingAutoPunctuation)
+                    Toggle("Automatically improve punctuation", isOn: $pendingAutoPunctuation)
 
-                    Text("有効時は句読点の正規化と文末補完を行います")
+                    Text("When enabled, punctuation is normalized and sentence endings are completed.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("精度 (Temperature): \(String(format: "%.1f", pendingTemperature))")
+                    Text("Accuracy (Temperature): \(String(format: "%.1f", pendingTemperature))")
                         .font(.subheadline)
 
                     Slider(value: $pendingTemperature, in: 0.0...1.0, step: 0.1)
 
-                    Text("値が低いほど精度が高くなります")
+                    Text("Lower values generally improve accuracy.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -326,9 +326,9 @@ struct SettingsView: View {
                         .font(.subheadline)
 
                     Picker("", selection: $pendingBeamSize) {
-                        Text("1 (高速)").tag(1)
-                        Text("5 (標準)").tag(5)
-                        Text("10 (高精度)").tag(10)
+                        Text("1 (Fast)").tag(1)
+                        Text("5 (Standard)").tag(5)
+                        Text("10 (High accuracy)").tag(10)
                     }
                     .pickerStyle(.segmented)
                 }
@@ -351,7 +351,7 @@ struct SettingsView: View {
 
                     Slider(value: $pendingNoSpeechThreshold, in: 0.1...1.0, step: 0.1)
 
-                    Text("無音とみなす閾値")
+                    Text("Threshold treated as silence")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -362,7 +362,7 @@ struct SettingsView: View {
 
                     Slider(value: $pendingCompressionRatioThreshold, in: 1.0...5.0, step: 0.1)
 
-                    Text("圧縮率の閾値")
+                    Text("Compression ratio threshold")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -373,72 +373,72 @@ struct SettingsView: View {
 
                     Slider(value: $pendingVadThreshold, in: 0.0...1.0, step: 0.1)
 
-                    Text("音声検出の閾値")
+                    Text("Voice activity detection threshold")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("小さい声を自動増幅する", isOn: $pendingAutoGainEnabled)
+                    Toggle("Automatically amplify quiet input", isOn: $pendingAutoGainEnabled)
 
-                    Text("入力が小さい場合のみ音量を持ち上げてから文字起こしします")
+                    Text("Only low-level input is amplified before transcription.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Auto Gain 弱入力閾値 (dBFS): \(String(format: "%.1f", pendingAutoGainWeakThresholdDbfs))")
+                    Text("Auto Gain weak-input threshold (dBFS): \(String(format: "%.1f", pendingAutoGainWeakThresholdDbfs))")
                         .font(.subheadline)
 
                     Slider(value: $pendingAutoGainWeakThresholdDbfs, in: (-40.0)...(-6.0), step: 1.0)
                         .disabled(!pendingAutoGainEnabled)
 
-                    Text("この値より小さい音量を増幅対象にします")
+                    Text("Input lower than this value is amplified.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Auto Gain 目標ピーク (dBFS): \(String(format: "%.1f", pendingAutoGainTargetPeakDbfs))")
+                    Text("Auto Gain target peak (dBFS): \(String(format: "%.1f", pendingAutoGainTargetPeakDbfs))")
                         .font(.subheadline)
 
                     Slider(value: $pendingAutoGainTargetPeakDbfs, in: (-20.0)...(-1.0), step: 1.0)
                         .disabled(!pendingAutoGainEnabled)
 
-                    Text("増幅後に目指すピークレベル")
+                    Text("Target peak level after amplification")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Auto Gain 最大増幅 (dB): \(String(format: "%.0f", pendingAutoGainMaxDb))")
+                    Text("Auto Gain max amplification (dB): \(String(format: "%.0f", pendingAutoGainMaxDb))")
                         .font(.subheadline)
 
                     Slider(value: $pendingAutoGainMaxDb, in: 3.0...30.0, step: 1.0)
                         .disabled(!pendingAutoGainEnabled)
 
-                    Text("急激な増幅を防ぐ上限値")
+                    Text("Upper limit to prevent excessive amplification")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("専門用語辞書")
+                    Text("Custom terminology dictionary")
                         .font(.subheadline)
 
                     HStack {
-                        TextField("例: ctranslate2, Whisper large-v3-turbo", text: $pendingDictionaryEntry)
+                        TextField("e.g. ctranslate2, Whisper large-v3-turbo", text: $pendingDictionaryEntry)
                             .onSubmit {
                                 addDictionaryWord()
                             }
-                        Button("追加") {
+                        Button("Add") {
                             addDictionaryWord()
                         }
                         .disabled(pendingDictionaryEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
                     if pendingDictionaryWords.isEmpty {
-                        Text("登録された用語はありません")
+                        Text("No terms registered")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -469,24 +469,24 @@ struct SettingsView: View {
 
                         HStack {
                             Spacer()
-                            Button("すべて削除", role: .destructive) {
+                            Button("Remove all", role: .destructive) {
                                 pendingDictionaryWords.removeAll()
                             }
                         }
                     }
 
-                    Text("最大200語まで。保存後、次回の文字起こしから反映されます。")
+                    Text("Up to 200 terms. Changes apply from the next transcription after saving.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 HStack {
                     Spacer()
-                    Button("保存") {
+                    Button("Save") {
                         applySettings()
                     }
                     .keyboardShortcut(.defaultAction)
-                    Button("キャンセル") {
+                    Button("Cancel") {
                         isPresented = false
                     }
                 }
@@ -498,44 +498,44 @@ struct SettingsView: View {
     private var batchSettings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("バッチ処理設定")
+                Text("Batch Processing Settings")
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("分割間隔 (秒): \(String(format: "%.0f", pendingBatchInterval))")
+                    Text("Split interval (seconds): \(String(format: "%.0f", pendingBatchInterval))")
                         .font(.subheadline)
 
                     Slider(value: $pendingBatchInterval, in: 5.0...30.0, step: 1.0)
 
-                    Text("この時間ごとに無音検出でファイル分割します")
+                    Text("Files are split using silence detection at this interval.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("無音検出閾値 (dB): \(String(format: "%.0f", pendingSilenceThreshold))")
+                    Text("Silence detection threshold (dB): \(String(format: "%.0f", pendingSilenceThreshold))")
                         .font(.subheadline)
 
                     Slider(value: $pendingSilenceThreshold, in: (-60.0)...(-20.0), step: 5.0)
 
-                    Text("このレベル以下を無音とみなします")
+                    Text("Audio below this level is treated as silence.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("無音持続時間 (秒): \(String(format: "%.1f", pendingSilenceDuration))")
+                    Text("Silence duration (seconds): \(String(format: "%.1f", pendingSilenceDuration))")
                         .font(.subheadline)
 
                     Slider(value: $pendingSilenceDuration, in: 0.3...2.0, step: 0.1)
 
-                    Text("この時間以上無音が続くとファイル分割します")
+                    Text("Files are split when silence lasts longer than this duration.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("並列プロセス数: \(pendingParallelism)")
+                    Text("Parallel process count: \(pendingParallelism)")
                         .font(.subheadline)
 
                     Picker("", selection: $pendingParallelism) {
@@ -546,18 +546,18 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Text("同時に処理するプロセス数")
+                    Text("Number of processes running concurrently")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 HStack {
                     Spacer()
-                    Button("保存") {
+                    Button("Save") {
                         applySettings()
                     }
                     .keyboardShortcut(.defaultAction)
-                    Button("キャンセル") {
+                    Button("Cancel") {
                         isPresented = false
                     }
                 }
@@ -568,11 +568,11 @@ struct SettingsView: View {
     
     private var debugSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("デバッグ")
+            Text("Debug")
                 .font(.headline)
             
             VStack(alignment: .leading, spacing: 8) {
-                Text("ログファイル:")
+                Text("Log file:")
                     .font(.subheadline)
                 
                 Text(Logger.shared.logPath)
@@ -585,22 +585,22 @@ struct SettingsView: View {
             }
             
             HStack {
-                Button("ログファイルを開く") {
+                Button("Open log file") {
                     openLogFile()
                 }
                 
-                Button("ログディレクトリを開く") {
+                Button("Open log directory") {
                     openLogDirectory()
                 }
             }
             
-            Text("ログは問題の診断に役立ちます")
+            Text("Logs are useful for troubleshooting")
                 .font(.caption)
                 .foregroundColor(.secondary)
             
             HStack {
                 Spacer()
-                Button("キャンセル") {
+                Button("Cancel") {
                     isPresented = false
                 }
                 .keyboardShortcut(.defaultAction)

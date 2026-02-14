@@ -16,26 +16,26 @@ struct HistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("文字起こし履歴")
+                Text("Transcription History")
                     .font(.headline)
                 Spacer()
-                Button("更新") {
+                Button("Refresh") {
                     reload()
                 }
-                Button("すべて削除", role: .destructive) {
+                Button("Clear All", role: .destructive) {
                     TranscriptionHistoryManager.shared.clear()
                     reload()
                 }
             }
 
-            TextField("履歴を検索", text: $searchText)
+            TextField("Search history", text: $searchText)
                 .textFieldStyle(.roundedBorder)
 
             if filteredEntries.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("履歴はまだありません")
+                    Text("No history yet")
                         .foregroundColor(.secondary)
-                    Text("録音または音声ファイル文字起こしの結果がここに保存されます")
+                    Text("Results from live recording or imported audio transcription are saved here.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -53,7 +53,7 @@ struct HistoryView: View {
 
             HStack {
                 Spacer()
-                Button("閉じる") {
+                Button("Close") {
                     onClose()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -84,7 +84,7 @@ private struct HistoryRowView: View {
                 Text(entry.source.displayName)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Button("コピー") {
+                Button("Copy") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(entry.text, forType: .string)
                 }
@@ -111,7 +111,7 @@ private struct HistoryRowView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .medium
-        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.locale = Locale(identifier: "en_US")
         return formatter
     }()
 }
