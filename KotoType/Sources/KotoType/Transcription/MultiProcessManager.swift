@@ -70,7 +70,7 @@ final class MultiProcessManager: @unchecked Sendable {
         Logger.shared.log("MultiProcessManager: initialized with \(initializedCount) processes", level: .info)
     }
     
-    func processFile(url: URL, index: Int, settings: AppSettings, retryCount: Int = 0, queueAttempt: Int = 0) {
+    func processFile(url: URL, index: Int, settings: AppSettings, screenshotContext: String? = nil, retryCount: Int = 0, queueAttempt: Int = 0) {
         Logger.shared.log("MultiProcessManager: processFile called - url=\(url.path), index=\(index)", level: .info)
         processLock.lock()
         if isStopping {
@@ -100,6 +100,7 @@ final class MultiProcessManager: @unchecked Sendable {
                     url: url,
                     index: index,
                     settings: settings,
+                    screenshotContext: screenshotContext,
                     retryCount: retryCount,
                     queueAttempt: queueAttempt + 1
                 )
@@ -114,7 +115,8 @@ final class MultiProcessManager: @unchecked Sendable {
                 url: url,
                 index: index,
                 settings: settings,
-                retryCount: retryCount
+                retryCount: retryCount,
+                screenshotContext: screenshotContext
             )
         )
     }
@@ -156,7 +158,8 @@ final class MultiProcessManager: @unchecked Sendable {
             autoGainEnabled: context.settings.autoGainEnabled,
             autoGainWeakThresholdDbfs: context.settings.autoGainWeakThresholdDbfs,
             autoGainTargetPeakDbfs: context.settings.autoGainTargetPeakDbfs,
-            autoGainMaxDb: context.settings.autoGainMaxDb
+            autoGainMaxDb: context.settings.autoGainMaxDb,
+            screenshotContext: context.screenshotContext
         )
 
         if !sendSucceeded {
@@ -288,6 +291,7 @@ final class MultiProcessManager: @unchecked Sendable {
                 url: context.url,
                 index: context.index,
                 settings: context.settings,
+                screenshotContext: context.screenshotContext,
                 retryCount: nextRetry,
                 queueAttempt: 0
             )
@@ -570,4 +574,5 @@ private struct SegmentContext {
     let index: Int
     let settings: AppSettings
     let retryCount: Int
+    let screenshotContext: String?
 }

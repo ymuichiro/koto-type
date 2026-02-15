@@ -27,7 +27,8 @@ protocol PythonProcessManaging: AnyObject {
         autoGainEnabled: Bool,
         autoGainWeakThresholdDbfs: Double,
         autoGainTargetPeakDbfs: Double,
-        autoGainMaxDb: Double
+        autoGainMaxDb: Double,
+        screenshotContext: String?
     ) -> Bool
     func isRunning() -> Bool
     func stop()
@@ -110,7 +111,8 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
             autoGainEnabled: settings.autoGainEnabled,
             autoGainWeakThresholdDbfs: settings.autoGainWeakThresholdDbfs,
             autoGainTargetPeakDbfs: settings.autoGainTargetPeakDbfs,
-            autoGainMaxDb: settings.autoGainMaxDb
+            autoGainMaxDb: settings.autoGainMaxDb,
+            screenshotContext: nil
         )
 
         if !succeeded {

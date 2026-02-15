@@ -156,7 +156,8 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
         autoGainEnabled: Bool,
         autoGainWeakThresholdDbfs: Double,
         autoGainTargetPeakDbfs: Double,
-        autoGainMaxDb: Double
+        autoGainMaxDb: Double,
+        screenshotContext: String?
     ) -> Bool {
         onSend?(self)
         return sendSucceeds

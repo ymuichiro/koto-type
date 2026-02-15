@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import base64
 import re
 import sys
 import traceback
@@ -683,7 +684,7 @@ def load_user_dictionary(path=None, log=None):
         return []
 
 
-def generate_initial_prompt(language, use_context=True, user_words=None):
+def generate_initial_prompt(language, use_context=True, user_words=None, screenshot_context=None):
     base_prompts = {
         "ja": "これは会話の文字起こしです。正確な日本語で出力してください。",
         "en": "This is a speech transcription. Please output accurate English.",
@@ -701,6 +702,15 @@ def generate_initial_prompt(language, use_context=True, user_words=None):
             else:
                 word_list = ", ".join(normalized_words[:20])
                 prompt += f" Please accurately recognize these terms: {word_list}."
+
+    if screenshot_context:
+        normalized_screenshot_context = " ".join(str(screenshot_context).split())
+        if normalized_screenshot_context:
+            clipped_screenshot_context = normalized_screenshot_context[:250]
+            if language == "ja":
+                prompt += f" 画面上の情報: {clipped_screenshot_context}。"
+            else:
+                prompt += f" On-screen context: {clipped_screenshot_context}."
 
     return prompt if prompt else None
 
@@ -797,7 +807,7 @@ def main():
                 log("EOF reached, exiting")
                 break
 
-            parts = line.strip().split("|")
+            parts = line.strip().split("|", 14)
             audio_path = parts[0]
             language = parts[1] if len(parts) > 1 else "auto"
             temperature = float(parts[2]) if len(parts) > 2 else 0.0
@@ -820,6 +830,13 @@ def main():
             auto_gain_max_db = (
                 parse_optional_float(parts[13]) if len(parts) > 13 else None
             )
+            screenshot_context_base64 = parts[14] if len(parts) > 14 else ""
+            screenshot_context = None
+            if screenshot_context_base64:
+                try:
+                    screenshot_context = base64.b64decode(screenshot_context_base64).decode("utf-8")
+                except Exception as decode_error:
+                    log(f"Failed to decode screenshot context: {decode_error}")
 
             actual_language = None if language == "auto" else language
             log(
@@ -827,7 +844,8 @@ def main():
                 f"no_speech_threshold={no_speech_threshold}, compression_ratio_threshold={compression_ratio_threshold}, "
                 f"task={task}, best_of={best_of}, vad_threshold={vad_threshold}, auto_punctuation={auto_punctuation}, "
                 f"auto_gain_enabled={auto_gain_enabled}, auto_gain_weak_threshold_dbfs={auto_gain_weak_threshold_dbfs}, "
-                f"auto_gain_target_peak_dbfs={auto_gain_target_peak_dbfs}, auto_gain_max_db={auto_gain_max_db}"
+                f"auto_gain_target_peak_dbfs={auto_gain_target_peak_dbfs}, auto_gain_max_db={auto_gain_max_db}, "
+                f"screenshot_context_len={len(screenshot_context) if screenshot_context else 0}"
             )
 
             if not audio_path:
@@ -869,6 +887,7 @@ def main():
                 actual_language or language or "ja",
                 use_context=True,
                 user_words=user_words,
+                screenshot_context=screenshot_context,
             )
 
             start_time = time.time()

@@ -135,7 +135,8 @@ private final class MockPythonProcessManager: PythonProcessManaging {
         autoGainEnabled: Bool,
         autoGainWeakThresholdDbfs: Double,
         autoGainTargetPeakDbfs: Double,
-        autoGainMaxDb: Double
+        autoGainMaxDb: Double,
+        screenshotContext: String?
     ) -> Bool {
         sendInputCallCount += 1
         return true

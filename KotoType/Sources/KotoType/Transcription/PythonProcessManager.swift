@@ -141,12 +141,19 @@ final class PythonProcessManager: @unchecked Sendable {
         autoGainEnabled: Bool = true,
         autoGainWeakThresholdDbfs: Double = -18.0,
         autoGainTargetPeakDbfs: Double = -10.0,
-        autoGainMaxDb: Double = 18.0
+        autoGainMaxDb: Double = 18.0,
+        screenshotContext: String? = nil
     ) -> Bool {
         let punctuationFlag = autoPunctuation ? "1" : "0"
         let autoGainFlag = autoGainEnabled ? "1" : "0"
-        let input = "\(text)|\(language)|\(temperature)|\(beamSize)|\(noSpeechThreshold)|\(compressionRatioThreshold)|\(task)|\(bestOf)|\(vadThreshold)|\(punctuationFlag)|\(autoGainFlag)|\(autoGainWeakThresholdDbfs)|\(autoGainTargetPeakDbfs)|\(autoGainMaxDb)"
-        Logger.shared.log("Sending input to Python: \(input)", level: .debug)
+        let screenshotContextBase64 = screenshotContext?
+            .data(using: .utf8)?
+            .base64EncodedString() ?? ""
+        let input = "\(text)|\(language)|\(temperature)|\(beamSize)|\(noSpeechThreshold)|\(compressionRatioThreshold)|\(task)|\(bestOf)|\(vadThreshold)|\(punctuationFlag)|\(autoGainFlag)|\(autoGainWeakThresholdDbfs)|\(autoGainTargetPeakDbfs)|\(autoGainMaxDb)|\(screenshotContextBase64)"
+        Logger.shared.log(
+            "Sending input to Python: audioPath=\(text), language=\(language), task=\(task), screenshotContextLength=\(screenshotContext?.count ?? 0)",
+            level: .debug
+        )
         guard let process = process, process.isRunning else {
             Logger.shared.log("Cannot send input: Python process is not running", level: .error)
             return false

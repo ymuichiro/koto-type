@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentSettings: AppSettings = AppSettings()
     private var lastTranscriptionText: String = ""
     private var pendingSegmentFiles: [Int: URL] = [:]
+    private var recordingScreenshotContext: String?
 
     nonisolated static func resolvedWorkerCount(
         requested: Int,
@@ -168,6 +169,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         isRecording = true
         lastTranscriptionText = ""
+        recordingScreenshotContext = nil
         batchTranscriptionManager?.reset()
         cleanupAllPendingSegmentFiles()
         Logger.shared.log("Starting audio recording...", level: .info)
@@ -182,7 +184,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.shared.log("File created: \(url.path), index: \(index)", level: .info)
             self.pendingSegmentFiles[index] = url
             self.batchTranscriptionManager?.addSegment(url: url, index: index)
-            self.multiProcessManager?.processFile(url: url, index: index, settings: self.currentSettings)
+            self.multiProcessManager?.processFile(
+                url: url,
+                index: index,
+                settings: self.currentSettings,
+                screenshotContext: self.recordingScreenshotContext
+            )
         }
 
         guard realtimeRecorder?.startRecording() == true else {
@@ -197,6 +204,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func stopRecording() {
         isRecording = false
         Logger.shared.log("Stopping audio recording...", level: .info)
+        recordingScreenshotContext = ScreenContextExtractor.captureScreenTextContext()
         realtimeRecorder?.stopRecording()
         Logger.shared.log("Recording stopped", level: .info)
         Logger.shared.log("Waiting for transcription to complete...", level: .info)
