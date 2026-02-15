@@ -133,7 +133,7 @@ struct InitialSetupView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else if shouldShowAccessibilityRestartHint && !isAccessibilityGranted {
-                Text("Accessibility permission changes may take a few seconds to apply or may require a restart. After granting permission, click "Restart App".")
+                Text("Accessibility permission changes may take a few seconds to apply or may require a restart. After granting permission, click \"Restart App\".")
                     .font(.caption)
                     .foregroundColor(.orange)
             }
