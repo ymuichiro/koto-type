@@ -225,7 +225,7 @@ struct SettingsView: View {
                 Text("Start / stop recording:")
                     .font(.subheadline)
                 
-                HotkeyRecorderView(initialConfig: hotkeyConfig, onChange: { config in
+                HotkeyRecorderView(initialConfig: pendingHotkeyConfig, onChange: { config in
                     pendingHotkeyConfig = config
                 })
                 .frame(height: 40)
@@ -248,6 +248,15 @@ struct SettingsView: View {
                 Button("⌘+⌥ (Default)") {
                     pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: true, useControl: false, useShift: false, keyCode: 0)
                 }
+                Button("⌘+⌃") {
+                    pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: false, useControl: true, useShift: false, keyCode: 0)
+                }
+                Button("⌘+⌃+Space") {
+                    pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: false, useControl: true, useShift: false, keyCode: 0x31)
+                }
+                Button("⌘+⌥+B") {
+                    pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: true, useControl: false, useShift: false, keyCode: 0x0B)
+                }
                 Button("⌃+⌥+Space") {
                     pendingHotkeyConfig = HotkeyConfiguration(useCommand: false, useOption: true, useControl: true, useShift: false, keyCode: 0x31)
                 }
@@ -256,6 +265,15 @@ struct SettingsView: View {
                 }
                 Button("⌃+⌥+B") {
                     pendingHotkeyConfig = HotkeyConfiguration(useCommand: false, useOption: true, useControl: true, useShift: false, keyCode: 0x0B)
+                }
+                Button("⌘+⌃+⌥") {
+                    pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: true, useControl: true, useShift: false, keyCode: 0)
+                }
+                Button("⌘+⌃+⌥+Space") {
+                    pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: true, useControl: true, useShift: false, keyCode: 0x31)
+                }
+                Button("⌘+⌃+⌥+B") {
+                    pendingHotkeyConfig = HotkeyConfiguration(useCommand: true, useOption: true, useControl: true, useShift: false, keyCode: 0x0B)
                 }
             }
             
