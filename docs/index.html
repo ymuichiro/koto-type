@@ -226,6 +226,7 @@ ffmpeg -version</code></pre>
             <h3>Direct input into any app</h3>
             <p>
               Hold a global hotkey while speaking, then release to transcribe and insert text at the active cursor position.
+              While recording/processing, the indicator shows a realtime preview of recognized text (display-only).
             </p>
           </article>
           <article class="card reveal">
@@ -255,7 +256,7 @@ ffmpeg -version</code></pre>
           <li>Download the latest release and move KotoType to Applications.</li>
           <li>Install FFmpeg: <code>brew install ffmpeg</code>.</li>
           <li>Launch KotoType and pass the Initial Setup checks.</li>
-          <li>Focus a text field, hold your hotkey, speak, and release to insert text.</li>
+          <li>Focus a text field, hold your hotkey, speak, then release to finalize and insert text (preview is shown during recording/processing).</li>
         </ol>
       </section>
 
@@ -265,8 +266,8 @@ ffmpeg -version</code></pre>
           <li>Confirm setup is complete and KotoType is running in the menu bar.</li>
           <li>Focus an editable text field in your target app.</li>
           <li>Hold your configured hotkey (default: <code>⌘+⌥</code>).</li>
-          <li>Speak while holding the hotkey, then release to transcribe.</li>
-          <li>KotoType inserts the transcription at the active cursor when processing finishes.</li>
+          <li>Speak while holding the hotkey. The indicator shows a realtime preview while recording.</li>
+          <li>Release the hotkey to finalize. KotoType inserts only the finalized transcription at the active cursor.</li>
           <li>If text is not inserted, re-check Accessibility permission and cursor focus.</li>
         </ol>
       </section>
