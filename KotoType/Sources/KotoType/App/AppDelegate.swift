@@ -23,6 +23,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastTranscriptionText: String = ""
     private var pendingSegmentFiles: [Int: URL] = [:]
     private var recordingScreenshotContext: String?
+    private var recordingProgressState = RecordingProgressState()
+    private var pendingProgressUpdateWorkItem: DispatchWorkItem?
 
     nonisolated static func resolvedWorkerCount(
         requested: Int,
@@ -85,6 +87,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.lastTranscriptionText += text
             Logger.shared.log("Accumulated ordered transcription: '\(self.lastTranscriptionText)'", level: .info)
+            if self.recordingProgressState.append(chunk: text) {
+                self.scheduleProgressIndicatorUpdate()
+            }
         }
         settingsWindowController = SettingsWindowController()
         historyWindowController = HistoryWindowController()
@@ -171,6 +176,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         isRecording = true
         lastTranscriptionText = ""
         recordingScreenshotContext = nil
+        resetRecordingProgressState()
         batchTranscriptionManager?.reset()
         cleanupAllPendingSegmentFiles()
         Logger.shared.log("Starting audio recording...", level: .info)
@@ -209,7 +215,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         realtimeRecorder?.stopRecording()
         Logger.shared.log("Recording stopped", level: .info)
         Logger.shared.log("Waiting for transcription to complete...", level: .info)
-        recordingIndicatorWindow?.showProcessing()
+        recordingIndicatorWindow?.showProcessing(progressText: recordingProgressState.displayText)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
@@ -261,9 +267,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         cleanupAllPendingSegmentFiles()
         batchTranscriptionManager?.reset()
         lastTranscriptionText = ""
+        resetRecordingProgressState()
         recordingIndicatorWindow?.showCompleted(success: didInsertText)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
             self?.recordingIndicatorWindow?.hide()
+        }
+    }
+
+    private func resetRecordingProgressState() {
+        pendingProgressUpdateWorkItem?.cancel()
+        pendingProgressUpdateWorkItem = nil
+        recordingProgressState.reset()
+    }
+
+    private func scheduleProgressIndicatorUpdate() {
+        let now = Date()
+        if recordingProgressState.shouldEmit(now: now) {
+            emitProgressIndicatorUpdate()
+            return
+        }
+
+        guard pendingProgressUpdateWorkItem == nil else {
+            return
+        }
+
+        let delay = recordingProgressState.nextDelay(now: now)
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.pendingProgressUpdateWorkItem = nil
+            let now = Date()
+            guard self.recordingProgressState.shouldEmit(now: now) else {
+                return
+            }
+            self.emitProgressIndicatorUpdate()
+        }
+        pendingProgressUpdateWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func emitProgressIndicatorUpdate() {
+        guard let progressText = recordingProgressState.displayText else {
+            return
+        }
+
+        if isRecording {
+            recordingIndicatorWindow?.showRecording(progressText: progressText)
+        } else {
+            recordingIndicatorWindow?.showProcessing(progressText: progressText)
         }
     }
 
@@ -323,7 +373,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let importedAudioTranscriptionManager else { return }
         isImportingAudio = true
         currentSettings = SettingsManager.shared.load()
-        recordingIndicatorWindow?.showProcessing()
+        resetRecordingProgressState()
+        recordingIndicatorWindow?.showProcessing(progressText: nil)
 
         importedAudioTranscriptionManager.transcribe(fileURL: fileURL, settings: currentSettings) { [weak self] result in
             guard let self = self else { return }

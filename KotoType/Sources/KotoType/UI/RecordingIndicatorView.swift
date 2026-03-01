@@ -9,6 +9,30 @@ enum IndicatorState {
 
 struct RecordingIndicatorView: View {
     let state: IndicatorState
+    let progressText: String?
+
+    init(state: IndicatorState, progressText: String? = nil) {
+        self.state = state
+        self.progressText = progressText
+    }
+
+    static func preferredContentSize(for state: IndicatorState, progressText: String?) -> CGSize {
+        let hasProgress = {
+            guard state == .recording || state == .processing else { return false }
+            return !(progressText?.isEmpty ?? true)
+        }()
+
+        if hasProgress {
+            return CGSize(width: 286, height: 70)
+        }
+
+        let width: CGFloat = (state == .recording || state == .processing) ? 92 : 124
+        return CGSize(width: width, height: 68)
+    }
+
+    private var preferredSize: CGSize {
+        Self.preferredContentSize(for: state, progressText: progressText)
+    }
 
     var body: some View {
         ZStack {
@@ -16,18 +40,19 @@ struct RecordingIndicatorView: View {
 
             switch state {
             case .recording:
-                RecordingContent()
+                RecordingContent(progressText: progressText)
             case .processing:
-                ProcessingContent()
+                ProcessingContent(progressText: progressText)
             case .completed:
                 CompletedContent()
             case .attention:
                 AttentionContent()
             }
         }
-        .frame(width: state == .recording || state == .processing ? 92 : 124, height: 56)
+        .frame(width: preferredSize.width, height: preferredSize.height)
         .padding(6)
         .animation(.easeInOut(duration: 0.2), value: state)
+        .animation(.easeInOut(duration: 0.2), value: progressText ?? "")
     }
 }
 
@@ -68,23 +93,31 @@ private struct IndicatorBackground: View {
 }
 
 private struct RecordingContent: View {
+    let progressText: String?
     @State private var pulse = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.red.opacity(0.92))
-                    .frame(width: 12, height: 12)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.92))
+                        .frame(width: 12, height: 12)
 
-                Circle()
-                    .stroke(Color.red.opacity(0.45), lineWidth: 2)
-                    .frame(width: 24, height: 24)
-                    .scaleEffect(pulse ? 1.28 : 0.86)
-                    .opacity(pulse ? 0.08 : 0.7)
+                    Circle()
+                        .stroke(Color.red.opacity(0.45), lineWidth: 2)
+                        .frame(width: 24, height: 24)
+                        .scaleEffect(pulse ? 1.28 : 0.86)
+                        .opacity(pulse ? 0.08 : 0.7)
+                }
+
+                WaveformAnimation(color: .white)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            WaveformAnimation(color: .white)
+            if let progressText, !progressText.isEmpty {
+                ProgressTextContent(text: progressText, accentColor: .red)
+            }
         }
         .onAppear {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
@@ -121,35 +154,67 @@ private struct WaveformAnimation: View {
 }
 
 private struct ProcessingContent: View {
+    let progressText: String?
     @State private var rotating = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
-                    .frame(width: 20, height: 20)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
+                        .frame(width: 20, height: 20)
 
-                Circle()
-                    .trim(from: 0.1, to: 0.78)
-                    .stroke(
-                        AngularGradient(
-                            colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
-                            center: .center
-                        ),
-                        style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
-                    )
-                    .frame(width: 20, height: 20)
-                    .rotationEffect(.degrees(rotating ? 360 : 0))
+                    Circle()
+                        .trim(from: 0.1, to: 0.78)
+                        .stroke(
+                            AngularGradient(
+                                colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
+                                center: .center
+                            ),
+                            style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
+                        )
+                        .frame(width: 20, height: 20)
+                        .rotationEffect(.degrees(rotating ? 360 : 0))
+                }
+
+                ProcessingDots()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            ProcessingDots()
+            if let progressText, !progressText.isEmpty {
+                ProgressTextContent(text: progressText, accentColor: .blue)
+            }
         }
         .onAppear {
             withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
                 rotating = true
             }
         }
+    }
+}
+
+private struct ProgressTextContent: View {
+    let text: String
+    let accentColor: Color
+
+    var body: some View {
+        Text(text)
+            .foregroundStyle(Color.white.opacity(0.95))
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .lineLimit(1)
+            .truncationMode(.head)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(accentColor.opacity(0.16))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(accentColor.opacity(0.34), lineWidth: 0.8)
+            )
     }
 }
 
