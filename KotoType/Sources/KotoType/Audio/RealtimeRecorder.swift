@@ -166,9 +166,11 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
                 "RealtimeRecorder: created audio file: \(filePath) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(currentFileCount))",
                 level: .info
             )
-            
+
+            let onFileCreatedHandler = onFileCreated
             DispatchQueue.main.async { [weak self] in
-                self?.onFileCreated?(fileURL, currentFileCount)
+                guard self != nil else { return }
+                onFileCreatedHandler?(fileURL, currentFileCount)
             }
             
             audioBuffer.removeAll()
