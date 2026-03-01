@@ -3,6 +3,8 @@ import SwiftUI
 enum IndicatorState {
     case recording
     case processing
+    case completed
+    case attention
 }
 
 struct RecordingIndicatorView: View {
@@ -17,9 +19,13 @@ struct RecordingIndicatorView: View {
                 RecordingContent()
             case .processing:
                 ProcessingContent()
+            case .completed:
+                CompletedContent()
+            case .attention:
+                AttentionContent()
             }
         }
-        .frame(width: 92, height: 56)
+        .frame(width: state == .recording || state == .processing ? 92 : 124, height: 56)
         .padding(6)
         .animation(.easeInOut(duration: 0.2), value: state)
     }
@@ -53,6 +59,10 @@ private struct IndicatorBackground: View {
             return Color.red.opacity(0.55)
         case .processing:
             return Color.blue.opacity(0.55)
+        case .completed:
+            return Color.green.opacity(0.55)
+        case .attention:
+            return Color.orange.opacity(0.55)
         }
     }
 }
@@ -158,6 +168,32 @@ private struct ProcessingDots: View {
                 }
             }
             .frame(width: 24, height: 12)
+        }
+    }
+}
+
+private struct CompletedContent: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Color.green.opacity(0.9))
+                .font(.system(size: 15, weight: .semibold))
+            Text("Inserted")
+                .foregroundStyle(Color.white.opacity(0.95))
+                .font(.system(size: 12, weight: .semibold))
+        }
+    }
+}
+
+private struct AttentionContent: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.orange.opacity(0.92))
+                .font(.system(size: 14, weight: .semibold))
+            Text("Check focus")
+                .foregroundStyle(Color.white.opacity(0.95))
+                .font(.system(size: 12, weight: .semibold))
         }
     }
 }

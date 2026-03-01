@@ -55,7 +55,7 @@ body {
 .site-header,
 main,
 .site-footer {
-  width: min(1040px, calc(100% - 2rem));
+  width: min(1080px, calc(100% - 2.8rem));
   margin: 0 auto;
 }
 
@@ -96,14 +96,26 @@ main,
 }
 
 .btn-ghost {
-  margin-left: auto;
   border: 1px solid var(--card-border);
   color: var(--text);
   opacity: 0.92;
 }
 
+.site-header .btn-ghost {
+  margin-left: auto;
+}
+
 .hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.95fr);
+  grid-template-areas: "main banner";
+  gap: 1.15rem 1.2rem;
+  align-items: center;
   padding: 2.4rem 0 1.4rem;
+}
+
+.hero-main {
+  grid-area: main;
 }
 
 .eyebrow {
@@ -135,19 +147,23 @@ h1 {
 }
 
 .hero-banner {
-  width: min(720px, 100%);
-  margin-top: 1.8rem;
+  grid-area: banner;
+  width: 100%;
+  max-width: 520px;
+  justify-self: end;
+  margin-top: 0;
   border-radius: 12px;
   border: 1px solid var(--card-border);
   background: rgba(255, 255, 255, 0.03);
 }
 
 section {
-  padding: 1.8rem 0;
+  padding: 2.2rem 0;
 }
 
 h2 {
   font-size: clamp(1.4rem, 3.2vw, 2rem);
+  line-height: 1.2;
   margin: 0 0 1rem;
 }
 
@@ -161,33 +177,251 @@ h2 {
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.9rem;
+  gap: 1.15rem;
+}
+
+.quickstart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.quickstart .card a {
+  display: inline-block;
+  margin-top: 0.7rem;
+  color: var(--text);
 }
 
 .card {
   background: var(--card);
   border: 1px solid var(--card-border);
   border-radius: 16px;
-  padding: 1rem 1rem 1.1rem;
+  padding: 1.25rem 1.2rem 1.3rem;
   backdrop-filter: blur(7px);
 }
 
 .card h3 {
-  margin: 0 0 0.55rem;
+  margin: 0 0 0.72rem;
   font-size: 1.03rem;
 }
 
 .card p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.45;
+  line-height: 1.55;
+}
+
+.card ol {
+  margin: 0.7rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.setup .card p,
+.setup .card ol {
+  color: #c7d5e0;
+  font-size: 0.99rem;
+}
+
+.setup .card li + li {
+  margin-top: 0.36rem;
+}
+
+.setup .card ol {
+  margin-top: 0.95rem;
+  padding-left: 1.35rem;
+  line-height: 1.72;
+}
+
+.setup .section-copy {
+  margin-bottom: 0.9rem;
+}
+
+.card a {
+  color: var(--text);
+}
+
+.command {
+  margin: 0.8rem 0 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--card-border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-family: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  font-size: 0.82rem;
+  overflow-x: auto;
 }
 
 .flow ol {
   margin: 0;
   padding-left: 1.2rem;
-  color: var(--muted);
+  color: #c7d5e0;
+  font-size: 1rem;
   line-height: 1.8;
+}
+
+.demo-strip {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.demo-step {
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 0.9rem 0.8rem;
+  text-align: center;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  color: #d6e2ec;
+  animation: demoPulse 6s ease-in-out infinite;
+}
+
+.demo-step-label {
+  font-weight: 600;
+}
+
+.demo-step-sub {
+  font-size: 0.78rem;
+  color: #b8c8d4;
+}
+
+.hotkey-visual {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.12rem 0;
+}
+
+.keycap {
+  min-width: 2rem;
+  height: 1.8rem;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.28);
+  font-family: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  font-size: 0.92rem;
+}
+
+.key-plus {
+  color: #a9bcc8;
+  font-size: 0.9rem;
+}
+
+.demo-step-hold .keycap {
+  animation: holdKeysPress 6s ease-in-out infinite;
+}
+
+.demo-step-release .keycap {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  animation: releaseKeysUp 6s ease-in-out infinite;
+  animation-delay: 3s;
+}
+
+.demo-step-release .hotkey-visual::after {
+  content: "";
+  position: absolute;
+  inset: -0.3rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 122, 24, 0.55);
+  opacity: 0;
+  animation: releaseRing 6s ease-out infinite;
+  animation-delay: 3s;
+}
+
+.demo-step:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.demo-step:nth-child(2) {
+  animation-delay: 1.5s;
+}
+
+.demo-step:nth-child(3) {
+  animation-delay: 3s;
+}
+
+.demo-step:nth-child(4) {
+  animation-delay: 4.5s;
+}
+
+@keyframes demoPulse {
+  0%,
+  75%,
+  100% {
+    transform: translateY(0);
+    border-color: var(--card-border);
+    box-shadow: none;
+  }
+  18% {
+    transform: translateY(-2px);
+    border-color: rgba(255, 122, 24, 0.7);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.17);
+  }
+}
+
+@keyframes holdKeysPress {
+  0%,
+  75%,
+  100% {
+    transform: translateY(0);
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.28);
+    background: rgba(255, 255, 255, 0.08);
+  }
+  18%,
+  30% {
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+    background: rgba(0, 179, 164, 0.15);
+  }
+}
+
+@keyframes releaseKeysUp {
+  0%,
+  12%,
+  100% {
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+    background: rgba(255, 255, 255, 0.08);
+  }
+  20% {
+    transform: translateY(-4px);
+    box-shadow: 0 5px 0 rgba(0, 0, 0, 0.3);
+    background: rgba(255, 122, 24, 0.18);
+  }
+  28% {
+    transform: translateY(0);
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.24);
+  }
+}
+
+@keyframes releaseRing {
+  0%,
+  14%,
+  100% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  22% {
+    opacity: 0.7;
+  }
+  36% {
+    opacity: 0;
+    transform: scale(1.18);
+  }
 }
 
 .chip-row {
@@ -234,7 +468,7 @@ h2 {
 .support-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.9rem;
+  gap: 1.15rem;
 }
 
 .support-grid .card a {
@@ -272,9 +506,46 @@ h2 {
   transform: translateY(0);
 }
 
+@media (max-width: 820px) {
+  .hero {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "main"
+      "banner";
+    gap: 0.95rem;
+  }
+
+  .hero-main {
+    text-align: center;
+  }
+
+  .lead {
+    margin-inline: auto;
+  }
+
+  .hero-actions {
+    justify-content: center;
+  }
+
+  .hero-banner {
+    justify-self: center;
+    max-width: 680px;
+    margin-top: 0.35rem;
+  }
+}
+
 @media (max-width: 760px) {
   .grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .quickstart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-strip {
+    grid-template-columns: 1fr 1fr;
   }
 
   .support-grid {
@@ -287,7 +558,21 @@ h2 {
     gap: 0.4rem;
   }
 
-  .btn-ghost {
-    margin-left: 0;
+  .hero-actions {
+    gap: 0.62rem;
+  }
+
+  h2 {
+    font-size: 1.62rem;
+  }
+
+  .setup .card p,
+  .setup .card ol,
+  .flow ol {
+    font-size: 0.98rem;
+  }
+
+  .card {
+    padding: 1.1rem 1rem 1.15rem;
   }
 }

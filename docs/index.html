@@ -6,7 +6,7 @@
     <title>KotoType | Voice-to-Text for macOS</title>
     <meta
       name="description"
-      content="KotoType is a local-first voice-to-text app for macOS. Press one hotkey, speak, and text appears in your current cursor position."
+      content="KotoType is a local-first voice-to-text app for macOS. Hold your hotkey to record, release to transcribe, and insert text at your cursor."
     />
     <meta name="robots" content="index,follow,max-image-preview:large" />
     <meta
@@ -85,16 +85,39 @@
 
     <main>
       <section class="hero reveal">
-        <p class="eyebrow">Voice-to-Text for macOS</p>
-        <h1>Speak naturally. Type anywhere.</h1>
-        <p class="lead">
-          KotoType stays in your menu bar, records with one hotkey, and inserts transcribed text directly at your cursor.
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="https://github.com/ymuichiro/koto-type/releases/latest" target="_blank" rel="noreferrer">Download Latest Release</a>
-          <a class="btn btn-ghost" href="https://github.com/ymuichiro/koto-type#installation" target="_blank" rel="noreferrer">Install Guide</a>
+        <div class="hero-main">
+          <p class="eyebrow">Voice-to-Text for macOS</p>
+          <h1>Speak naturally. Type anywhere.</h1>
+          <p class="lead">
+            KotoType stays in your menu bar. Hold your hotkey while speaking, release it to transcribe, and insert text directly at your cursor.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="https://github.com/ymuichiro/koto-type/releases/latest" target="_blank" rel="noreferrer">Download Latest Release</a>
+            <a class="btn btn-ghost" href="https://github.com/ymuichiro/koto-type#installation" target="_blank" rel="noreferrer">Install Guide</a>
+          </div>
         </div>
         <img class="hero-banner" src="./assets/banner.png" alt="KotoType banner" />
+      </section>
+
+      <section class="quickstart reveal">
+        <h2>Start in 3 steps</h2>
+        <div class="quickstart-grid">
+          <article class="card">
+            <h3>Step 1: Install</h3>
+            <p>Install KotoType and FFmpeg.</p>
+            <a href="#setup-checklist">Open setup checklist</a>
+          </article>
+          <article class="card">
+            <h3>Step 2: Complete initial setup</h3>
+            <p>Use the setup window buttons in order until all checks pass.</p>
+            <a href="#setup-checklist">View first-launch steps</a>
+          </article>
+          <article class="card">
+            <h3>Step 3: Run first dictation</h3>
+            <p>Focus a text field, hold hotkey to record, release to transcribe.</p>
+            <a href="#first-recording">Open recording walkthrough</a>
+          </article>
+        </div>
       </section>
 
       <section class="compat reveal">
@@ -105,7 +128,72 @@
           <span class="chip">Accessibility permission</span>
           <span class="chip">Microphone permission</span>
           <span class="chip">Screen Recording permission</span>
-          <span class="chip">Requires `ffmpeg`</span>
+          <span class="chip">Requires system `ffmpeg`</span>
+        </div>
+      </section>
+
+      <section class="setup reveal" id="setup-checklist">
+        <h2>Setup checklist</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>1. Install the app</h3>
+            <p>Download the latest release, open the DMG, and drag KotoType.app into Applications.</p>
+          </article>
+          <article class="card">
+            <h3>2. Install FFmpeg (required)</h3>
+            <p>FFmpeg is not bundled. Install it once, then confirm it is available in your terminal.</p>
+            <pre class="command"><code>brew install ffmpeg
+ffmpeg -version</code></pre>
+          </article>
+          <article class="card">
+            <h3>3. Complete first launch checks</h3>
+            <ol>
+              <li>Launch KotoType. The <strong>Initial Setup</strong> window opens.</li>
+              <li>Click <strong>Grant Accessibility</strong> and enable KotoType in System Settings.</li>
+              <li>Click <strong>Grant Microphone</strong> and allow microphone access.</li>
+              <li>Click <strong>Grant Screen Recording</strong> and enable KotoType.</li>
+              <li>Click <strong>Re-check</strong> until all required checks pass, then click <strong>Finish setup and start</strong>.</li>
+            </ol>
+          </article>
+          <article class="card">
+            <h3>4. Run your first dictation</h3>
+            <ol>
+              <li>Open any app and click the text field where you want output.</li>
+              <li>Hold your hotkey (default: <code>⌘+⌥</code>) to start recording.</li>
+              <li>Speak while holding the hotkey.</li>
+              <li>Release the hotkey to stop recording and start transcription.</li>
+              <li>Wait a few seconds; recognized text is inserted at your cursor.</li>
+            </ol>
+          </article>
+        </div>
+      </section>
+
+      <section class="demo reveal">
+        <h2>See the flow in 5 seconds</h2>
+        <p class="section-copy">
+          This quick demo summarizes how recording works: hold hotkey, speak, release, and text is inserted.
+        </p>
+        <div class="demo-strip" aria-label="Quick visual walkthrough">
+          <div class="demo-step demo-step-hold">
+            <span class="demo-step-label">Hold hotkey</span>
+            <span class="hotkey-visual" aria-hidden="true">
+              <span class="keycap">⌘</span>
+              <span class="key-plus">+</span>
+              <span class="keycap">⌥</span>
+            </span>
+            <span class="demo-step-sub">default: ⌘+⌥</span>
+          </div>
+          <div class="demo-step">Speak</div>
+          <div class="demo-step demo-step-release">
+            <span class="demo-step-label">Release hotkey</span>
+            <span class="hotkey-visual" aria-hidden="true">
+              <span class="keycap">⌘</span>
+              <span class="key-plus">+</span>
+              <span class="keycap">⌥</span>
+            </span>
+            <span class="demo-step-sub">lift fingers to stop recording</span>
+          </div>
+          <div class="demo-step">Text inserted</div>
         </div>
       </section>
 
@@ -115,7 +203,7 @@
           <article class="card reveal">
             <h3>Direct input into any app</h3>
             <p>
-              Start and stop recording with a global hotkey, then insert text at the active cursor position.
+              Hold a global hotkey while speaking, then release to transcribe and insert text at the active cursor position.
             </p>
           </article>
           <article class="card reveal">
@@ -143,9 +231,59 @@
         <h2>Get started in 30 seconds</h2>
         <ol>
           <li>Download the latest release and move KotoType to Applications.</li>
-          <li>On first launch, allow Accessibility, Microphone, and Screen Recording permissions.</li>
-          <li>Press your hotkey, speak, release hotkey, and text is inserted at your cursor.</li>
+          <li>Install FFmpeg: <code>brew install ffmpeg</code>.</li>
+          <li>Launch KotoType and pass the Initial Setup checks.</li>
+          <li>Focus a text field, hold your hotkey, speak, and release to insert text.</li>
         </ol>
+      </section>
+
+      <section class="flow reveal" id="first-recording">
+        <h2>First recording walkthrough</h2>
+        <ol>
+          <li>Confirm setup is complete and KotoType is running in the menu bar.</li>
+          <li>Focus an editable text field in your target app.</li>
+          <li>Hold your configured hotkey (default: <code>⌘+⌥</code>).</li>
+          <li>Speak while holding the hotkey, then release to transcribe.</li>
+          <li>KotoType inserts the transcription at the active cursor when processing finishes.</li>
+          <li>If text is not inserted, re-check Accessibility permission and cursor focus.</li>
+        </ol>
+      </section>
+
+      <section class="flow reveal">
+        <h2>After setup: next 3 actions</h2>
+        <ol>
+          <li>Click the text field where you want KotoType to type.</li>
+          <li>Hold your hotkey while speaking (recording runs only while held).</li>
+          <li>Release the hotkey and wait for automatic text insertion.</li>
+        </ol>
+      </section>
+
+      <section class="setup reveal">
+        <h2>Unsigned app launch (macOS 26 / 15 / 14)</h2>
+        <p class="section-copy">
+          KotoType is currently distributed without Apple Developer signing. If macOS blocks launch, use the version-specific Gatekeeper override below.
+        </p>
+        <div class="grid">
+          <article class="card">
+            <h3>macOS 26</h3>
+            <ol>
+              <li>Try opening KotoType once from Finder.</li>
+              <li>Open System Settings &gt; Privacy &amp; Security.</li>
+              <li>In Security, click <strong>Open Anyway</strong>, then confirm.</li>
+            </ol>
+            <p><a href="https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac" target="_blank" rel="noreferrer">Apple guide</a></p>
+          </article>
+          <article class="card">
+            <h3>macOS 15 / 14</h3>
+            <ol>
+              <li>Try opening KotoType once from Finder.</li>
+              <li>Open System Settings &gt; Privacy &amp; Security.</li>
+              <li>In Security, click <strong>Open Anyway</strong>, then confirm.</li>
+            </ol>
+            <p><a href="https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac" target="_blank" rel="noreferrer">Apple guide</a></p>
+          </article>
+        </div>
+        <p class="section-copy">In Apple’s official override steps, this is handled in Gatekeeper (Privacy &amp; Security), not in firewall settings.</p>
       </section>
 
       <section class="privacy reveal">
@@ -158,16 +296,24 @@
       <section class="faq reveal">
         <h2>FAQ</h2>
         <details>
+          <summary>KotoType is blocked and does not open. What should I do?</summary>
+          <p>Open System Settings &gt; Privacy &amp; Security and click <code>Open Anyway</code> for KotoType, then reopen the app.</p>
+        </details>
+        <details>
+          <summary>Hotkey does not start recording. What should I check first?</summary>
+          <p>Re-check Accessibility permission and confirm KotoType is enabled in System Settings &gt; Privacy &amp; Security &gt; Accessibility.</p>
+        </details>
+        <details>
+          <summary>Recording stops but text is not inserted. Why?</summary>
+          <p>Make sure the target app has an active editable cursor and re-check Accessibility permission from the setup window.</p>
+        </details>
+        <details>
+          <summary>How do I install FFmpeg?</summary>
+          <p>Run <code>brew install ffmpeg</code> in Terminal, then verify with <code>ffmpeg -version</code>.</p>
+        </details>
+        <details>
           <summary>Does KotoType send audio to the cloud?</summary>
           <p>Core usage is local-first and does not require mandatory cloud upload.</p>
-        </details>
-        <details>
-          <summary>Can I transcribe directly into any app?</summary>
-          <p>Yes. KotoType inserts text at the active cursor position after transcription.</p>
-        </details>
-        <details>
-          <summary>What should I check when accuracy is low?</summary>
-          <p>Confirm microphone permission, check input level, and ensure ffmpeg is installed and available.</p>
         </details>
       </section>
 
@@ -189,7 +335,8 @@
         <div class="hero-actions">
           <a class="btn btn-primary" href="https://github.com/ymuichiro/koto-type/releases/latest" target="_blank" rel="noreferrer">Download</a>
           <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type" target="_blank" rel="noreferrer">View on GitHub</a>
-          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type#documentation" target="_blank" rel="noreferrer">Read Docs</a>
+          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type#install-ffmpeg-required" target="_blank" rel="noreferrer">FFmpeg Guide</a>
+          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type#basic-operation" target="_blank" rel="noreferrer">Basic Operation</a>
         </div>
       </section>
     </main>

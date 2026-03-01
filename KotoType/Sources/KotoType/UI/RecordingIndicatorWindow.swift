@@ -78,6 +78,15 @@ class RecordingIndicatorWindow: NSPanel {
             self.contentView = self.hostingController?.view
         }
     }
+
+    func showCompleted(success: Bool) {
+        DispatchQueue.main.async {
+            self.orderFrontRegardless()
+            let view = RecordingIndicatorView(state: success ? .completed : .attention)
+            self.hostingController = NSHostingController(rootView: view)
+            self.contentView = self.hostingController?.view
+        }
+    }
     
     func show() {
         showRecording()

@@ -61,6 +61,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.initialSetupWindowController?.close()
             self.initialSetupWindowController = nil
             self.continueSetup()
+            self.showFirstRecordingGuideAlert()
         }
         initialSetupWindowController?.showWindow(nil)
     }
@@ -242,6 +243,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Completing transcription", level: .info)
 
         let finalText = batchTranscriptionManager?.finalize() ?? lastTranscriptionText
+        let didInsertText: Bool
 
         if !finalText.isEmpty {
             Logger.shared.log("Typing text into active window: '\(finalText)'", level: .info)
@@ -251,13 +253,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 text: finalText,
                 source: .liveRecording
             )
+            didInsertText = true
+        } else {
+            didInsertText = false
         }
 
         cleanupAllPendingSegmentFiles()
         batchTranscriptionManager?.reset()
         lastTranscriptionText = ""
+        recordingIndicatorWindow?.showCompleted(success: didInsertText)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            self?.recordingIndicatorWindow?.hide()
+        }
+    }
 
-        recordingIndicatorWindow?.hide()
+    private func showFirstRecordingGuideAlert() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Setup complete. Run your first dictation."
+        alert.informativeText = """
+        1. Open any app and click a text field.
+        2. Hold your hotkey (default: Command+Option) while speaking.
+        3. Release the hotkey and wait for text insertion.
+        """
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func presentImportAudioPanel() {

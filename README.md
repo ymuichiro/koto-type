@@ -25,7 +25,7 @@ A Mac-native voice-to-text application with high-accuracy transcription powered 
 ## Features
 
 - **Menu Bar Application**: Resides in the menu bar for quick access
-- **Global Hotkey**: Record audio with `Ctrl+Option+Space`
+- **Push-to-Talk Hotkey**: Hold your configured hotkey to record, release to transcribe (default: `⌘+⌥`)
 - **High-Accuracy Transcription**: Powered by OpenAI Whisper with optimized settings
 - **Automatic Text Input**: Automatically types transcribed text at the cursor position
 - **Audio Preprocessing**: Noise reduction with spectral subtraction and normalization
@@ -37,12 +37,37 @@ A Mac-native voice-to-text application with high-accuracy transcription powered 
 
 ## Installation
 
+### Quick Start (3 Steps)
+
+1. Install KotoType and FFmpeg (`brew install ffmpeg`)
+2. Complete all checks in the Initial Setup window
+3. Click a text field, hold hotkey to record, release to transcribe
+
 ### Install from DMG (Recommended)
 
 1. Download the latest [KotoType.dmg](https://github.com/yourusername/koto-type/releases/latest)
 2. Double-click the downloaded DMG file
 3. Drag KotoType.app to your Applications folder
 4. On first launch, click "Open" when prompted by the security warning
+
+### Install FFmpeg (Required)
+
+KotoType validates `ffmpeg` during the initial setup and cannot proceed without it.
+
+```bash
+# Homebrew (recommended)
+brew install ffmpeg
+
+# Confirm availability
+ffmpeg -version
+```
+
+Alternative package manager:
+
+```bash
+# MacPorts
+sudo port install ffmpeg
+```
 
 ### Build from Source
 
@@ -158,9 +183,47 @@ On first launch, the "Initial Setup" screen will appear to verify the following:
 
 1. **Accessibility Permissions** (for keyboard input simulation)
 2. **Microphone Permissions** (for recording)
-3. **FFmpeg Command Availability**
+3. **Screen Recording Permissions** (for screen context support)
+4. **FFmpeg Command Availability**
 
-Follow the on-screen instructions to grant permissions and install dependencies, then click "Re-check" to continue.
+#### Step-by-step walkthrough (first launch)
+
+1. Launch KotoType. The `Initial Setup` window opens automatically.
+2. Click **Grant Accessibility**.
+3. In `System Settings > Privacy & Security > Accessibility`, enable KotoType.
+4. Return to KotoType and click **Re-check**.
+5. If Accessibility does not switch to passed, wait a few seconds and click **Re-check** again. If still not reflected, click **Restart App** in the setup window and reopen.
+6. Click **Grant Microphone**, then choose **Allow** when macOS asks for permission.
+7. Click **Grant Screen Recording**, enable KotoType in `System Settings > Privacy & Security > Screen Recording`, then return to the app.
+8. If FFmpeg is not detected, install it:
+
+```bash
+brew install ffmpeg
+ffmpeg -version
+```
+
+9. Click **Re-check** until all required items become passed.
+10. Click **Finish setup and start** to enter normal menu bar mode.
+
+#### After setup: next 3 actions
+
+1. Click the text field where you want output.
+2. Hold your hotkey while speaking.
+3. Release the hotkey and wait for automatic text insertion.
+
+#### Fast fixes (first day)
+
+- **App blocked and won’t open**: System Settings > Privacy & Security > `Open Anyway`
+- **Hotkey does not start recording**: Re-enable KotoType in Accessibility
+- **Recorded but text not inserted**: Confirm editable cursor focus + Accessibility permission
+- **FFmpeg check failed**: `brew install ffmpeg` then `ffmpeg -version`, reopen app
+
+If the FFmpeg check fails, install or reinstall FFmpeg and restart KotoType:
+
+```bash
+brew install ffmpeg
+ffmpeg -version
+```
 
 > **Note**: Due to licensing considerations, FFmpeg is not bundled with the distribution.  
 > You must have `ffmpeg` installed on your system (e.g., `brew install ffmpeg`).
@@ -170,18 +233,41 @@ Follow the on-screen instructions to grant permissions and install dependencies,
 
 ### Basic Operation
 
-1. Launch the app - the KotoType icon appears in the menu bar
-2. Press **Ctrl+Option+Space** to start recording
-3. Press **Ctrl+Option+Space** again to stop recording
-4. Transcription starts automatically, and the text is typed at your cursor position
-5. Select "Import Audio File..." from the menu to transcribe `wav`/`mp3` files
-6. Select "History..." to view past transcriptions
-7. Enable "Launch at login" in "Settings... > General"
-8. Select "Quit" or press **Cmd+Q** to exit
+#### First dictation walkthrough
+
+1. Confirm setup is complete and the KotoType icon is visible in the menu bar.
+2. Open the app where you want text input (Notes, Slack, browser form, etc.).
+3. Click the target text field so the cursor is active.
+4. Hold the configured hotkey (default: **⌘+⌥**) to begin recording.
+5. Keep holding the hotkey while speaking.
+6. Release the hotkey to stop recording and trigger transcription.
+7. Wait for processing to complete; KotoType types the recognized text at the current cursor position.
+8. If no text is inserted, re-check Accessibility permission and confirm the cursor is focused in an editable field.
+
+#### Other daily operations
+
+1. (Optional) Change hotkey: "Settings... > Hotkey"
+2. (Optional) Transcribe files: "Import Audio File..." (`wav`/`mp3`)
+3. (Optional) Review past results: "History..."
+4. Quit app: "Quit" or **Cmd+Q**
 
 ## Security Warning
 
 This app is currently distributed without Apple Developer signing, so you may see a Gatekeeper warning on first launch.
+
+### Unsigned App Launch Steps by macOS Version
+
+Use the steps for your macOS version when KotoType is blocked.
+
+| macOS version | What to do |
+| --- | --- |
+| 26 | 1) Try to open KotoType once from Finder. 2) Open `System Settings > Privacy & Security`. 3) In Security, click **Open Anyway** and confirm. |
+| 15 / 14 | 1) Try to open KotoType once from Finder. 2) Open `System Settings > Privacy & Security`. 3) In Security, click **Open Anyway** and confirm. |
+
+Apple references:
+- [Open a Mac app from an unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)
+
+> `Open Anyway` is a Gatekeeper setting in Privacy & Security. Firewall settings are not part of this launch flow in Apple’s documented steps.
 
 ### If You See a Warning
 
@@ -189,8 +275,8 @@ This app is currently distributed without Apple Developer signing, so you may se
 1. Right-click or Ctrl+click on the app
 2. Select "Open"
 
-**Method 2: Allow in System Preferences**
-1. Go to System Preferences > Security & Privacy
+**Method 2: Allow in Privacy & Security**
+1. Go to System Settings, then open Privacy & Security
 2. Click "Open"
 
 This is normal behavior for apps without Apple Developer Program signing. After this, the app will launch without warnings.
@@ -383,7 +469,7 @@ Allow microphone access on first launch when prompted.
 The Whisper model (large-v3, ~3GB) is downloaded on first launch.
 
 ### Hotkey Not Working
-Enable KotoType in System Preferences > Security & Privacy > Accessibility.
+Enable KotoType in System Settings > Privacy & Security > Accessibility, and confirm you are holding the configured hotkey (default: `⌘+⌥`).
 
 ### Python Server Binary Not Found
 When creating distribution `.app`/`.dmg`, run `make build-server` to create `dist/whisper_server` before running `./scripts/create_app.sh`.
@@ -456,7 +542,7 @@ Made with ❤️ by [KotoType Contributors](CONTRIBUTORS.md)
 
 ## Limitations
 
-- **Microphone Permission**: Must be granted in System Preferences
+- **Microphone Permission**: Must be granted in System Settings
 - **Accessibility Permission**: Required for hotkeys and keyboard simulation
 - **Whisper Model**: ~3GB download on first launch
 
