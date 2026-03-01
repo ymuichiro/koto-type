@@ -10,13 +10,14 @@ enum IndicatorState {
 struct RecordingIndicatorView: View {
     let state: IndicatorState
     let progressText: String?
+    private static let outerPadding: CGFloat = 6
 
     init(state: IndicatorState, progressText: String? = nil) {
         self.state = state
         self.progressText = progressText
     }
 
-    static func preferredContentSize(for state: IndicatorState, progressText: String?) -> CGSize {
+    private static func frameSize(for state: IndicatorState, progressText: String?) -> CGSize {
         let hasProgress = {
             guard state == .recording || state == .processing else { return false }
             return !(progressText?.isEmpty ?? true)
@@ -30,8 +31,14 @@ struct RecordingIndicatorView: View {
         return CGSize(width: width, height: 68)
     }
 
-    private var preferredSize: CGSize {
-        Self.preferredContentSize(for: state, progressText: progressText)
+    static func preferredContentSize(for state: IndicatorState, progressText: String?) -> CGSize {
+        let frameSize = Self.frameSize(for: state, progressText: progressText)
+        let padding = Self.outerPadding * 2
+        return CGSize(width: frameSize.width + padding, height: frameSize.height + padding)
+    }
+
+    private var preferredFrameSize: CGSize {
+        Self.frameSize(for: state, progressText: progressText)
     }
 
     var body: some View {
@@ -49,8 +56,8 @@ struct RecordingIndicatorView: View {
                 AttentionContent()
             }
         }
-        .frame(width: preferredSize.width, height: preferredSize.height)
-        .padding(6)
+        .frame(width: preferredFrameSize.width, height: preferredFrameSize.height)
+        .padding(Self.outerPadding)
         .animation(.easeInOut(duration: 0.2), value: state)
         .animation(.easeInOut(duration: 0.2), value: progressText ?? "")
     }
