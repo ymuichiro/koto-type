@@ -28,6 +28,7 @@ final class InitialSetupWindowController: NSWindowController {
 
 struct InitialSetupView: View {
     private static let accessibilityResetCommand = "tccutil reset Accessibility com.ymuichiro.kototype"
+    private static let ffmpegInstallCommand = "brew install ffmpeg && ffmpeg -version"
     private let diagnosticsService: InitialSetupDiagnosticsService
     private let onComplete: () -> Void
     private let bannerImage: NSImage?
@@ -38,6 +39,7 @@ struct InitialSetupView: View {
     @State private var isWaitingForAccessibilityUpdate = false
     @State private var shouldShowAccessibilityRestartHint = false
     @State private var hasCopiedAccessibilityResetCommand = false
+    @State private var hasCopiedFfmpegInstallCommand = false
     @State private var accessibilityRefreshTask: Task<Void, Never>?
 
     init(
@@ -71,6 +73,33 @@ struct InitialSetupView: View {
                     .foregroundColor(.secondary)
             }
 
+            if let nextRequiredItem {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Guided Setup")
+                        .font(.headline)
+                    Text("Next step: \(nextRequiredItem.title)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Text(guidedDetail(for: nextRequiredItem.id))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 10) {
+                        Button(guidedActionTitle(for: nextRequiredItem.id)) {
+                            runAction(for: nextRequiredItem.id)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        if nextRequiredItem.id == "ffmpeg" && hasCopiedFfmpegInstallCommand {
+                            Text("Copied. Run in Terminal, then click Re-check.")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
+            }
+
             List(report.items, id: \.id) { item in
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: item.status == .passed ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -98,31 +127,38 @@ struct InitialSetupView: View {
             }
             .frame(height: 320)
 
-            HStack(spacing: 10) {
-                Button("Grant Accessibility") {
-                    diagnosticsService.requestAccessibilityPermission()
-                    openAccessibilitySettings()
-                    startAccessibilityPolling()
-                }
-                Button("Grant Microphone") {
-                    isRequestingMicrophone = true
-                    diagnosticsService.requestMicrophonePermission { _ in
-                        Task { @MainActor in
-                            isRequestingMicrophone = false
-                            refreshChecks()
+            if !failingRequiredItems.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Quick fixes")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    ForEach(failingRequiredItems, id: \.id) { item in
+                        HStack(alignment: .top) {
+                            Text("• \(item.title)")
+                                .font(.caption)
+                            Spacer()
+                            Button(guidedActionTitle(for: item.id)) {
+                                runAction(for: item.id)
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
+                }
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
+            }
+
+            HStack(spacing: 10) {
+                Button("Grant Accessibility") {
+                    runAccessibilityFlow()
+                }
+                Button("Grant Microphone") {
+                    runMicrophoneFlow()
                 }
                 .disabled(isRequestingMicrophone)
                 Button("Grant Screen Recording") {
-                    isRequestingScreenRecording = true
-                    diagnosticsService.requestScreenRecordingPermission { _ in
-                        Task { @MainActor in
-                            isRequestingScreenRecording = false
-                            refreshChecks()
-                        }
-                    }
-                    openScreenRecordingSettings()
+                    runScreenRecordingFlow()
                 }
                 .disabled(isRequestingScreenRecording)
                 Button("Open System Settings") {
@@ -192,6 +228,24 @@ struct InitialSetupView: View {
                     .foregroundColor(.secondary)
             }
 
+            if report.canStartApplication {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("After setup: next 3 actions")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text("1. Click any text field.\n2. Hold hotkey while speaking.\n3. Release hotkey to transcribe.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button("Show first recording test steps") {
+                        showFirstRecordingGuide()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
+            }
+
             HStack {
                 Spacer()
                 Button("Finish setup and start") {
@@ -216,6 +270,14 @@ struct InitialSetupView: View {
         report.items.first(where: { $0.id == "accessibility" })?.status == .passed
     }
 
+    private var failingRequiredItems: [InitialSetupCheckItem] {
+        report.items.filter { $0.required && $0.status == .failed }
+    }
+
+    private var nextRequiredItem: InitialSetupCheckItem? {
+        failingRequiredItems.first
+    }
+
     private func refreshChecks() {
         report = diagnosticsService.evaluate()
         if isAccessibilityGranted {
@@ -234,6 +296,12 @@ struct InitialSetupView: View {
 
     private func openScreenRecordingSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func openMicrophoneSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -269,6 +337,100 @@ struct InitialSetupView: View {
         pasteboard.clearContents()
         pasteboard.setString(Self.accessibilityResetCommand, forType: .string)
         hasCopiedAccessibilityResetCommand = true
+    }
+
+    private func copyFfmpegInstallCommand() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(Self.ffmpegInstallCommand, forType: .string)
+        hasCopiedFfmpegInstallCommand = true
+    }
+
+    private func runAccessibilityFlow() {
+        diagnosticsService.requestAccessibilityPermission()
+        openAccessibilitySettings()
+        startAccessibilityPolling()
+    }
+
+    private func runMicrophoneFlow() {
+        isRequestingMicrophone = true
+        diagnosticsService.requestMicrophonePermission { _ in
+            Task { @MainActor in
+                isRequestingMicrophone = false
+                refreshChecks()
+            }
+        }
+        openMicrophoneSettings()
+    }
+
+    private func runScreenRecordingFlow() {
+        isRequestingScreenRecording = true
+        diagnosticsService.requestScreenRecordingPermission { _ in
+            Task { @MainActor in
+                isRequestingScreenRecording = false
+                refreshChecks()
+            }
+        }
+        openScreenRecordingSettings()
+    }
+
+    private func runAction(for itemID: String) {
+        switch itemID {
+        case "accessibility":
+            runAccessibilityFlow()
+        case "microphone":
+            runMicrophoneFlow()
+        case "screenRecording":
+            runScreenRecordingFlow()
+        case "ffmpeg":
+            copyFfmpegInstallCommand()
+        default:
+            break
+        }
+    }
+
+    private func guidedActionTitle(for itemID: String) -> String {
+        switch itemID {
+        case "accessibility":
+            return "Grant Accessibility"
+        case "microphone":
+            return "Grant Microphone"
+        case "screenRecording":
+            return "Grant Screen Recording"
+        case "ffmpeg":
+            return "Copy FFmpeg install command"
+        default:
+            return "Open"
+        }
+    }
+
+    private func guidedDetail(for itemID: String) -> String {
+        switch itemID {
+        case "accessibility":
+            return "Enable KotoType in Accessibility, then come back and Re-check."
+        case "microphone":
+            return "Allow microphone permission when prompted."
+        case "screenRecording":
+            return "Enable KotoType in Screen Recording, then return to this window."
+        case "ffmpeg":
+            return "Run the copied command in Terminal, then return and click Re-check."
+        default:
+            return "Complete this check and continue."
+        }
+    }
+
+    private func showFirstRecordingGuide() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "First recording test"
+        alert.informativeText = """
+        1. Click a text field in any app.
+        2. Hold your hotkey (default: Command+Option) and speak.
+        3. Release the hotkey and wait for inserted text.
+        """
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private static func loadBannerImage() -> NSImage? {

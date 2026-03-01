@@ -35,7 +35,7 @@ Welcome to the KotoType support page. Here you'll find resources to help you get
 
 1. **Install KotoType**: Follow the [Installation Guide](README.md#installation)
 2. **Grant Permissions**: Run the first-time setup wizard to grant necessary permissions
-3. **Test Recording**: Try recording a short audio clip
+3. **Test Recording**: Hold your hotkey to record and release to transcribe
 4. **Check Transcription**: Verify that transcription works as expected
 
 ### Setup Requirements
@@ -43,7 +43,7 @@ Welcome to the KotoType support page. Here you'll find resources to help you get
 Before using KotoType, ensure you have:
 
 - macOS 13.0 or later
-- FFmpeg installed (for audio file conversion)
+- FFmpeg installed (for audio file conversion, e.g., `brew install ffmpeg`)
 - Microphone access granted
 - Accessibility permissions granted (for hotkeys)
 
@@ -71,7 +71,7 @@ Before using KotoType, ensure you have:
 
 ### Hotkey Not Responding
 
-**Symptoms**: Ctrl+Option+Space doesn't start/stop recording
+**Symptoms**: Holding and releasing the configured hotkey does not start/stop recording
 
 **Solutions**:
 1. Check System Preferences > Security & Privacy > Accessibility

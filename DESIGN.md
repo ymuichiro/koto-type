@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Mac-native voice-to-text application using OpenAI Whisper. The app recognizes speech via a global hotkey (Ctrl+Option+Space) and types the transcribed text at the cursor position.
+A Mac-native voice-to-text application using OpenAI Whisper. The app recognizes speech via a global push-to-talk hotkey (default: Command+Option) and types the transcribed text at the cursor position.
 
 ## Architecture
 
@@ -41,7 +41,7 @@ A Mac-native voice-to-text application using OpenAI Whisper. The app recognizes 
 
 **Features**:
 - Menu bar resident (icon + menu)
-- Global event monitoring for `Ctrl+Option+Space` hotkey
+- Global event monitoring for a configurable hotkey (default: `⌘+⌥`)
 - Recording start/stop (AVFoundation)
 - Python process launch and communication (Process)
 - Text input to other applications (CGEvent)
@@ -131,11 +131,11 @@ text = " ".join([segment.text for segment in segments])
 2. **Idle State**:
    - Start global hotkey monitoring
 
-3. **Recording Start** (`Ctrl+Option+Space` press):
+3. **Recording Start** (configured hotkey press and hold):
    - Start recording
    - Provide visual feedback (menu bar icon color change, etc.)
 
-4. **Recording Stop** (`Ctrl+Option+Space` release):
+4. **Recording Stop** (configured hotkey release):
    - Stop recording
    - Save audio file temporarily
    - Send file path to Python
@@ -167,7 +167,7 @@ text = " ".join([segment.text for segment in segments])
 ## Design Principles for Simplicity
 
 1. **Minimal UI**: Menu bar resident only, no complex settings screens
-2. **Single Setting**: Fixed hotkey (Ctrl+Option+Space), not user-customizable
+2. **Simple Default**: Hotkey defaults to Command+Option and can be customized in Settings
 3. **Temporary Files**: Save recording files temporarily, delete after use
 4. **Synchronous Communication**: Communicate with Python synchronously to simplify processing
 5. **Minimal Error Handling**: Handle only essential errors
