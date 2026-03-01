@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KotoType | macOS向け音声入力</title>
+    <meta
+      name="description"
+      content="KotoType は macOS 向けのローカルファースト音声入力アプリです。ホットキーを押して録音し、離すと文字起こししてカーソル位置に挿入します。"
+    />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <meta
+      name="google-site-verification"
+      content="pGpaqomDQhOY9S0FpVai7gdUDKDtDe-g0eMbrpNUkTs"
+    />
+    <meta name="theme-color" content="#0b1020" />
+    <link rel="canonical" href="https://ymuichiro.github.io/koto-type/ja/index.html" />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://ymuichiro.github.io/koto-type/"
+    />
+    <link
+      rel="alternate"
+      hreflang="ja"
+      href="https://ymuichiro.github.io/koto-type/ja/index.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://ymuichiro.github.io/koto-type/"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="KotoType" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:title" content="KotoType | macOS向け音声入力" />
+    <meta
+      property="og:description"
+      content="自然に話してそのまま入力。KotoType は macOS 向けのローカルファースト音声入力アプリです。"
+    />
+    <meta property="og:url" content="https://ymuichiro.github.io/koto-type/ja/index.html" />
+    <meta
+      property="og:image"
+      content="https://ymuichiro.github.io/koto-type/assets/og-image-1200x630.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="KotoType: 自然に話して、macOSのどこでも入力"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="KotoType | macOS向け音声入力" />
+    <meta
+      name="twitter:description"
+      content="ホットキーで録音し、離すと文字起こししてカーソル位置に挿入。KotoType はローカルファースト設計です。"
+    />
+    <meta
+      name="twitter:image"
+      content="https://ymuichiro.github.io/koto-type/assets/og-image-1200x630.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="KotoType: 自然に話して、macOSのどこでも入力"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/png" href="../assets/icon.png" />
+    <link rel="apple-touch-icon" href="../assets/icon.png" />
+    <link rel="stylesheet" href="../styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "KotoType",
+        "applicationCategory": "ProductivityApplication",
+        "operatingSystem": "macOS",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "url": "https://ymuichiro.github.io/koto-type/ja/index.html",
+        "description": "KotoType は macOS 向けのローカルファースト音声入力アプリです。文字起こし結果をカーソル位置へ直接挿入します。",
+        "image": "https://ymuichiro.github.io/koto-type/assets/og-image-1200x630.png"
+      }
+    </script>
+  </head>
+  <body>
+    <div class="bg-glow bg-glow-left" aria-hidden="true"></div>
+    <div class="bg-glow bg-glow-right" aria-hidden="true"></div>
+    <header class="site-header">
+      <img class="logo" src="../assets/icon-light.png" alt="KotoType アイコン" />
+      <span class="brand">KotoType</span>
+      <nav class="lang-switch" aria-label="Language switcher">
+        <a class="lang-link" href="../en/index.html" lang="en">EN</a>
+        <span class="lang-divider" aria-hidden="true">/</span>
+        <a class="lang-link active" href="../ja/index.html" lang="ja" aria-current="page">JA</a>
+      </nav>
+      <a class="btn btn-ghost header-github" href="https://github.com/ymuichiro/koto-type" target="_blank" rel="noreferrer">GitHub</a>
+    </header>
+
+    <main>
+      <section class="hero reveal">
+        <div class="hero-main">
+          <p class="eyebrow">macOS向け音声入力</p>
+          <h1>自然に話して、どこでも入力。</h1>
+          <p class="lead">
+            KotoType はメニューバーに常駐します。ホットキーを押している間だけ録音し、離すと文字起こししてカーソル位置へ直接入力します。
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="https://github.com/ymuichiro/koto-type/releases/latest" target="_blank" rel="noreferrer">最新版をダウンロード</a>
+            <a class="btn btn-ghost" href="https://github.com/ymuichiro/koto-type#installation" target="_blank" rel="noreferrer">インストールガイド</a>
+          </div>
+        </div>
+        <img class="hero-banner" src="../assets/banner.png" alt="KotoType バナー" />
+      </section>
+
+      <section class="quickstart reveal">
+        <h2>3ステップで開始</h2>
+        <div class="quickstart-grid">
+          <article class="card">
+            <h3>Step 1: インストール</h3>
+            <p>KotoType と FFmpeg をインストールします。</p>
+            <a href="#setup-checklist">セットアップチェックリストを見る</a>
+          </article>
+          <article class="card">
+            <h3>Step 2: 初期設定を完了</h3>
+            <p>セットアップ画面のボタンを順に実行し、すべてのチェックを通過させます。</p>
+            <a href="#setup-checklist">初回起動の手順を見る</a>
+          </article>
+          <article class="card">
+            <h3>Step 3: 最初の音声入力</h3>
+            <p>テキスト欄にフォーカスし、ホットキー長押しで録音、離して文字起こしします。</p>
+            <a href="#first-recording">録音チュートリアルを見る</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="compat reveal">
+        <h2>対応環境</h2>
+        <div class="chip-row">
+          <span class="chip">macOS 13+</span>
+          <span class="chip">Apple Silicon / Intel</span>
+          <span class="chip">Accessibility 権限</span>
+          <span class="chip">マイク権限</span>
+          <span class="chip">画面収録権限</span>
+          <span class="chip">システム `ffmpeg` が必要</span>
+        </div>
+      </section>
+
+      <section class="setup reveal" id="setup-checklist">
+        <h2>セットアップチェックリスト</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>1. アプリをインストール</h3>
+            <p>最新版をダウンロードし、DMG を開いて KotoType.app を Applications にドラッグします。</p>
+          </article>
+          <article class="card">
+            <h3>2. FFmpeg をインストール（必須）</h3>
+            <p>FFmpeg は同梱されません。1度インストールし、ターミナルで利用可能か確認します。</p>
+            <pre class="command"><code>brew install ffmpeg
+ffmpeg -version</code></pre>
+          </article>
+          <article class="card">
+            <h3>3. 初回起動チェックを完了</h3>
+            <ol>
+              <li>KotoType を起動すると <strong>Initial Setup</strong> ウィンドウが開きます。</li>
+              <li><strong>Grant Accessibility</strong> を押し、System Settings で KotoType を有効化します。</li>
+              <li><strong>Grant Microphone</strong> を押し、マイクアクセスを許可します。</li>
+              <li><strong>Grant Screen Recording</strong> を押し、KotoType を有効化します。</li>
+              <li>必須チェックがすべて通るまで <strong>Re-check</strong> を押し、最後に <strong>Finish setup and start</strong> を押します。</li>
+            </ol>
+          </article>
+          <article class="card">
+            <h3>4. 最初の音声入力を実行</h3>
+            <ol>
+              <li>出力したいテキスト欄を任意のアプリでクリックします。</li>
+              <li>ホットキー（既定: <code>⌘+⌥</code>）を押し続けて録音を開始します。</li>
+              <li>ホットキーを押している間に話します。</li>
+              <li>ホットキーを離して録音を停止し、文字起こしを開始します。</li>
+              <li>数秒待つと、認識結果がカーソル位置に挿入されます。</li>
+            </ol>
+          </article>
+        </div>
+      </section>
+
+      <section class="demo reveal">
+        <h2>5秒で流れを確認</h2>
+        <p class="section-copy">
+          録音の流れはシンプルです。ホットキーを押す、話す、離す。すると文字が挿入されます。
+        </p>
+        <div class="demo-strip" aria-label="簡易ビジュアルガイド">
+          <div class="demo-step demo-step-hold">
+            <span class="demo-step-label">ホットキーを押す</span>
+            <span class="hotkey-visual" aria-hidden="true">
+              <span class="keycap">⌘</span>
+              <span class="key-plus">+</span>
+              <span class="keycap">⌥</span>
+            </span>
+            <span class="demo-step-sub">既定: ⌘+⌥</span>
+          </div>
+          <div class="demo-step">話す</div>
+          <div class="demo-step demo-step-release">
+            <span class="demo-step-label">ホットキーを離す</span>
+            <span class="hotkey-visual" aria-hidden="true">
+              <span class="keycap">⌘</span>
+              <span class="key-plus">+</span>
+              <span class="keycap">⌥</span>
+            </span>
+            <span class="demo-step-sub">指を離すと録音停止</span>
+          </div>
+          <div class="demo-step">文字を挿入</div>
+        </div>
+      </section>
+
+      <section class="strengths">
+        <h2 class="reveal">KotoType が選ばれる理由</h2>
+        <div class="grid">
+          <article class="card reveal">
+            <h3>どのアプリにも直接入力</h3>
+            <p>
+              グローバルホットキーを押して話し、離すだけで文字起こし結果をアクティブなカーソル位置に挿入できます。
+            </p>
+          </article>
+          <article class="card reveal">
+            <h3>実環境の音声に強い</h3>
+            <p>
+              ノイズ低減、正規化、自動ゲイン処理により、騒がしい環境や小さい声でも文字起こし品質を安定させます。
+            </p>
+          </article>
+          <article class="card reveal">
+            <h3>ローカルファースト設計</h3>
+            <p>
+              ローカル処理を前提にした設計で、必須のクラウド利用なしに高速かつプライバシー重視で使えます。
+            </p>
+          </article>
+          <article class="card reveal">
+            <h3>毎日使える実用機能</h3>
+            <p>
+              メニューバーUX、セットアップチェック、履歴管理、音声ファイル取り込み、ログイン時起動に対応します。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="flow reveal">
+        <h2>30秒で使い始める</h2>
+        <ol>
+          <li>最新版をダウンロードし、KotoType を Applications に移動します。</li>
+          <li>FFmpeg をインストールします: <code>brew install ffmpeg</code>。</li>
+          <li>KotoType を起動し、Initial Setup のチェックを完了します。</li>
+          <li>テキスト欄にフォーカスし、ホットキーを押しながら話して、離すと入力されます。</li>
+        </ol>
+      </section>
+
+      <section class="flow reveal" id="first-recording">
+        <h2>最初の録音ガイド</h2>
+        <ol>
+          <li>セットアップ完了後、KotoType がメニューバーで起動中であることを確認します。</li>
+          <li>入力先アプリで編集可能なテキスト欄にフォーカスします。</li>
+          <li>設定済みホットキー（既定: <code>⌘+⌥</code>）を押し続けます。</li>
+          <li>押している間に話し、離すと文字起こしが開始されます。</li>
+          <li>処理完了後、KotoType がアクティブなカーソル位置へ文字を挿入します。</li>
+          <li>挿入されない場合は Accessibility 権限とカーソルフォーカスを再確認します。</li>
+        </ol>
+      </section>
+
+      <section class="flow reveal">
+        <h2>セットアップ後の3アクション</h2>
+        <ol>
+          <li>KotoType に入力させたいテキスト欄をクリックします。</li>
+          <li>ホットキーを押しながら話します（押している間だけ録音）。</li>
+          <li>ホットキーを離し、自動で文字が挿入されるまで待ちます。</li>
+        </ol>
+      </section>
+
+      <section class="setup reveal">
+        <h2>未署名アプリの起動（macOS 26 / 15 / 14）</h2>
+        <p class="section-copy">
+          KotoType は現在、Apple Developer 署名なしで配布されています。macOS に起動をブロックされた場合は、以下の Gatekeeper 手順で許可してください。
+        </p>
+        <div class="grid">
+          <article class="card">
+            <h3>macOS 26</h3>
+            <ol>
+              <li>Finder から一度 KotoType を開こうとします。</li>
+              <li>System Settings &gt; Privacy &amp; Security を開きます。</li>
+              <li>Security 内の <strong>Open Anyway</strong> を押して許可します。</li>
+            </ol>
+            <p><a href="https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac" target="_blank" rel="noreferrer">Appleガイド</a></p>
+          </article>
+          <article class="card">
+            <h3>macOS 15 / 14</h3>
+            <ol>
+              <li>Finder から一度 KotoType を開こうとします。</li>
+              <li>System Settings &gt; Privacy &amp; Security を開きます。</li>
+              <li>Security 内の <strong>Open Anyway</strong> を押して許可します。</li>
+            </ol>
+            <p><a href="https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac" target="_blank" rel="noreferrer">Appleガイド</a></p>
+          </article>
+        </div>
+        <p class="section-copy">Apple公式の回避手順は Gatekeeper（Privacy &amp; Security）で実施し、ファイアウォール設定ではありません。</p>
+      </section>
+
+      <section class="privacy reveal">
+        <h2>プライバシー</h2>
+        <p class="section-copy">
+          KotoType はローカルファーストで動作するよう設計されています。コア機能に必須のクラウドアップロードはありません。
+        </p>
+      </section>
+
+      <section class="faq reveal">
+        <h2>FAQ</h2>
+        <details>
+          <summary>KotoType がブロックされて起動できません。どうすればよいですか？</summary>
+          <p>System Settings &gt; Privacy &amp; Security で KotoType の <code>Open Anyway</code> を押し、再度アプリを開いてください。</p>
+        </details>
+        <details>
+          <summary>ホットキーで録音が始まりません。最初に何を確認すべきですか？</summary>
+          <p>Accessibility 権限を再確認し、System Settings &gt; Privacy &amp; Security &gt; Accessibility で KotoType が有効か確認してください。</p>
+        </details>
+        <details>
+          <summary>録音は止まるのに文字が挿入されません。なぜですか？</summary>
+          <p>入力先アプリで編集可能カーソルが有効か確認し、セットアップ画面から Accessibility 権限を再チェックしてください。</p>
+        </details>
+        <details>
+          <summary>FFmpeg はどうやってインストールしますか？</summary>
+          <p>Terminal で <code>brew install ffmpeg</code> を実行し、<code>ffmpeg -version</code> で確認します。</p>
+        </details>
+        <details>
+          <summary>KotoType は音声をクラウドに送信しますか？</summary>
+          <p>コア利用はローカルファーストで、必須のクラウドアップロードはありません。</p>
+        </details>
+      </section>
+
+      <section class="support-grid reveal">
+        <article class="card">
+          <h3>トラブルシューティング</h3>
+          <p>セットアップや認識がうまくいかない場合は、まずトラブルシューティングとサポートガイドを確認してください。</p>
+          <a href="https://github.com/ymuichiro/koto-type#troubleshooting" target="_blank" rel="noreferrer">トラブルシューティングを開く</a>
+        </article>
+        <article class="card">
+          <h3>最新アップデート</h3>
+          <p>最新のリリースノート、既知の制限、修正状況を確認できます。</p>
+          <a href="https://github.com/ymuichiro/koto-type/releases" target="_blank" rel="noreferrer">リリースを見る</a>
+        </article>
+      </section>
+
+      <section class="cta-block reveal">
+        <h2>KotoType を試してみますか？</h2>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/ymuichiro/koto-type/releases/latest" target="_blank" rel="noreferrer">ダウンロード</a>
+          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type" target="_blank" rel="noreferrer">GitHubで見る</a>
+          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type#install-ffmpeg-required" target="_blank" rel="noreferrer">FFmpegガイド</a>
+          <a class="btn btn-ghost btn-inline" href="https://github.com/ymuichiro/koto-type#basic-operation" target="_blank" rel="noreferrer">基本操作</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer reveal">
+      <p>MIT License のオープンソースです。</p>
+      <a href="https://github.com/ymuichiro/koto-type" target="_blank" rel="noreferrer">ソースコードを見る</a>
+    </footer>
+
+    <script src="../script.js"></script>
+  </body>
+</html>

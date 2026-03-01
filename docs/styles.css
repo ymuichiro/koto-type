@@ -101,8 +101,43 @@ main,
   opacity: 0.92;
 }
 
-.site-header .btn-ghost {
+.lang-switch {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lang-link {
+  text-decoration: none;
+  font-family: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.lang-link:hover {
+  color: var(--text);
+}
+
+.lang-link.active {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.lang-divider {
+  color: #7f95a4;
+  font-size: 0.76rem;
+}
+
+.site-header .header-github {
+  margin-left: 0.2rem;
 }
 
 .hero {
@@ -535,6 +570,15 @@ h2 {
 }
 
 @media (max-width: 760px) {
+  .site-header {
+    flex-wrap: wrap;
+    row-gap: 0.55rem;
+  }
+
+  .site-header .header-github {
+    margin-left: 0;
+  }
+
   .grid {
     grid-template-columns: 1fr;
     gap: 1rem;
