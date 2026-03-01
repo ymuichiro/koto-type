@@ -227,6 +227,7 @@ ffmpeg -version</code></pre>
             <p>
               Hold a global hotkey while speaking, then release to transcribe and insert text at the active cursor position.
               While recording/processing, the indicator shows a realtime preview of recognized text (display-only).
+              If you start another recording while a previous one is still finalizing, KotoType keeps each recording isolated and finalizes them in stop order.
             </p>
           </article>
           <article class="card reveal">
@@ -268,6 +269,7 @@ ffmpeg -version</code></pre>
           <li>Hold your configured hotkey (default: <code>⌘+⌥</code>).</li>
           <li>Speak while holding the hotkey. The indicator shows a realtime preview while recording.</li>
           <li>Release the hotkey to finalize. KotoType inserts only the finalized transcription at the active cursor.</li>
+          <li>If you start another recording before finalization completes, each recording is finalized independently in stop order.</li>
           <li>If text is not inserted, re-check Accessibility permission and cursor focus.</li>
         </ol>
       </section>
