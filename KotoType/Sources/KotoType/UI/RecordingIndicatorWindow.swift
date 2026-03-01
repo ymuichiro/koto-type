@@ -25,7 +25,7 @@ class RecordingIndicatorWindow: NSPanel {
         self.level = .floating
         self.isMovable = false
         self.isMovableByWindowBackground = false
-        self.hasShadow = true
+        self.hasShadow = false
         self.backgroundColor = .clear
         self.isOpaque = false
         

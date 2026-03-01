@@ -72,22 +72,34 @@ private struct IndicatorBackground: View {
                 )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(borderColor, lineWidth: 1.0)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.14),
+                                Color.white.opacity(0.03),
+                                Color.clear,
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .padding(1)
             )
-            .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+            .shadow(color: accentColor.opacity(0.12), radius: 8, x: 0, y: 2)
+            .shadow(color: .black.opacity(0.22), radius: 8, x: 0, y: 4)
     }
 
-    private var borderColor: Color {
+    private var accentColor: Color {
         switch state {
         case .recording:
-            return Color.red.opacity(0.55)
+            return .red
         case .processing:
-            return Color.blue.opacity(0.55)
+            return .blue
         case .completed:
-            return Color.green.opacity(0.55)
+            return .green
         case .attention:
-            return Color.orange.opacity(0.55)
+            return .orange
         }
     }
 }
