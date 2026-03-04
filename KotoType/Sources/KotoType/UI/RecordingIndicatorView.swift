@@ -11,6 +11,7 @@ struct RecordingIndicatorView: View {
     let state: IndicatorState
     let progressText: String?
     private static let outerPadding: CGFloat = 6
+    private static let contentClipCornerRadius: CGFloat = 13
 
     init(state: IndicatorState, progressText: String? = nil) {
         self.state = state
@@ -24,7 +25,7 @@ struct RecordingIndicatorView: View {
         }()
 
         if hasProgress {
-            return CGSize(width: 286, height: 70)
+            return CGSize(width: 320, height: 76)
         }
 
         let width: CGFloat = (state == .recording || state == .processing) ? 92 : 124
@@ -45,21 +46,36 @@ struct RecordingIndicatorView: View {
         ZStack {
             IndicatorBackground(state: state)
 
-            switch state {
-            case .recording:
-                RecordingContent(progressText: progressText)
-            case .processing:
-                ProcessingContent(progressText: progressText)
-            case .completed:
-                CompletedContent()
-            case .attention:
-                AttentionContent()
-            }
+            stateContent
+                .frame(width: preferredFrameSize.width, height: preferredFrameSize.height)
+                .clipShape(RoundedRectangle(cornerRadius: Self.contentClipCornerRadius, style: .continuous))
         }
         .frame(width: preferredFrameSize.width, height: preferredFrameSize.height)
         .padding(Self.outerPadding)
         .animation(.easeInOut(duration: 0.2), value: state)
         .animation(.easeInOut(duration: 0.2), value: progressText ?? "")
+    }
+
+    @ViewBuilder
+    private var stateContent: some View {
+        switch state {
+        case .recording:
+            RecordingContent(progressText: progressText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+        case .processing:
+            ProcessingContent(progressText: progressText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+        case .completed:
+            CompletedContent()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .attention:
+            AttentionContent()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
     }
 }
 
