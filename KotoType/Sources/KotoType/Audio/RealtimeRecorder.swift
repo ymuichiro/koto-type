@@ -15,6 +15,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     var batchInterval: TimeInterval
     var silenceThreshold: Float
     var silenceDuration: TimeInterval
+    var previewSplitIntervalCap: TimeInterval = 2.5
     
     private var lastSoundTime: TimeInterval = 0
     private var recordingStartTime: TimeInterval = 0
@@ -112,7 +113,13 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         }
         
         let timeSinceLastSound = currentTime - lastSoundTime
-        let shouldSplit = elapsedTime >= batchInterval && timeSinceLastSound >= silenceDuration
+        let shouldSplit = Self.shouldSplitChunk(
+            elapsedTime: elapsedTime,
+            timeSinceLastSound: timeSinceLastSound,
+            batchInterval: batchInterval,
+            silenceDuration: silenceDuration,
+            previewSplitIntervalCap: previewSplitIntervalCap
+        )
         
         if shouldSplit && hasRecordedContent && audioBuffer.count >= 4096 {
             Logger.shared.log("RealtimeRecorder: splitting batch - elapsedTime=\(String(format: "%.1f", elapsedTime))s, timeSinceLastSound=\(String(format: "%.1f", timeSinceLastSound))s", level: .debug)
@@ -166,9 +173,11 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
                 "RealtimeRecorder: created audio file: \(filePath) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(currentFileCount))",
                 level: .info
             )
-            
+
+            let onFileCreatedHandler = onFileCreated
             DispatchQueue.main.async { [weak self] in
-                self?.onFileCreated?(fileURL, currentFileCount)
+                guard self != nil else { return }
+                onFileCreatedHandler?(fileURL, currentFileCount)
             }
             
             audioBuffer.removeAll()
@@ -194,5 +203,31 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             return 16_000.0
         }
         return sampleRate
+    }
+
+    static func shouldSplitChunk(
+        elapsedTime: TimeInterval,
+        timeSinceLastSound: TimeInterval,
+        batchInterval: TimeInterval,
+        silenceDuration: TimeInterval,
+        previewSplitIntervalCap: TimeInterval
+    ) -> Bool {
+        let normalizedElapsed = max(0, elapsedTime)
+        let normalizedSilence = max(0, timeSinceLastSound)
+        let normalizedBatchInterval = max(0.1, batchInterval)
+        let normalizedSilenceDuration = max(0, silenceDuration)
+        let normalizedPreviewCap = max(0, previewSplitIntervalCap)
+
+        let splitBySilence = normalizedElapsed >= normalizedBatchInterval &&
+            normalizedSilence >= normalizedSilenceDuration
+
+        let splitByPreviewCap: Bool
+        if normalizedPreviewCap > 0 {
+            splitByPreviewCap = normalizedElapsed >= min(normalizedBatchInterval, normalizedPreviewCap)
+        } else {
+            splitByPreviewCap = false
+        }
+
+        return splitBySilence || splitByPreviewCap
     }
 }

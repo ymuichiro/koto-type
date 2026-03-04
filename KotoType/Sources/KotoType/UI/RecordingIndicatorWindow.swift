@@ -3,9 +3,12 @@ import SwiftUI
 
 class RecordingIndicatorWindow: NSPanel {
     private var hostingController: NSHostingController<RecordingIndicatorView>?
+    private var currentState: IndicatorState = .recording
+    private var currentProgressText: String?
     
     init() {
-        let contentRect = NSRect(x: 0, y: 0, width: 104, height: 72)
+        let initialSize = RecordingIndicatorView.preferredContentSize(for: .recording, progressText: nil)
+        let contentRect = NSRect(x: 0, y: 0, width: initialSize.width, height: initialSize.height)
         
         super.init(
             contentRect: contentRect,
@@ -22,7 +25,7 @@ class RecordingIndicatorWindow: NSPanel {
         self.level = .floating
         self.isMovable = false
         self.isMovableByWindowBackground = false
-        self.hasShadow = true
+        self.hasShadow = false
         self.backgroundColor = .clear
         self.isOpaque = false
         
@@ -32,10 +35,10 @@ class RecordingIndicatorWindow: NSPanel {
     }
     
     private func setupContent() {
-        let view = RecordingIndicatorView(state: .recording)
+        let view = RecordingIndicatorView(state: currentState, progressText: currentProgressText)
         hostingController = NSHostingController(rootView: view)
-        
         self.contentView = hostingController?.view
+        updatePanelSize(state: currentState, progressText: currentProgressText)
     }
     
     private func positionWindow() {
@@ -46,8 +49,8 @@ class RecordingIndicatorWindow: NSPanel {
         let windowHeight = self.contentRect(forFrameRect: self.frame).height
         let margin: CGFloat = 50
         
-        let x = (screenFrame.width - windowWidth) / 2
-        let y = margin
+        let x = screenFrame.origin.x + ((screenFrame.width - windowWidth) / 2)
+        let y = screenFrame.origin.y + margin
         
         self.setFrame(
             NSRect(x: x, y: y, width: windowWidth, height: windowHeight),
@@ -55,41 +58,54 @@ class RecordingIndicatorWindow: NSPanel {
         )
     }
     
-    func showRecording() {
+    private func updatePanelSize(state: IndicatorState, progressText: String?) {
+        let size = RecordingIndicatorView.preferredContentSize(for: state, progressText: progressText)
+        if contentRect(forFrameRect: frame).size != size {
+            setContentSize(size)
+            positionWindow()
+        }
+    }
+
+    private func render(state: IndicatorState, progressText: String?, ensureVisible: Bool) {
+        currentState = state
+        currentProgressText = progressText
+        hostingController?.rootView = RecordingIndicatorView(state: state, progressText: progressText)
+        updatePanelSize(state: state, progressText: progressText)
+        if ensureVisible {
+            orderFrontRegardless()
+            alphaValue = 1.0
+        }
+    }
+
+    func showRecording(progressText: String? = nil) {
         DispatchQueue.main.async {
-            self.orderFrontRegardless()
-            self.alphaValue = 0
-            
-            let view = RecordingIndicatorView(state: .recording)
-            self.hostingController = NSHostingController(rootView: view)
-            self.contentView = self.hostingController?.view
-            
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.3
-                self.animator().alphaValue = 1.0
+            let shouldAnimate = !self.isVisible || self.alphaValue < 0.99
+            self.render(state: .recording, progressText: progressText, ensureVisible: true)
+
+            if shouldAnimate {
+                self.alphaValue = 0
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    self.animator().alphaValue = 1.0
+                }
             }
         }
     }
     
-    func showProcessing() {
+    func showProcessing(progressText: String? = nil) {
         DispatchQueue.main.async {
-            let view = RecordingIndicatorView(state: .processing)
-            self.hostingController = NSHostingController(rootView: view)
-            self.contentView = self.hostingController?.view
+            self.render(state: .processing, progressText: progressText, ensureVisible: true)
         }
     }
 
     func showCompleted(success: Bool) {
         DispatchQueue.main.async {
-            self.orderFrontRegardless()
-            let view = RecordingIndicatorView(state: success ? .completed : .attention)
-            self.hostingController = NSHostingController(rootView: view)
-            self.contentView = self.hostingController?.view
+            self.render(state: success ? .completed : .attention, progressText: nil, ensureVisible: true)
         }
     }
     
     func show() {
-        showRecording()
+        showRecording(progressText: nil)
     }
     
     func hide() {

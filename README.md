@@ -26,6 +26,8 @@ A Mac-native voice-to-text application with high-accuracy transcription powered 
 
 - **Menu Bar Application**: Resides in the menu bar for quick access
 - **Push-to-Talk Hotkey**: Hold your configured hotkey to record, release to transcribe (default: `⌘+⌥`)
+- **Realtime Progress Preview**: During recording/processing, the indicator shows partial text as a preview (display-only)
+- **Session-Safe Finalization**: If you start another recording before a previous one finishes, each recording finalizes independently in stop order (no mixed chunks)
 - **High-Accuracy Transcription**: Powered by OpenAI Whisper with optimized settings
 - **Automatic Text Input**: Automatically types transcribed text at the cursor position
 - **Audio Preprocessing**: Noise reduction with spectral subtraction and normalization
@@ -240,9 +242,10 @@ ffmpeg -version
 3. Click the target text field so the cursor is active.
 4. Hold the configured hotkey (default: **⌘+⌥**) to begin recording.
 5. Keep holding the hotkey while speaking.
-6. Release the hotkey to stop recording and trigger transcription.
-7. Wait for processing to complete; KotoType types the recognized text at the current cursor position.
-8. If no text is inserted, re-check Accessibility permission and confirm the cursor is focused in an editable field.
+6. Release the hotkey to stop recording and trigger finalization.
+7. During recording/processing, the indicator shows a realtime preview; final text insertion happens only after stop/finalization.
+8. If you start another recording before a previous finalize completes, KotoType queues both and finalizes each recording independently in stop order.
+9. If no text is inserted, re-check Accessibility permission and confirm the cursor is focused in an editable field.
 
 #### Other daily operations
 
