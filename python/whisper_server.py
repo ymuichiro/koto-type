@@ -14,6 +14,9 @@ from datetime import datetime
 from math import inf, log10
 import wave
 
+HEALTHCHECK_REQUEST_PREFIX = "__KOTOTYPE_HEALTHCHECK__:"
+HEALTHCHECK_RESPONSE_PREFIX = "__KOTOTYPE_HEALTHCHECK_OK__:"
+
 
 def default_dictionary_path():
     return os.path.expanduser("~/Library/Application Support/koto-type/user_dictionary.json")
@@ -850,6 +853,13 @@ def main():
 
             if not audio_path:
                 log("Empty audio path, skipping")
+                continue
+
+            if audio_path.startswith(HEALTHCHECK_REQUEST_PREFIX):
+                token = audio_path[len(HEALTHCHECK_REQUEST_PREFIX) :]
+                print(f"{HEALTHCHECK_RESPONSE_PREFIX}{token}", file=sys.stdout)
+                sys.stdout.flush()
+                log(f"Health check acknowledged (token={token})")
                 continue
 
             if not os.path.exists(audio_path):

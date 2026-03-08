@@ -1,4 +1,5 @@
 import AppKit
+import Dispatch
 import Foundation
 import os.log
 import UniformTypeIdentifiers
@@ -52,6 +53,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var segmentRouter = RecordingSegmentRouter()
     private let finalizationReadyDelay: TimeInterval = 0.35
     private let completionTimeoutInterval: TimeInterval = 50.0
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+    private var temporaryBatchCleanupTimer: DispatchSourceTimer?
+    private var adaptiveWorkerCap: Int?
+    private var currentRealtimeWorkerCount = 0
+    private var pendingWorkerReconfigure = false
+    private let temporaryBatchDirectoryName = "koto-type-batch-recordings"
+    private let staleBatchFileMaxAge: TimeInterval = 6 * 60 * 60
+    private let temporaryBatchCleanupInterval: TimeInterval = 10 * 60
 
     nonisolated static func resolvedWorkerCount(
         requested: Int,
@@ -130,15 +139,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Starting Python process at: \(scriptPath)", level: .info)
 
         currentSettings = SettingsManager.shared.load()
-        let workerCount = Self.resolvedWorkerCount(requested: currentSettings.parallelism)
-        if workerCount != currentSettings.parallelism {
-            Logger.shared.log(
-                "Worker count clamped from \(currentSettings.parallelism) to \(workerCount) for app-bundle execution",
-                level: .warning
-            )
-        }
-        multiProcessManager?.initialize(count: workerCount, scriptPath: scriptPath)
-        Logger.shared.log("MultiProcessManager initialized with \(workerCount) processes", level: .info)
+        reinitializeRealtimeWorkers(force: true, reason: "initial startup")
+        setupMemoryPressureMonitoring()
+        cleanupStaleTemporaryBatchFiles()
+        startTemporaryBatchCleanupTimer()
         _ = LaunchAtLoginManager.shared.setEnabled(currentSettings.launchAtLogin)
 
         multiProcessManager?.outputReceived = { [weak self] processIndex, output in
@@ -174,8 +178,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if let config = config {
                     Logger.shared.log("AppDelegate: Received hotkeyConfigurationChanged notification: \(config.description)")
                 }
+                let previousParallelism = self.currentSettings.parallelism
                 self.currentSettings = SettingsManager.shared.load()
                 Logger.shared.log("AppDelegate: Reloaded settings - language=\(self.currentSettings.language), temp=\(self.currentSettings.temperature), beam=\(self.currentSettings.beamSize)")
+                if self.currentSettings.parallelism != previousParallelism {
+                    self.pendingWorkerReconfigure = true
+                    self.applyPendingWorkerReconfigureIfPossible()
+                }
             }
         }
     }
@@ -367,6 +376,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             finalizationQueue.remove(sessionID: nextSessionID)
             finalizeSession(sessionID: nextSessionID)
         }
+
+        applyPendingWorkerReconfigureIfPossible()
     }
 
     private func finalizeSession(sessionID: Int) {
@@ -522,17 +533,229 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard didSuspendRealtimeWorkersForImport else { return }
         guard !serverScriptPath.isEmpty else { return }
 
+        didSuspendRealtimeWorkersForImport = false
+        reinitializeRealtimeWorkers(force: true, reason: "resume after imported audio")
+        applyPendingWorkerReconfigureIfPossible()
+    }
+
+    private func effectiveRealtimeWorkerCount(requested: Int) -> Int {
+        var workerCount = Self.resolvedWorkerCount(requested: requested)
+        if let adaptiveWorkerCap {
+            workerCount = min(workerCount, max(1, adaptiveWorkerCap))
+        }
+        return max(1, workerCount)
+    }
+
+    private func reinitializeRealtimeWorkers(force: Bool, reason: String) {
+        guard let multiProcessManager else { return }
+        guard !serverScriptPath.isEmpty else { return }
+
         currentSettings = SettingsManager.shared.load()
-        let workerCount = Self.resolvedWorkerCount(requested: currentSettings.parallelism)
-        if workerCount != currentSettings.parallelism {
+        let requestedWorkerCount = currentSettings.parallelism
+        let bundleResolvedWorkerCount = Self.resolvedWorkerCount(requested: requestedWorkerCount)
+        let effectiveWorkerCount = effectiveRealtimeWorkerCount(requested: requestedWorkerCount)
+
+        if !force && currentRealtimeWorkerCount == effectiveWorkerCount {
+            return
+        }
+
+        if bundleResolvedWorkerCount != requestedWorkerCount {
             Logger.shared.log(
-                "Worker count clamped from \(currentSettings.parallelism) to \(workerCount) for app-bundle execution",
+                "Worker count clamped from \(requestedWorkerCount) to \(bundleResolvedWorkerCount) for app-bundle execution",
                 level: .warning
             )
         }
-        multiProcessManager?.initialize(count: workerCount, scriptPath: serverScriptPath)
-        Logger.shared.log("Resumed realtime transcription workers after file import", level: .info)
-        didSuspendRealtimeWorkersForImport = false
+        if let adaptiveWorkerCap, effectiveWorkerCount != bundleResolvedWorkerCount {
+            Logger.shared.log(
+                "Worker count further limited by adaptive memory-pressure cap: \(bundleResolvedWorkerCount) -> \(effectiveWorkerCount) (cap=\(adaptiveWorkerCap))",
+                level: .warning
+            )
+        }
+
+        multiProcessManager.initialize(count: effectiveWorkerCount, scriptPath: serverScriptPath)
+        currentRealtimeWorkerCount = effectiveWorkerCount
+        Logger.shared.log(
+            "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason))",
+            level: .info
+        )
+    }
+
+    private func setupMemoryPressureMonitoring() {
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
+
+        let source = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            let event = source.data
+            Task { @MainActor [weak self] in
+                self?.handleMemoryPressureEvent(event)
+            }
+        }
+        source.resume()
+        memoryPressureSource = source
+    }
+
+    private func handleMemoryPressureEvent(_ event: DispatchSource.MemoryPressureEvent) {
+        guard event.contains(.warning) || event.contains(.critical) else {
+            return
+        }
+
+        let eventDescription: String
+        if event.contains(.critical) {
+            eventDescription = "critical"
+        } else if event.contains(.warning) {
+            eventDescription = "warning"
+        } else {
+            eventDescription = "unknown"
+        }
+
+        let baselineWorkerCount = max(1, currentRealtimeWorkerCount)
+        let targetCap = event.contains(.critical)
+            ? 1
+            : max(1, baselineWorkerCount - 1)
+
+        if let currentCap = adaptiveWorkerCap, targetCap >= currentCap {
+            Logger.shared.log(
+                "Memory pressure event (\(eventDescription)) received, but worker cap already at \(currentCap)",
+                level: .warning
+            )
+            return
+        }
+
+        adaptiveWorkerCap = targetCap
+        pendingWorkerReconfigure = true
+        Logger.shared.log(
+            "Memory pressure event (\(eventDescription)) detected; scheduling worker cap update to \(targetCap)",
+            level: .warning
+        )
+        applyPendingWorkerReconfigureIfPossible()
+    }
+
+    private func applyPendingWorkerReconfigureIfPossible() {
+        guard pendingWorkerReconfigure else {
+            return
+        }
+        guard !isRecording else {
+            return
+        }
+        guard finalizationQueue.isEmpty else {
+            return
+        }
+        guard !isImportingAudio else {
+            return
+        }
+        guard !didSuspendRealtimeWorkersForImport else {
+            return
+        }
+
+        pendingWorkerReconfigure = false
+        reinitializeRealtimeWorkers(force: true, reason: "adaptive reconfiguration")
+    }
+
+    private func startTemporaryBatchCleanupTimer() {
+        stopTemporaryBatchCleanupTimer()
+
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(
+            deadline: .now() + temporaryBatchCleanupInterval,
+            repeating: temporaryBatchCleanupInterval
+        )
+        timer.setEventHandler { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.cleanupStaleTemporaryBatchFiles()
+            }
+        }
+        timer.resume()
+        temporaryBatchCleanupTimer = timer
+    }
+
+    private func stopTemporaryBatchCleanupTimer() {
+        temporaryBatchCleanupTimer?.cancel()
+        temporaryBatchCleanupTimer = nil
+    }
+
+    private func cleanupStaleTemporaryBatchFiles() {
+        let fileManager = FileManager.default
+        let directoryURL = fileManager.temporaryDirectory
+            .appendingPathComponent(temporaryBatchDirectoryName, isDirectory: true)
+
+        guard fileManager.fileExists(atPath: directoryURL.path) else {
+            return
+        }
+
+        let activePaths = Set(
+            pendingSegmentFiles.values.map { $0.standardizedFileURL.path }
+        )
+        let now = Date()
+        var removedCount = 0
+
+        do {
+            let fileURLs = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: [
+                    .isRegularFileKey,
+                    .contentModificationDateKey,
+                    .creationDateKey,
+                ],
+                options: [.skipsHiddenFiles]
+            )
+
+            for fileURL in fileURLs {
+                let standardizedPath = fileURL.standardizedFileURL.path
+                if activePaths.contains(standardizedPath) {
+                    continue
+                }
+
+                let values = try fileURL.resourceValues(forKeys: [
+                    .isRegularFileKey,
+                    .contentModificationDateKey,
+                    .creationDateKey,
+                ])
+                guard values.isRegularFile == true else {
+                    continue
+                }
+
+                let lastUpdatedAt = values.contentModificationDate ?? values.creationDate ?? .distantPast
+                guard now.timeIntervalSince(lastUpdatedAt) >= staleBatchFileMaxAge else {
+                    continue
+                }
+
+                do {
+                    try fileManager.removeItem(at: fileURL)
+                    removedCount += 1
+                } catch {
+                    Logger.shared.log(
+                        "Failed to remove stale temporary batch file: \(fileURL.path), error: \(error)",
+                        level: .warning
+                    )
+                }
+            }
+
+            if removedCount > 0 {
+                Logger.shared.log(
+                    "Removed \(removedCount) stale temporary batch file(s) from \(directoryURL.path)",
+                    level: .info
+                )
+            }
+
+            let remaining = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+            if remaining.isEmpty {
+                try fileManager.removeItem(at: directoryURL)
+            }
+        } catch {
+            Logger.shared.log(
+                "Failed to clean stale temporary batch directory \(directoryURL.path): \(error)",
+                level: .warning
+            )
+        }
     }
 
     private func cleanupSegmentFile(globalIndex: Int) {
@@ -569,6 +792,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        stopTemporaryBatchCleanupTimer()
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
         for session in sessionByID.values {
             session.cancelFinalizationReadyWorkItem()
             session.cancelCompletionTimeout()
@@ -578,6 +804,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         indicatorPresentation.reset()
         hotkeyManager?.cleanup()
         cleanupAllPendingSegmentFiles()
+        cleanupStaleTemporaryBatchFiles()
         multiProcessManager?.stop()
         importedAudioTranscriptionManager?.stop()
     }

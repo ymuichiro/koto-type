@@ -4,11 +4,16 @@ final class MultiProcessManager: @unchecked Sendable {
     private var processes: [Int: any PythonProcessManaging] = [:]
     private var idleProcesses: Set<Int> = []
     private var segmentContextByProcess: [Int: SegmentContext] = [:]
+    private var healthCheckContextByProcess: [Int: HealthCheckContext] = [:]
+    private var lastHealthCheckAtByProcess: [Int: Date] = [:]
+    private var processStartedAtByIndex: [Int: Date] = [:]
     private var recoveryInProgress: Set<Int> = []
     private var scheduledRecoveries: Set<Int> = []
     private var idleTerminationHistory: [Int: [Date]] = [:]
     private var startFailureHistory: [Int: [Date]] = [:]
     private var recoverySuppressedUntil: [Int: Date] = [:]
+    private var watchdogTimer: DispatchSourceTimer?
+    private var healthCheckSequence: UInt64 = 0
     private var processLock = NSLock()
     private var scriptPath: String = ""
     private let maxRetryCount = 2
@@ -22,8 +27,16 @@ final class MultiProcessManager: @unchecked Sendable {
     private let startFailureCooldownSeconds: TimeInterval = 300
     private let startFailureBaseDelaySeconds: TimeInterval = 0.5
     private let maxNoIdleQueueAttempts = 200
+    private let segmentProcessingTimeoutSeconds: TimeInterval
+    private let watchdogIntervalSeconds: TimeInterval
+    private let healthCheckIntervalSeconds: TimeInterval
+    private let healthCheckTimeoutSeconds: TimeInterval
+    private let healthCheckStartupGraceSeconds: TimeInterval
     private let processManagerFactory: () -> any PythonProcessManaging
     private var isStopping = false
+
+    private static let healthCheckRequestPrefix = "__KOTOTYPE_HEALTHCHECK__:"
+    private static let healthCheckResponsePrefix = "__KOTOTYPE_HEALTHCHECK_OK__:"
     
     var outputReceived: ((Int, String) -> Void)?
     var segmentComplete: ((Int, String) -> Void)?
@@ -33,12 +46,27 @@ final class MultiProcessManager: @unchecked Sendable {
         // Auto-restarting immediately can amplify the pressure and create a restart storm.
         status != 9
     }
-    init(processManagerFactory: @escaping () -> any PythonProcessManaging = { PythonProcessManager() }) {
+
+    init(
+        processManagerFactory: @escaping () -> any PythonProcessManaging = { PythonProcessManager() },
+        segmentProcessingTimeoutSeconds: TimeInterval = 60.0,
+        watchdogIntervalSeconds: TimeInterval = 2.0,
+        healthCheckIntervalSeconds: TimeInterval = 30.0,
+        healthCheckTimeoutSeconds: TimeInterval = 8.0,
+        healthCheckStartupGraceSeconds: TimeInterval = 12.0
+    ) {
         self.processManagerFactory = processManagerFactory
+        self.segmentProcessingTimeoutSeconds = max(0.1, segmentProcessingTimeoutSeconds)
+        self.watchdogIntervalSeconds = max(0.1, watchdogIntervalSeconds)
+        self.healthCheckIntervalSeconds = max(0.1, healthCheckIntervalSeconds)
+        self.healthCheckTimeoutSeconds = max(0.1, healthCheckTimeoutSeconds)
+        self.healthCheckStartupGraceSeconds = max(0.1, healthCheckStartupGraceSeconds)
     }
     
     func initialize(count: Int, scriptPath: String) {
         Logger.shared.log("MultiProcessManager: initialize called - count=\(count), scriptPath=\(scriptPath)", level: .info)
+        stopWatchdog()
+
         var oldProcesses: [Int: any PythonProcessManaging] = [:]
         processLock.lock()
         oldProcesses = processes
@@ -47,6 +75,10 @@ final class MultiProcessManager: @unchecked Sendable {
         self.processes.removeAll()
         self.idleProcesses.removeAll()
         self.segmentContextByProcess.removeAll()
+        self.healthCheckContextByProcess.removeAll()
+        self.lastHealthCheckAtByProcess.removeAll()
+        self.processStartedAtByIndex.removeAll()
+        self.healthCheckSequence = 0
         self.recoveryInProgress.removeAll()
         self.scheduledRecoveries.removeAll()
         self.idleTerminationHistory.removeAll()
@@ -68,6 +100,7 @@ final class MultiProcessManager: @unchecked Sendable {
         let initializedCount = processes.count
         processLock.unlock()
         Logger.shared.log("MultiProcessManager: initialized with \(initializedCount) processes", level: .info)
+        startWatchdog()
     }
     
     func processFile(url: URL, index: Int, settings: AppSettings, screenshotContext: String? = nil, retryCount: Int = 0, queueAttempt: Int = 0) {
@@ -122,64 +155,93 @@ final class MultiProcessManager: @unchecked Sendable {
     }
     
     private func assignProcess(processIndex: Int, context: SegmentContext) {
+        var assignedContext = context
+        assignedContext.assignedAt = Date()
+
         processLock.lock()
         idleProcesses.remove(processIndex)
-        segmentContextByProcess[processIndex] = context
+        healthCheckContextByProcess.removeValue(forKey: processIndex)
+        segmentContextByProcess[processIndex] = assignedContext
         processLock.unlock()
         
         guard let manager = processes[processIndex] else {
             Logger.shared.log("MultiProcessManager: process \(processIndex) not found", level: .error)
-            handleProcessFailure(processIndex: processIndex, context: context, reason: "manager_not_found")
+            handleProcessFailure(processIndex: processIndex, context: assignedContext, reason: "manager_not_found")
             return
         }
         
         guard manager.isRunning() else {
             Logger.shared.log("MultiProcessManager: process \(processIndex) is not running", level: .error)
-            handleProcessFailure(processIndex: processIndex, context: context, reason: "process_not_running")
+            handleProcessFailure(processIndex: processIndex, context: assignedContext, reason: "process_not_running")
             return
         }
         
         Logger.shared.log(
-            "MultiProcessManager: process \(processIndex) processing file \(context.index): \(context.url.path) (retry=\(context.retryCount))",
+            "MultiProcessManager: process \(processIndex) processing file \(assignedContext.index): \(assignedContext.url.path) (retry=\(assignedContext.retryCount))",
             level: .info
         )
         
         let sendSucceeded = manager.sendInput(
-            context.url.path,
-            language: context.settings.language,
-            temperature: context.settings.temperature,
-            beamSize: context.settings.beamSize,
-            noSpeechThreshold: context.settings.noSpeechThreshold,
-            compressionRatioThreshold: context.settings.compressionRatioThreshold,
-            task: context.settings.task,
-            bestOf: context.settings.bestOf,
-            vadThreshold: context.settings.vadThreshold,
-            autoPunctuation: context.settings.autoPunctuation,
-            autoGainEnabled: context.settings.autoGainEnabled,
-            autoGainWeakThresholdDbfs: context.settings.autoGainWeakThresholdDbfs,
-            autoGainTargetPeakDbfs: context.settings.autoGainTargetPeakDbfs,
-            autoGainMaxDb: context.settings.autoGainMaxDb,
-            screenshotContext: context.screenshotContext
+            assignedContext.url.path,
+            language: assignedContext.settings.language,
+            temperature: assignedContext.settings.temperature,
+            beamSize: assignedContext.settings.beamSize,
+            noSpeechThreshold: assignedContext.settings.noSpeechThreshold,
+            compressionRatioThreshold: assignedContext.settings.compressionRatioThreshold,
+            task: assignedContext.settings.task,
+            bestOf: assignedContext.settings.bestOf,
+            vadThreshold: assignedContext.settings.vadThreshold,
+            autoPunctuation: assignedContext.settings.autoPunctuation,
+            autoGainEnabled: assignedContext.settings.autoGainEnabled,
+            autoGainWeakThresholdDbfs: assignedContext.settings.autoGainWeakThresholdDbfs,
+            autoGainTargetPeakDbfs: assignedContext.settings.autoGainTargetPeakDbfs,
+            autoGainMaxDb: assignedContext.settings.autoGainMaxDb,
+            screenshotContext: assignedContext.screenshotContext
         )
 
         if !sendSucceeded {
-            handleProcessFailure(processIndex: processIndex, context: context, reason: "send_input_failed")
+            handleProcessFailure(processIndex: processIndex, context: assignedContext, reason: "send_input_failed")
         }
     }
     
     private func handleOutput(processIndex: Int, output: String) {
         Logger.shared.log("MultiProcessManager: handleOutput called - processIndex=\(processIndex), output='\(output)'", level: .info)
+        let now = Date()
         
         processLock.lock()
+        if let healthCheckContext = healthCheckContextByProcess.removeValue(forKey: processIndex) {
+            idleProcesses.insert(processIndex)
+            let expectedResponse = Self.healthCheckResponsePrefix + healthCheckContext.token
+            if output == expectedResponse {
+                idleTerminationHistory.removeValue(forKey: processIndex)
+                recoverySuppressedUntil.removeValue(forKey: processIndex)
+                lastHealthCheckAtByProcess[processIndex] = now
+                processLock.unlock()
+                Logger.shared.log("MultiProcessManager: health check passed for process \(processIndex)", level: .debug)
+                return
+            }
+            processLock.unlock()
+            Logger.shared.log(
+                "MultiProcessManager: invalid health check response from process \(processIndex): '\(output)'",
+                level: .warning
+            )
+            recoverProcess(processIndex: processIndex)
+            return
+        }
+
         guard let context = segmentContextByProcess[processIndex] else {
             processLock.unlock()
-            Logger.shared.log("MultiProcessManager: no segment index for process \(processIndex)", level: .error)
+            Logger.shared.log(
+                "MultiProcessManager: stale output without in-flight segment from process \(processIndex); ignoring",
+                level: .warning
+            )
             return
         }
         segmentContextByProcess.removeValue(forKey: processIndex)
         idleProcesses.insert(processIndex)
         idleTerminationHistory.removeValue(forKey: processIndex)
         recoverySuppressedUntil.removeValue(forKey: processIndex)
+        lastHealthCheckAtByProcess[processIndex] = now
         processLock.unlock()
 
         DispatchQueue.main.async { [weak self] in
@@ -192,6 +254,9 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.lock()
         let shouldHandle = !isStopping && processes[processIndex] != nil
         let context = segmentContextByProcess[processIndex]
+        healthCheckContextByProcess.removeValue(forKey: processIndex)
+        processStartedAtByIndex.removeValue(forKey: processIndex)
+        lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         if context == nil {
             idleProcesses.remove(processIndex)
         }
@@ -229,6 +294,9 @@ final class MultiProcessManager: @unchecked Sendable {
 
         processLock.lock()
         segmentContextByProcess.removeValue(forKey: processIndex)
+        healthCheckContextByProcess.removeValue(forKey: processIndex)
+        processStartedAtByIndex.removeValue(forKey: processIndex)
+        lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         processLock.unlock()
 
         recoverProcess(processIndex: processIndex)
@@ -243,6 +311,9 @@ final class MultiProcessManager: @unchecked Sendable {
         processes.removeValue(forKey: processIndex)
         idleProcesses.remove(processIndex)
         segmentContextByProcess.removeValue(forKey: processIndex)
+        healthCheckContextByProcess.removeValue(forKey: processIndex)
+        processStartedAtByIndex.removeValue(forKey: processIndex)
+        lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         recoverySuppressedUntil[processIndex] = now.addingTimeInterval(fatalIdleTerminationCooldownSeconds)
         processLock.unlock()
 
@@ -344,6 +415,9 @@ final class MultiProcessManager: @unchecked Sendable {
             processes.removeValue(forKey: processIndex)
             idleProcesses.remove(processIndex)
             segmentContextByProcess.removeValue(forKey: processIndex)
+            healthCheckContextByProcess.removeValue(forKey: processIndex)
+            processStartedAtByIndex.removeValue(forKey: processIndex)
+            lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
             processLock.unlock()
             manager.outputReceived = nil
             manager.processTerminated = nil
@@ -362,6 +436,8 @@ final class MultiProcessManager: @unchecked Sendable {
             idleProcesses.insert(processIndex)
             startFailureHistory.removeValue(forKey: processIndex)
             recoverySuppressedUntil.removeValue(forKey: processIndex)
+            processStartedAtByIndex[processIndex] = now
+            lastHealthCheckAtByProcess[processIndex] = now
             processLock.unlock()
             Logger.shared.log("MultiProcessManager: process \(processIndex) initialized", level: .debug)
             return
@@ -370,6 +446,9 @@ final class MultiProcessManager: @unchecked Sendable {
         processes.removeValue(forKey: processIndex)
         idleProcesses.remove(processIndex)
         segmentContextByProcess.removeValue(forKey: processIndex)
+        healthCheckContextByProcess.removeValue(forKey: processIndex)
+        processStartedAtByIndex.removeValue(forKey: processIndex)
+        lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         processLock.unlock()
         handleProcessStartFailure(processIndex: processIndex, now: now)
     }
@@ -420,6 +499,9 @@ final class MultiProcessManager: @unchecked Sendable {
         oldManager = processes[processIndex]
         idleProcesses.remove(processIndex)
         segmentContextByProcess.removeValue(forKey: processIndex)
+        healthCheckContextByProcess.removeValue(forKey: processIndex)
+        processStartedAtByIndex.removeValue(forKey: processIndex)
+        lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         processLock.unlock()
 
         oldManager?.outputReceived = nil
@@ -532,15 +614,187 @@ final class MultiProcessManager: @unchecked Sendable {
             self.recoverProcess(processIndex: processIndex)
         }
     }
+
+    private func startWatchdog() {
+        processLock.lock()
+        if watchdogTimer != nil {
+            processLock.unlock()
+            return
+        }
+        processLock.unlock()
+
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + watchdogIntervalSeconds, repeating: watchdogIntervalSeconds)
+        timer.setEventHandler { [weak self] in
+            self?.runWatchdog()
+        }
+        timer.resume()
+
+        processLock.lock()
+        watchdogTimer = timer
+        processLock.unlock()
+    }
+
+    private func stopWatchdog() {
+        processLock.lock()
+        let timer = watchdogTimer
+        watchdogTimer = nil
+        processLock.unlock()
+        timer?.cancel()
+    }
+
+    private func runWatchdog() {
+        let now = Date()
+        var timedOutSegments: [(Int, SegmentContext)] = []
+        var timedOutHealthChecks: [(Int, String)] = []
+        var stoppedProcessesWithoutContext: [Int] = []
+        var healthChecksToSend: [(Int, String)] = []
+
+        processLock.lock()
+        guard !isStopping else {
+            processLock.unlock()
+            return
+        }
+
+        for processIndex in Array(segmentContextByProcess.keys) {
+            guard let context = segmentContextByProcess[processIndex] else { continue }
+            if now.timeIntervalSince(context.assignedAt) >= segmentProcessingTimeoutSeconds {
+                segmentContextByProcess.removeValue(forKey: processIndex)
+                idleProcesses.remove(processIndex)
+                timedOutSegments.append((processIndex, context))
+            }
+        }
+
+        for processIndex in Array(healthCheckContextByProcess.keys) {
+            guard let healthContext = healthCheckContextByProcess[processIndex] else { continue }
+            if now.timeIntervalSince(healthContext.sentAt) >= healthCheckTimeoutSeconds {
+                healthCheckContextByProcess.removeValue(forKey: processIndex)
+                idleProcesses.remove(processIndex)
+                timedOutHealthChecks.append((processIndex, healthContext.token))
+            }
+        }
+
+        for (processIndex, manager) in processes {
+            if segmentContextByProcess[processIndex] != nil || healthCheckContextByProcess[processIndex] != nil {
+                continue
+            }
+
+            guard manager.isRunning() else {
+                idleProcesses.remove(processIndex)
+                stoppedProcessesWithoutContext.append(processIndex)
+                continue
+            }
+
+            guard idleProcesses.contains(processIndex) else {
+                continue
+            }
+
+            let startedAt = processStartedAtByIndex[processIndex] ?? now
+            guard now.timeIntervalSince(startedAt) >= healthCheckStartupGraceSeconds else {
+                continue
+            }
+
+            let lastHealthCheckAt = lastHealthCheckAtByProcess[processIndex] ?? startedAt
+            guard now.timeIntervalSince(lastHealthCheckAt) >= healthCheckIntervalSeconds else {
+                continue
+            }
+
+            healthCheckSequence += 1
+            let token = "\(processIndex)-\(healthCheckSequence)"
+            healthCheckContextByProcess[processIndex] = HealthCheckContext(token: token, sentAt: now)
+            idleProcesses.remove(processIndex)
+            healthChecksToSend.append((processIndex, token))
+        }
+        processLock.unlock()
+
+        for (processIndex, context) in timedOutSegments {
+            Logger.shared.log(
+                "MultiProcessManager: segment timeout on process \(processIndex), segment=\(context.index), age=\(String(format: "%.1f", now.timeIntervalSince(context.assignedAt)))s",
+                level: .error
+            )
+            handleProcessFailure(
+                processIndex: processIndex,
+                context: context,
+                reason: "segment_timeout"
+            )
+        }
+
+        for (processIndex, token) in timedOutHealthChecks {
+            Logger.shared.log(
+                "MultiProcessManager: health check timeout on process \(processIndex), token=\(token)",
+                level: .warning
+            )
+            recoverProcess(processIndex: processIndex)
+        }
+
+        for processIndex in stoppedProcessesWithoutContext {
+            Logger.shared.log(
+                "MultiProcessManager: process \(processIndex) is not running during watchdog probe; recovering",
+                level: .warning
+            )
+            recoverProcess(processIndex: processIndex)
+        }
+
+        for (processIndex, token) in healthChecksToSend {
+            let succeeded = sendHealthCheck(processIndex: processIndex, token: token)
+            if succeeded {
+                continue
+            }
+
+            processLock.lock()
+            healthCheckContextByProcess.removeValue(forKey: processIndex)
+            processLock.unlock()
+
+            Logger.shared.log(
+                "MultiProcessManager: failed to send health check to process \(processIndex), recovering",
+                level: .warning
+            )
+            recoverProcess(processIndex: processIndex)
+        }
+    }
+
+    private func sendHealthCheck(processIndex: Int, token: String) -> Bool {
+        processLock.lock()
+        let manager = processes[processIndex]
+        processLock.unlock()
+
+        guard let manager else {
+            return false
+        }
+
+        let request = Self.healthCheckRequestPrefix + token
+        return manager.sendInput(
+            request,
+            language: "auto",
+            temperature: 0.0,
+            beamSize: 1,
+            noSpeechThreshold: 0.6,
+            compressionRatioThreshold: 2.4,
+            task: "transcribe",
+            bestOf: 1,
+            vadThreshold: 0.5,
+            autoPunctuation: false,
+            autoGainEnabled: false,
+            autoGainWeakThresholdDbfs: -18.0,
+            autoGainTargetPeakDbfs: -10.0,
+            autoGainMaxDb: 18.0,
+            screenshotContext: nil
+        )
+    }
     
     func stop() {
         Logger.shared.log("MultiProcessManager: stop called", level: .info)
+        stopWatchdog()
+
         processLock.lock()
         isStopping = true
         let allProcesses = processes
         processes.removeAll()
         idleProcesses.removeAll()
         segmentContextByProcess.removeAll()
+        healthCheckContextByProcess.removeAll()
+        lastHealthCheckAtByProcess.removeAll()
+        processStartedAtByIndex.removeAll()
         recoveryInProgress.removeAll()
         scheduledRecoveries.removeAll()
         idleTerminationHistory.removeAll()
@@ -575,4 +829,10 @@ private struct SegmentContext {
     let settings: AppSettings
     let retryCount: Int
     let screenshotContext: String?
+    var assignedAt: Date = .distantPast
+}
+
+private struct HealthCheckContext {
+    let token: String
+    let sentAt: Date
 }
