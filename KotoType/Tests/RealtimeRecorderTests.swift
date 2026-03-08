@@ -107,44 +107,29 @@ final class RealtimeRecorderTests: XCTestCase {
             elapsedTime: 10.0,
             timeSinceLastSound: 0.6,
             batchInterval: 10.0,
-            silenceDuration: 0.5,
-            previewSplitIntervalCap: 2.5
+            silenceDuration: 0.5
         )
 
         XCTAssertTrue(shouldSplit)
     }
 
-    func testShouldSplitChunkByPreviewCapDuringContinuousSpeech() {
+    func testShouldNotSplitChunkWithoutSilenceAfterBatchInterval() {
         let shouldSplit = RealtimeRecorder.shouldSplitChunk(
-            elapsedTime: 2.6,
+            elapsedTime: 12.0,
             timeSinceLastSound: 0.05,
             batchInterval: 10.0,
-            silenceDuration: 0.5,
-            previewSplitIntervalCap: 2.5
-        )
-
-        XCTAssertTrue(shouldSplit)
-    }
-
-    func testShouldNotForceSplitWhenBatchIntervalIsAlreadyBelowPreviewCap() {
-        let shouldSplit = RealtimeRecorder.shouldSplitChunk(
-            elapsedTime: 2.0,
-            timeSinceLastSound: 0.05,
-            batchInterval: 2.0,
-            silenceDuration: 0.5,
-            previewSplitIntervalCap: 2.5
+            silenceDuration: 0.5
         )
 
         XCTAssertFalse(shouldSplit)
     }
 
-    func testShouldNotSplitChunkBeforePreviewCapOrSilenceThreshold() {
+    func testShouldNotSplitChunkBeforeBatchIntervalOrSilenceThreshold() {
         let shouldSplit = RealtimeRecorder.shouldSplitChunk(
             elapsedTime: 1.4,
             timeSinceLastSound: 0.05,
             batchInterval: 10.0,
-            silenceDuration: 0.5,
-            previewSplitIntervalCap: 2.5
+            silenceDuration: 0.5
         )
 
         XCTAssertFalse(shouldSplit)

@@ -23,7 +23,6 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     var batchInterval: TimeInterval
     var silenceThreshold: Float
     var silenceDuration: TimeInterval
-    var previewSplitIntervalCap: TimeInterval = 2.5
     
     private var lastSoundTime: TimeInterval = 0
     private var recordingStartTime: TimeInterval = 0
@@ -139,8 +138,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             elapsedTime: elapsedTime,
             timeSinceLastSound: timeSinceLastSound,
             batchInterval: batchInterval,
-            silenceDuration: silenceDuration,
-            previewSplitIntervalCap: previewSplitIntervalCap
+            silenceDuration: silenceDuration
         )
         
         if shouldSplit && hasRecordedContent && audioBuffer.count >= 4096 {
@@ -250,25 +248,14 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         elapsedTime: TimeInterval,
         timeSinceLastSound: TimeInterval,
         batchInterval: TimeInterval,
-        silenceDuration: TimeInterval,
-        previewSplitIntervalCap: TimeInterval
+        silenceDuration: TimeInterval
     ) -> Bool {
         let normalizedElapsed = max(0, elapsedTime)
         let normalizedSilence = max(0, timeSinceLastSound)
         let normalizedBatchInterval = max(0.1, batchInterval)
         let normalizedSilenceDuration = max(0, silenceDuration)
-        let normalizedPreviewCap = max(0, previewSplitIntervalCap)
 
-        let splitBySilence = normalizedElapsed >= normalizedBatchInterval &&
+        return normalizedElapsed >= normalizedBatchInterval &&
             normalizedSilence >= normalizedSilenceDuration
-
-        // Only override silence-gated batching when the configured batch window is
-        // longer than the preview cap. Short custom batch intervals should keep the
-        // existing silence-based split behavior.
-        let splitByPreviewCap = normalizedPreviewCap > 0 &&
-            normalizedBatchInterval > normalizedPreviewCap &&
-            normalizedElapsed >= normalizedPreviewCap
-
-        return splitBySilence || splitByPreviewCap
     }
 }
