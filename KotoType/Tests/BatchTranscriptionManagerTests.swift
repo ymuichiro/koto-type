@@ -132,29 +132,4 @@ final class BatchTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(manager.isComplete(), "Manager should be complete")
     }
 
-    func testOnTranscriptionCompleteFlushesInOrder() {
-        let file1 = createTestAudioFile(index: 0)
-        let file2 = createTestAudioFile(index: 1)
-        let file3 = createTestAudioFile(index: 2)
-
-        manager.addSegment(url: file1, index: 0)
-        manager.addSegment(url: file2, index: 1)
-        manager.addSegment(url: file3, index: 2)
-
-        let expectation = XCTestExpectation(description: "Ordered flush callbacks")
-        expectation.expectedFulfillmentCount = 2
-
-        var emitted: [String] = []
-        manager.onTranscriptionComplete = { text in
-            emitted.append(text)
-            expectation.fulfill()
-        }
-
-        manager.completeSegment(index: 2, text: "C")
-        manager.completeSegment(index: 0, text: "A")
-        manager.completeSegment(index: 1, text: "B")
-
-        wait(for: [expectation], timeout: 1.0)
-        XCTAssertEqual(emitted, ["A", "BC"])
-    }
 }

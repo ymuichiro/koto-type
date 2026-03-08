@@ -3,33 +3,17 @@ import Foundation
 import os.log
 import UniformTypeIdentifiers
 
-private struct SegmentRoute {
-    let sessionID: Int
-    let localIndex: Int
-}
-
 @MainActor
 private final class RecordingSessionContext {
     let id: Int
     let batchTranscriptionManager: BatchTranscriptionManager
-    var orderedText: String = ""
-    var progressState = RecordingProgressState()
-    var pendingProgressUpdateWorkItem: DispatchWorkItem?
     var finalizationReadyWorkItem: DispatchWorkItem?
     var completionTimeoutWorkItem: DispatchWorkItem?
     var screenshotContext: String?
-    var isReadyForFinalization = false
-    var hasTimedOut = false
 
     init(id: Int) {
         self.id = id
         self.batchTranscriptionManager = BatchTranscriptionManager()
-    }
-
-    func resetProgressState() {
-        pendingProgressUpdateWorkItem?.cancel()
-        pendingProgressUpdateWorkItem = nil
-        progressState.reset()
     }
 
     func cancelCompletionTimeout() {
@@ -60,13 +44,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var serverScriptPath: String = ""
     private var currentSettings: AppSettings = AppSettings()
     private var nextRecordingSessionID = 0
-    private var nextGlobalSegmentIndex = 0
     private var activeRecordingSessionID: Int?
-    private var indicatorSessionID: Int?
+    private var indicatorPresentation = IndicatorPresentationState()
     private var sessionByID: [Int: RecordingSessionContext] = [:]
-    private var pendingFinalizationSessionIDs: [Int] = []
+    private var finalizationQueue = RecordingFinalizationQueue()
     private var pendingSegmentFiles: [Int: URL] = [:]
-    private var segmentRouteByGlobalIndex: [Int: SegmentRoute] = [:]
+    private var segmentRouter = RecordingSegmentRouter()
     private let finalizationReadyDelay: TimeInterval = 0.35
     private let completionTimeoutInterval: TimeInterval = 50.0
 
@@ -211,7 +194,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let sessionID = session.id
         isRecording = true
         activeRecordingSessionID = sessionID
-        indicatorSessionID = sessionID
+        indicatorPresentation.beginLiveSession(sessionID)
         Logger.shared.log("Starting audio recording for session \(sessionID)...", level: .info)
 
         currentSettings = SettingsManager.shared.load()
@@ -230,13 +213,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            let globalIndex = self.allocateGlobalSegmentIndex()
+            let globalIndex = self.segmentRouter.register(sessionID: sessionID, localIndex: localIndex)
             Logger.shared.log(
                 "File created: \(url.path), localIndex=\(localIndex), globalIndex=\(globalIndex), session=\(sessionID)",
                 level: .info
             )
             self.pendingSegmentFiles[globalIndex] = url
-            self.segmentRouteByGlobalIndex[globalIndex] = SegmentRoute(sessionID: sessionID, localIndex: localIndex)
             currentSession.batchTranscriptionManager.addSegment(url: url, index: localIndex)
             self.multiProcessManager?.processFile(
                 url: url,
@@ -248,14 +230,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard realtimeRecorder?.startRecording() == true else {
             Logger.shared.log("Failed to start recording", level: .error)
+            if realtimeRecorder?.lastStartFailureReason == .noInputDevice {
+                Logger.shared.log("Recording aborted: microphone input device is unavailable", level: .warning)
+                showTransientRecordingAttention("Microphone not detected")
+            }
             isRecording = false
             activeRecordingSessionID = nil
-            indicatorSessionID = pendingFinalizationSessionIDs.last
             destroySession(sessionID: sessionID)
             return
         }
         Logger.shared.log("Recording started (session \(sessionID))", level: .info)
         recordingIndicatorWindow?.show()
+    }
+
+    private func showTransientRecordingAttention(_ message: String) {
+        indicatorPresentation.beginNonLivePresentation()
+        recordingIndicatorWindow?.showAttention(message: message)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+            guard let self = self else { return }
+            guard !self.isRecording else { return }
+            guard !self.isImportingAudio else { return }
+            self.recordingIndicatorWindow?.hide()
+        }
     }
     
     func stopRecording() {
@@ -270,7 +267,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         realtimeRecorder?.stopRecording()
         Logger.shared.log("Recording stopped (session \(sessionID))", level: .info)
         Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
-        recordingIndicatorWindow?.showProcessing(progressText: session.progressState.displayText)
+        recordingIndicatorWindow?.showProcessing()
         enqueueSessionForFinalization(sessionID: sessionID)
         tryFinalizePendingSessionsIfNeeded()
     }
@@ -279,10 +276,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let sessionID = nextRecordingSessionID
         nextRecordingSessionID += 1
         let session = RecordingSessionContext(id: sessionID)
-        session.batchTranscriptionManager.onTranscriptionComplete = { [weak self] text in
-            guard let self = self else { return }
-            self.handleOrderedTranscriptionChunk(text, forSessionID: sessionID)
-        }
         sessionByID[sessionID] = session
         return session
     }
@@ -291,24 +284,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let session = sessionByID.removeValue(forKey: sessionID) else {
             return
         }
-        session.resetProgressState()
         session.cancelFinalizationReadyWorkItem()
         session.cancelCompletionTimeout()
         cleanupPendingSegmentFiles(forSessionID: sessionID)
-        pendingFinalizationSessionIDs.removeAll { $0 == sessionID }
-        if indicatorSessionID == sessionID {
-            indicatorSessionID = pendingFinalizationSessionIDs.last
+        finalizationQueue.remove(sessionID: sessionID)
+        if indicatorPresentation.currentLiveSessionID == sessionID {
+            indicatorPresentation.setFallbackLiveSession(finalizationQueue.liveIndicatorFallbackSessionID)
         }
     }
 
-    private func allocateGlobalSegmentIndex() -> Int {
-        let index = nextGlobalSegmentIndex
-        nextGlobalSegmentIndex += 1
-        return index
-    }
-
     private func handleSegmentComplete(globalIndex: Int, output: String) {
-        guard let route = segmentRouteByGlobalIndex.removeValue(forKey: globalIndex) else {
+        guard let route = segmentRouter.consume(globalIndex: globalIndex) else {
             Logger.shared.log(
                 "Received segment completion for unknown global index=\(globalIndex). Ignoring stale callback.",
                 level: .warning
@@ -331,83 +317,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tryFinalizePendingSessionsIfNeeded()
     }
 
-    private func handleOrderedTranscriptionChunk(_ text: String, forSessionID sessionID: Int) {
-        guard !text.isEmpty else {
-            Logger.shared.log("BatchTranscriptionManager emitted empty ordered text chunk", level: .debug)
-            return
-        }
-        guard let session = sessionByID[sessionID] else {
-            Logger.shared.log("Dropping ordered transcription chunk for missing session \(sessionID)", level: .warning)
-            return
-        }
-
-        session.orderedText += text
-        Logger.shared.log("Accumulated ordered transcription (session \(sessionID)): '\(session.orderedText)'", level: .info)
-        if session.progressState.append(chunk: text) {
-            scheduleProgressIndicatorUpdate(forSessionID: sessionID)
-        }
-        tryFinalizePendingSessionsIfNeeded()
-    }
-
-    private func scheduleProgressIndicatorUpdate(forSessionID sessionID: Int) {
-        guard let session = sessionByID[sessionID] else {
-            return
-        }
-
-        let now = Date()
-        if session.progressState.shouldEmit(now: now) {
-            emitProgressIndicatorUpdate(forSessionID: sessionID)
-            return
-        }
-
-        guard session.pendingProgressUpdateWorkItem == nil else {
-            return
-        }
-
-        let delay = session.progressState.nextDelay(now: now)
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self = self, let session = self.sessionByID[sessionID] else { return }
-            session.pendingProgressUpdateWorkItem = nil
-            let now = Date()
-            guard session.progressState.shouldEmit(now: now) else {
-                return
-            }
-            self.emitProgressIndicatorUpdate(forSessionID: sessionID)
-        }
-        session.pendingProgressUpdateWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
-    }
-
-    private func emitProgressIndicatorUpdate(forSessionID sessionID: Int) {
-        guard sessionID == indicatorSessionID, let session = sessionByID[sessionID] else {
-            return
-        }
-        guard let progressText = session.progressState.displayText else {
-            return
-        }
-
-        if isRecording && activeRecordingSessionID == sessionID {
-            recordingIndicatorWindow?.showRecording(progressText: progressText)
-        } else {
-            recordingIndicatorWindow?.showProcessing(progressText: progressText)
-        }
-    }
-
     private func enqueueSessionForFinalization(sessionID: Int) {
         guard let session = sessionByID[sessionID] else {
             return
         }
-        if !pendingFinalizationSessionIDs.contains(sessionID) {
-            pendingFinalizationSessionIDs.append(sessionID)
-        }
+        finalizationQueue.enqueue(sessionID: sessionID)
 
-        session.isReadyForFinalization = false
-        session.hasTimedOut = false
         session.cancelFinalizationReadyWorkItem()
         let readyWorkItem = DispatchWorkItem { [weak self] in
             guard let self = self, let session = self.sessionByID[sessionID] else { return }
             session.finalizationReadyWorkItem = nil
-            session.isReadyForFinalization = true
+            self.finalizationQueue.markReady(sessionID: sessionID)
             self.tryFinalizePendingSessionsIfNeeded()
         }
         session.finalizationReadyWorkItem = readyWorkItem
@@ -417,7 +337,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, let session = self.sessionByID[sessionID] else { return }
             session.completionTimeoutWorkItem = nil
-            session.hasTimedOut = true
+            self.finalizationQueue.markTimedOut(sessionID: sessionID)
             Logger.shared.log("Transcription timeout reached for session \(sessionID). Finalizing with available text.", level: .warning)
             self.tryFinalizePendingSessionsIfNeeded()
         }
@@ -430,18 +350,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        while let nextSessionID = pendingFinalizationSessionIDs.first {
+        while let nextSessionID = finalizationQueue.nextPendingSessionID {
             guard let session = sessionByID[nextSessionID] else {
-                pendingFinalizationSessionIDs.removeFirst()
+                finalizationQueue.remove(sessionID: nextSessionID)
                 continue
             }
 
-            let shouldFinalize = (session.isReadyForFinalization && session.batchTranscriptionManager.isComplete()) || session.hasTimedOut
+            let shouldFinalize = finalizationQueue.canFinalize(
+                sessionID: nextSessionID,
+                isComplete: session.batchTranscriptionManager.isComplete()
+            )
             guard shouldFinalize else {
                 break
             }
 
-            pendingFinalizationSessionIDs.removeFirst()
+            finalizationQueue.remove(sessionID: nextSessionID)
             finalizeSession(sessionID: nextSessionID)
         }
     }
@@ -453,9 +376,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         session.cancelCompletionTimeout()
         session.cancelFinalizationReadyWorkItem()
-        session.resetProgressState()
 
-        let finalText = session.batchTranscriptionManager.finalize() ?? session.orderedText
+        let finalText = session.batchTranscriptionManager.finalize() ?? ""
         let didInsertText: Bool
         if !finalText.isEmpty {
             Logger.shared.log("Typing text into active window (session \(sessionID)): '\(finalText)'", level: .info)
@@ -473,16 +395,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         cleanupPendingSegmentFiles(forSessionID: sessionID)
         session.batchTranscriptionManager.reset()
 
-        guard indicatorSessionID == sessionID else {
+        guard indicatorPresentation.currentLiveSessionID == sessionID else {
             return
         }
         recordingIndicatorWindow?.showCompleted(success: didInsertText)
+        let hideToken = indicatorPresentation.generation
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
             guard let self = self else { return }
-            guard self.indicatorSessionID == sessionID else { return }
-            guard !self.isRecording else { return }
+            guard self.indicatorPresentation.canHideCompletedSession(
+                sessionID: sessionID,
+                token: hideToken,
+                isRecording: self.isRecording,
+                isImportingAudio: self.isImportingAudio
+            ) else { return }
             self.recordingIndicatorWindow?.hide()
-            self.indicatorSessionID = self.pendingFinalizationSessionIDs.last
+            self.indicatorPresentation.didHideCompletedSession(
+                sessionID: sessionID,
+                fallbackSessionID: self.finalizationQueue.liveIndicatorFallbackSessionID
+            )
         }
     }
 
@@ -506,7 +436,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard pendingFinalizationSessionIDs.isEmpty else {
+        guard finalizationQueue.isEmpty else {
             Logger.shared.log(
                 "Cannot import audio while live recording transcription is still processing",
                 level: .warning
@@ -550,7 +480,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let importedAudioTranscriptionManager else { return }
         isImportingAudio = true
         currentSettings = SettingsManager.shared.load()
-        recordingIndicatorWindow?.showProcessing(progressText: nil)
+        indicatorPresentation.beginNonLivePresentation()
+        recordingIndicatorWindow?.showProcessing()
 
         importedAudioTranscriptionManager.transcribe(fileURL: fileURL, settings: currentSettings) { [weak self] result in
             guard let self = self else { return }
@@ -612,11 +543,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cleanupPendingSegmentFiles(forSessionID sessionID: Int) {
-        let indices = segmentRouteByGlobalIndex.compactMap { globalIndex, route in
-            route.sessionID == sessionID ? globalIndex : nil
-        }
+        let indices = segmentRouter.removeAll(forSessionID: sessionID)
         for globalIndex in indices {
-            segmentRouteByGlobalIndex.removeValue(forKey: globalIndex)
             cleanupSegmentFile(globalIndex: globalIndex)
         }
     }
@@ -626,7 +554,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             removeAudioFileIfExists(fileURL)
         }
         pendingSegmentFiles.removeAll()
-        segmentRouteByGlobalIndex.removeAll()
+        segmentRouter.reset()
     }
 
     private func removeAudioFileIfExists(_ fileURL: URL) {
@@ -642,12 +570,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationWillTerminate(_ notification: Notification) {
         for session in sessionByID.values {
-            session.resetProgressState()
             session.cancelFinalizationReadyWorkItem()
             session.cancelCompletionTimeout()
         }
         sessionByID.removeAll()
-        pendingFinalizationSessionIDs.removeAll()
+        finalizationQueue.reset()
+        indicatorPresentation.reset()
         hotkeyManager?.cleanup()
         cleanupAllPendingSegmentFiles()
         multiProcessManager?.stop()

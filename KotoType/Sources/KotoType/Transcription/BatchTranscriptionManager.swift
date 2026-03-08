@@ -3,10 +3,7 @@ import Foundation
 final class BatchTranscriptionManager: @unchecked Sendable {
     private var pendingSegments: [Segment] = []
     private var completedSegments: [Segment?] = []
-    private var nextIndex = 0
     private var lock = NSLock()
-    
-    var onTranscriptionComplete: ((String) -> Void)?
     
     func addSegment(url: URL, index: Int) {
         Logger.shared.log("BatchTranscriptionManager: addSegment called - url=\(url.path), index=\(index)", level: .info)
@@ -18,7 +15,7 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         
         ensureArrayCapacity(index: index)
         
-        Logger.shared.log("BatchTranscriptionManager: segment added - pending=\(pendingSegments.count), nextIndex=\(nextIndex)", level: .debug)
+        Logger.shared.log("BatchTranscriptionManager: segment added - pending=\(pendingSegments.count)", level: .debug)
     }
     
     func completeSegment(index: Int, text: String) {
@@ -28,12 +25,7 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         
         ensureArrayCapacity(index: index)
         completedSegments[index] = Segment(url: URL(fileURLWithPath: ""), index: index, text: text)
-        
-        if index == nextIndex {
-            flushCompletedSegments()
-        }
-        
-        Logger.shared.log("BatchTranscriptionManager: segment completed - index=\(index), nextIndex=\(nextIndex)", level: .debug)
+        Logger.shared.log("BatchTranscriptionManager: segment completed - index=\(index)", level: .debug)
     }
     
     func finalize() -> String? {
@@ -58,31 +50,14 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         }
     }
     
-    private func flushCompletedSegments() {
-        var segmentsToCombine: [Segment] = []
-        
-        while nextIndex < completedSegments.count {
-            if let segment = completedSegments[nextIndex] {
-                segmentsToCombine.append(segment)
-                nextIndex += 1
-            } else {
-                break
-            }
-        }
-        
-        if !segmentsToCombine.isEmpty {
-            let combined = segmentsToCombine.compactMap { $0.text }.joined(separator: "")
-            Logger.shared.log("BatchTranscriptionManager: flushing \(segmentsToCombine.count) segments: '\(combined)'", level: .info)
-            
-            DispatchQueue.main.async { [weak self] in
-                self?.onTranscriptionComplete?(combined)
-            }
-        }
-    }
-    
     private func combineSegments() -> String {
-        let segments = completedSegments.compactMap { $0 }
-        let combined = segments.compactMap { $0.text }.joined(separator: "")
+        let segments = completedSegments.enumerated().compactMap { entry -> (Int, String)? in
+            guard let segment = entry.element, let text = segment.text else {
+                return nil
+            }
+            return (entry.offset, text)
+        }
+        let combined = segments.map { $0.1 }.joined(separator: "")
         Logger.shared.log("BatchTranscriptionManager: combining \(segments.count) segments", level: .debug)
         return combined
     }
@@ -91,21 +66,10 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         
-        let allPendingCompleted = pendingSegments.allSatisfy { pending in
-            completedIndices().contains(pending.index)
+        return pendingSegments.allSatisfy { pending in
+            pending.index < completedSegments.count &&
+                completedSegments[pending.index]?.text != nil
         }
-        
-        return allPendingCompleted && nextIndex == completedSegments.count
-    }
-    
-    private func completedIndices() -> Set<Int> {
-        var indices: Set<Int> = []
-        for (i, segment) in completedSegments.enumerated() {
-            if segment != nil && segment!.text != nil {
-                indices.insert(i)
-            }
-        }
-        return indices
     }
     
     func reset() {
@@ -115,7 +79,6 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         
         pendingSegments.removeAll()
         completedSegments.removeAll()
-        nextIndex = 0
     }
 }
 

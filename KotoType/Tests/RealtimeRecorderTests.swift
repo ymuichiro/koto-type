@@ -94,6 +94,14 @@ final class RealtimeRecorderTests: XCTestCase {
         XCTAssertEqual(RealtimeRecorder.normalizeSampleRate(.nan), 16_000.0, accuracy: 0.001)
     }
 
+    func testHasUsableInputFormatForNormalMonoInput() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)
+        XCTAssertNotNil(format)
+        if let format {
+            XCTAssertTrue(RealtimeRecorder.hasUsableInputFormat(format))
+        }
+    }
+
     func testShouldSplitChunkBySilenceAfterBatchInterval() {
         let shouldSplit = RealtimeRecorder.shouldSplitChunk(
             elapsedTime: 10.0,
@@ -116,6 +124,18 @@ final class RealtimeRecorderTests: XCTestCase {
         )
 
         XCTAssertTrue(shouldSplit)
+    }
+
+    func testShouldNotForceSplitWhenBatchIntervalIsAlreadyBelowPreviewCap() {
+        let shouldSplit = RealtimeRecorder.shouldSplitChunk(
+            elapsedTime: 2.0,
+            timeSinceLastSound: 0.05,
+            batchInterval: 2.0,
+            silenceDuration: 0.5,
+            previewSplitIntervalCap: 2.5
+        )
+
+        XCTAssertFalse(shouldSplit)
     }
 
     func testShouldNotSplitChunkBeforePreviewCapOrSilenceThreshold() {
