@@ -26,7 +26,7 @@ struct RecordingIndicatorView: View {
             return CGSize(width: 260, height: 68)
         }
 
-        let width: CGFloat = (state == .recording || state == .processing) ? 92 : 124
+        let width: CGFloat = (state == .recording || state == .processing) ? 368 : 124
         return CGSize(width: width, height: 68)
     }
 
@@ -158,38 +158,57 @@ private struct RecordingContent: View {
 private struct WaveformAnimation: View {
     let color: Color
     let level: CGFloat
+    private let barCount = 32
+    private let barWidth: CGFloat = 4
+    private let barSpacing: CGFloat = 3
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let clampedLevel = max(0, min(level, 1))
-            let baseHeights: [CGFloat] = [0.48, 0.68, 0.86, 1.0, 0.86, 0.68, 0.48]
+            let boostedLevel = min(1, pow(clampedLevel, 0.55) * 1.9)
+            let baseHeights = baseHeightFactors(count: barCount)
 
-            HStack(spacing: 3) {
-                ForEach(0..<7, id: \.self) { index in
+            HStack(spacing: barSpacing) {
+                ForEach(0..<barCount, id: \.self) { index in
                     Capsule(style: .continuous)
                         .fill(color.opacity(0.95))
                         .frame(
-                            width: 3,
+                            width: barWidth,
                             height: barHeight(
                                 index: index,
                                 time: t,
-                                level: clampedLevel,
+                                level: boostedLevel,
                                 baseHeightFactor: baseHeights[index]
                             )
                         )
                 }
             }
-            .frame(width: 36, height: 26)
+            .frame(
+                width: (CGFloat(barCount) * barWidth) + (CGFloat(barCount - 1) * barSpacing),
+                height: 26
+            )
         }
     }
 
     private func barHeight(index: Int, time: TimeInterval, level: CGFloat, baseHeightFactor: CGFloat) -> CGFloat {
         let minHeight: CGFloat = 4
         let maxHeight: CGFloat = 23
-        let levelDriven = minHeight + (14 * level * baseHeightFactor)
-        let wobble = abs(sin((time * 8.5) + (Double(index) * 0.8))) * (3 * level)
+        let levelDriven = minHeight + (16 * level * baseHeightFactor)
+        let wobbleStrength = max(0.5, level)
+        let wobble = abs(sin((time * 8.5) + (Double(index) * 0.8))) * (5 * wobbleStrength)
         return min(maxHeight, levelDriven + wobble)
+    }
+
+    private func baseHeightFactors(count: Int) -> [CGFloat] {
+        guard count > 1 else {
+            return [1]
+        }
+        let center = Double(count - 1) / 2.0
+        return (0..<count).map { index in
+            let normalizedDistance = abs(Double(index) - center) / center
+            return CGFloat(0.45 + ((1.0 - normalizedDistance) * 0.55))
+        }
     }
 }
 
