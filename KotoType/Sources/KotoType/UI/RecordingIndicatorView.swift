@@ -11,13 +11,20 @@ struct RecordingIndicatorView: View {
     let state: IndicatorState
     let attentionMessage: String?
     let recordingLevel: CGFloat
+    let onCancelTapped: (() -> Void)?
     private static let outerPadding: CGFloat = 6
     private static let contentClipCornerRadius: CGFloat = 13
 
-    init(state: IndicatorState, attentionMessage: String? = nil, recordingLevel: CGFloat = 0) {
+    init(
+        state: IndicatorState,
+        attentionMessage: String? = nil,
+        recordingLevel: CGFloat = 0,
+        onCancelTapped: (() -> Void)? = nil
+    ) {
         self.state = state
         self.attentionMessage = attentionMessage
         self.recordingLevel = max(0, min(recordingLevel, 1))
+        self.onCancelTapped = onCancelTapped
     }
 
     private static func frameSize(for state: IndicatorState, attentionMessage: String?) -> CGSize {
@@ -58,7 +65,7 @@ struct RecordingIndicatorView: View {
     private var stateContent: some View {
         switch state {
         case .recording:
-            RecordingContent(level: recordingLevel)
+            RecordingContent(level: recordingLevel, onCancelTapped: onCancelTapped)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -127,26 +134,50 @@ private struct IndicatorBackground: View {
 
 private struct RecordingContent: View {
     let level: CGFloat
+    let onCancelTapped: (() -> Void)?
     @State private var pulse = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.red.opacity(0.92))
-                    .frame(width: 12, height: 12)
-
-                Circle()
-                    .stroke(Color.red.opacity(0.45), lineWidth: 2)
-                    .frame(width: 24, height: 24)
-                    .scaleEffect(pulse ? 1.28 : 0.86)
-                    .opacity(pulse ? 0.08 : 0.7)
-            }
-
+        ZStack {
             WaveformAnimation(color: .white, level: level)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+            HStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.92))
+                        .frame(width: 12, height: 12)
+
+                    Circle()
+                        .stroke(Color.red.opacity(0.45), lineWidth: 2)
+                        .frame(width: 24, height: 24)
+                        .scaleEffect(pulse ? 1.28 : 0.86)
+                        .opacity(pulse ? 0.08 : 0.7)
+                }
+
+                Spacer()
+
+                if let onCancelTapped {
+                    Button(action: onCancelTapped) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.92))
+                            .frame(width: 22, height: 22)
+                            .background(
+                                Circle()
+                                    .fill(Color.black.opacity(0.38))
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel recording")
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .onAppear {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                 pulse = true
@@ -160,8 +191,8 @@ private struct WaveformAnimation: View {
     let level: CGFloat
     private let barWidth: CGFloat = 4
     private let barSpacing: CGFloat = 3
-    private let minHeight: CGFloat = 4
-    private let maxHeight: CGFloat = 23
+    private let minHeight: CGFloat = 3
+    private let maxHeight: CGFloat = 32
     private let updateInterval: TimeInterval = 1.0 / 20.0
     @State private var history: [CGFloat] = []
     @State private var timer = Timer.publish(every: 1.0 / 20.0, on: .main, in: .common).autoconnect()
@@ -173,7 +204,13 @@ private struct WaveformAnimation: View {
                 barWidth: barWidth,
                 barSpacing: barSpacing
             )
-            HStack(spacing: barSpacing) {
+            let spacing = Self.interBarSpacing(
+                for: proxy.size.width,
+                barCount: barCount,
+                barWidth: barWidth,
+                fallbackSpacing: barSpacing
+            )
+            HStack(spacing: spacing) {
                 ForEach(0..<barCount, id: \.self) { index in
                     let sample = sampleValue(at: index, totalCount: barCount)
                     Capsule(style: .continuous)
@@ -181,7 +218,8 @@ private struct WaveformAnimation: View {
                         .frame(width: barWidth, height: barHeight(for: sample))
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(width: proxy.size.width, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .leading)
             .onAppear {
                 configureHistory(count: barCount)
                 timer = Timer.publish(every: updateInterval, on: .main, in: .common).autoconnect()
@@ -193,7 +231,7 @@ private struct WaveformAnimation: View {
                 appendSample(amplifiedLevel, maxCount: barCount)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 26, maxHeight: 26, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 39, maxHeight: 39, alignment: .leading)
         .transaction { transaction in
             transaction.animation = nil
         }
@@ -211,6 +249,21 @@ private struct WaveformAnimation: View {
             return 1
         }
         return max(1, Int((safeWidth + barSpacing) / unit))
+    }
+
+    private static func interBarSpacing(
+        for width: CGFloat,
+        barCount: Int,
+        barWidth: CGFloat,
+        fallbackSpacing: CGFloat
+    ) -> CGFloat {
+        guard barCount > 1 else {
+            return 0
+        }
+        let totalBarWidth = CGFloat(barCount) * barWidth
+        let remaining = max(0, width - totalBarWidth)
+        let computed = remaining / CGFloat(barCount - 1)
+        return computed.isFinite ? computed : fallbackSpacing
     }
 
     private func configureHistory(count: Int) {

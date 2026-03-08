@@ -116,6 +116,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController = SettingsWindowController()
         historyWindowController = HistoryWindowController()
         recordingIndicatorWindow = RecordingIndicatorWindow()
+        recordingIndicatorWindow?.setCancelAction { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.cancelRecording()
+            }
+        }
         Logger.shared.log("RecordingIndicatorWindow created", level: .debug)
         
         menuBarController?.showSettings = { [weak self] in
@@ -286,6 +291,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
         recordingIndicatorWindow?.showProcessing()
         enqueueSessionForFinalization(sessionID: sessionID)
+        tryFinalizePendingSessionsIfNeeded()
+    }
+
+    private func cancelRecording() {
+        guard isRecording, let sessionID = activeRecordingSessionID else {
+            return
+        }
+
+        Logger.shared.log("Canceling audio recording for session \(sessionID)...", level: .info)
+        isRecording = false
+        activeRecordingSessionID = nil
+        realtimeRecorder?.stopRecording(discardPendingAudio: true)
+        realtimeRecorder?.onInputLevelChanged = nil
+        recordingIndicatorWindow?.updateRecordingLevel(0)
+        destroySession(sessionID: sessionID)
+
+        if indicatorPresentation.currentLiveSessionID == nil {
+            recordingIndicatorWindow?.hide()
+        } else {
+            recordingIndicatorWindow?.showProcessing()
+        }
+
+        Logger.shared.log("Recording canceled (session \(sessionID))", level: .info)
         tryFinalizePendingSessionsIfNeeded()
     }
 

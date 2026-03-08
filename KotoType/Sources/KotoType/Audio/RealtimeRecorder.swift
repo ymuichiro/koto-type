@@ -94,7 +94,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         }
     }
     
-    func stopRecording() {
+    func stopRecording(discardPendingAudio: Bool = false) {
         Logger.shared.log("RealtimeRecorder: stopRecording called", level: .info)
         lock.lock()
         defer { lock.unlock() }
@@ -109,10 +109,14 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             engine.inputNode.removeTap(onBus: 0)
         }
         
-        if hasRecordedContent && !audioBuffer.isEmpty {
+        if !discardPendingAudio && hasRecordedContent && !audioBuffer.isEmpty {
             createAudioFile(force: true)
         }
         
+        if discardPendingAudio {
+            audioBuffer.removeAll()
+        }
+        hasRecordedContent = false
         isRecording = false
         audioEngine = nil
         reportInputLevel(0, force: true)

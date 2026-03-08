@@ -6,6 +6,7 @@ class RecordingIndicatorWindow: NSPanel {
     private var currentState: IndicatorState = .recording
     private var currentAttentionMessage: String?
     private var currentRecordingLevel: CGFloat = 0
+    private var onCancelTapped: (() -> Void)?
     private var visibilityToken: Int = 0
     
     init() {
@@ -40,7 +41,8 @@ class RecordingIndicatorWindow: NSPanel {
         let view = RecordingIndicatorView(
             state: currentState,
             attentionMessage: currentAttentionMessage,
-            recordingLevel: currentRecordingLevel
+            recordingLevel: currentRecordingLevel,
+            onCancelTapped: onCancelTapped
         )
         hostingController = NSHostingController(rootView: view)
         self.contentView = hostingController?.view
@@ -81,7 +83,8 @@ class RecordingIndicatorWindow: NSPanel {
         hostingController?.rootView = RecordingIndicatorView(
             state: state,
             attentionMessage: attentionMessage,
-            recordingLevel: currentRecordingLevel
+            recordingLevel: currentRecordingLevel,
+            onCancelTapped: onCancelTapped
         )
         updatePanelSize(state: state, attentionMessage: attentionMessage)
         if ensureVisible {
@@ -141,6 +144,17 @@ class RecordingIndicatorWindow: NSPanel {
     
     func show() {
         showRecording()
+    }
+
+    func setCancelAction(_ action: (() -> Void)?) {
+        DispatchQueue.main.async {
+            self.onCancelTapped = action
+            self.render(
+                state: self.currentState,
+                attentionMessage: self.currentAttentionMessage,
+                ensureVisible: false
+            )
+        }
     }
     
     func hide() {
