@@ -94,6 +94,22 @@ final class RealtimeRecorderTests: XCTestCase {
         XCTAssertEqual(RealtimeRecorder.normalizeSampleRate(.nan), 16_000.0, accuracy: 0.001)
     }
 
+    func testNormalizedInputLevelReturnsZeroWhenSilent() {
+        let level = RealtimeRecorder.normalizedInputLevel(maxAmplitude: 0, silenceThreshold: -40)
+        XCTAssertEqual(level, 0, accuracy: 0.0001)
+    }
+
+    func testNormalizedInputLevelScalesBetweenSilenceAndFullScale() {
+        let level = RealtimeRecorder.normalizedInputLevel(maxAmplitude: 0.1, silenceThreshold: -40)
+        XCTAssertGreaterThan(level, 0)
+        XCTAssertLessThan(level, 1)
+    }
+
+    func testNormalizedInputLevelClampsToOneForLoudInput() {
+        let level = RealtimeRecorder.normalizedInputLevel(maxAmplitude: 1.0, silenceThreshold: -40)
+        XCTAssertEqual(level, 1, accuracy: 0.0001)
+    }
+
     func testHasUsableInputFormatForNormalMonoInput() {
         let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)
         XCTAssertNotNil(format)

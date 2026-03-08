@@ -5,6 +5,7 @@ class RecordingIndicatorWindow: NSPanel {
     private var hostingController: NSHostingController<RecordingIndicatorView>?
     private var currentState: IndicatorState = .recording
     private var currentAttentionMessage: String?
+    private var currentRecordingLevel: CGFloat = 0
     private var visibilityToken: Int = 0
     
     init() {
@@ -36,7 +37,11 @@ class RecordingIndicatorWindow: NSPanel {
     }
     
     private func setupContent() {
-        let view = RecordingIndicatorView(state: currentState, attentionMessage: currentAttentionMessage)
+        let view = RecordingIndicatorView(
+            state: currentState,
+            attentionMessage: currentAttentionMessage,
+            recordingLevel: currentRecordingLevel
+        )
         hostingController = NSHostingController(rootView: view)
         self.contentView = hostingController?.view
         updatePanelSize(state: currentState, attentionMessage: currentAttentionMessage)
@@ -70,7 +75,14 @@ class RecordingIndicatorWindow: NSPanel {
     private func render(state: IndicatorState, attentionMessage: String?, ensureVisible: Bool) {
         currentState = state
         currentAttentionMessage = attentionMessage
-        hostingController?.rootView = RecordingIndicatorView(state: state, attentionMessage: attentionMessage)
+        if state != .recording {
+            currentRecordingLevel = 0
+        }
+        hostingController?.rootView = RecordingIndicatorView(
+            state: state,
+            attentionMessage: attentionMessage,
+            recordingLevel: currentRecordingLevel
+        )
         updatePanelSize(state: state, attentionMessage: attentionMessage)
         if ensureVisible {
             visibilityToken += 1
@@ -110,6 +122,20 @@ class RecordingIndicatorWindow: NSPanel {
     func showAttention(message: String) {
         DispatchQueue.main.async {
             self.render(state: .attention, attentionMessage: message, ensureVisible: true)
+        }
+    }
+
+    func updateRecordingLevel(_ level: CGFloat) {
+        DispatchQueue.main.async {
+            let clamped = max(0, min(level, 1))
+            guard abs(clamped - self.currentRecordingLevel) >= 0.01 else {
+                return
+            }
+            self.currentRecordingLevel = clamped
+            guard self.currentState == .recording else {
+                return
+            }
+            self.render(state: .recording, attentionMessage: nil, ensureVisible: false)
         }
     }
     

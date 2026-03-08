@@ -18,6 +18,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     
     var recordingURL: URL? { lastFileURL }
     var onFileCreated: ((URL, Int) -> Void)?
+    var onInputLevelChanged: ((Float) -> Void)?
     private(set) var lastStartFailureReason: RecordingStartFailureReason?
 
     var batchInterval: TimeInterval
@@ -27,6 +28,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     private var lastSoundTime: TimeInterval = 0
     private var recordingStartTime: TimeInterval = 0
     private var hasRecordedContent = false
+    private var lastReportedInputLevel: Float = 0
     
     init(batchInterval: TimeInterval = 10.0, silenceThreshold: Float = -40.0, silenceDuration: TimeInterval = 0.5) {
         self.batchInterval = batchInterval
@@ -74,6 +76,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         lastSoundTime = Date().timeIntervalSince1970
         recordingStartTime = Date().timeIntervalSince1970
         hasRecordedContent = false
+        reportInputLevel(0, force: true)
         
         node.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             self?.processAudio(buffer: buffer)
@@ -112,6 +115,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         
         isRecording = false
         audioEngine = nil
+        reportInputLevel(0, force: true)
         Logger.shared.log("RealtimeRecorder: recording stopped", level: .info)
     }
     
@@ -125,6 +129,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         let maxAmplitude = Self.appendSamples(samples, to: &audioBuffer)
         
         let amplitudeInDb = 20 * log10(max(maxAmplitude, 1e-10))
+        reportInputLevel(Self.normalizedInputLevel(maxAmplitude: maxAmplitude, silenceThreshold: silenceThreshold))
         let currentTime = Date().timeIntervalSince1970
         let elapsedTime = currentTime - recordingStartTime
         
@@ -244,6 +249,18 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         format.channelCount > 0 && format.sampleRate.isFinite && format.sampleRate > 0
     }
 
+    static func normalizedInputLevel(maxAmplitude: Float, silenceThreshold: Float) -> Float {
+        let clampedAmplitude = max(0, min(maxAmplitude, 1))
+        guard clampedAmplitude > 0 else {
+            return 0
+        }
+
+        let amplitudeDb = 20 * log10(clampedAmplitude)
+        let floorDb = min(-1, silenceThreshold)
+        let normalized = (amplitudeDb - floorDb) / -floorDb
+        return max(0, min(normalized, 1))
+    }
+
     static func shouldSplitChunk(
         elapsedTime: TimeInterval,
         timeSinceLastSound: TimeInterval,
@@ -257,5 +274,18 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
 
         return normalizedElapsed >= normalizedBatchInterval &&
             normalizedSilence >= normalizedSilenceDuration
+    }
+
+    private func reportInputLevel(_ level: Float, force: Bool = false) {
+        let clamped = max(0, min(level, 1))
+        if !force && abs(clamped - lastReportedInputLevel) < 0.015 {
+            return
+        }
+        lastReportedInputLevel = clamped
+
+        let handler = onInputLevelChanged
+        DispatchQueue.main.async {
+            handler?(clamped)
+        }
     }
 }

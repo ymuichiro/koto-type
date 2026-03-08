@@ -10,12 +10,14 @@ enum IndicatorState {
 struct RecordingIndicatorView: View {
     let state: IndicatorState
     let attentionMessage: String?
+    let recordingLevel: CGFloat
     private static let outerPadding: CGFloat = 6
     private static let contentClipCornerRadius: CGFloat = 13
 
-    init(state: IndicatorState, attentionMessage: String? = nil) {
+    init(state: IndicatorState, attentionMessage: String? = nil, recordingLevel: CGFloat = 0) {
         self.state = state
         self.attentionMessage = attentionMessage
+        self.recordingLevel = max(0, min(recordingLevel, 1))
     }
 
     private static func frameSize(for state: IndicatorState, attentionMessage: String?) -> CGSize {
@@ -50,13 +52,14 @@ struct RecordingIndicatorView: View {
         .padding(Self.outerPadding)
         .animation(.easeInOut(duration: 0.2), value: state)
         .animation(.easeInOut(duration: 0.2), value: attentionMessage ?? "")
+        .animation(.linear(duration: 0.08), value: recordingLevel)
     }
 
     @ViewBuilder
     private var stateContent: some View {
         switch state {
         case .recording:
-            RecordingContent()
+            RecordingContent(level: recordingLevel)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -124,6 +127,7 @@ private struct IndicatorBackground: View {
 }
 
 private struct RecordingContent: View {
+    let level: CGFloat
     @State private var pulse = false
 
     var body: some View {
@@ -140,7 +144,7 @@ private struct RecordingContent: View {
                     .opacity(pulse ? 0.08 : 0.7)
             }
 
-            WaveformAnimation(color: .white)
+            WaveformAnimation(color: .white, level: level)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
@@ -153,27 +157,39 @@ private struct RecordingContent: View {
 
 private struct WaveformAnimation: View {
     let color: Color
+    let level: CGFloat
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
+            let clampedLevel = max(0, min(level, 1))
+            let baseHeights: [CGFloat] = [0.48, 0.68, 0.86, 1.0, 0.86, 0.68, 0.48]
 
             HStack(spacing: 3) {
                 ForEach(0..<7, id: \.self) { index in
                     Capsule(style: .continuous)
                         .fill(color.opacity(0.95))
-                        .frame(width: 3, height: barHeight(index: index, time: t))
+                        .frame(
+                            width: 3,
+                            height: barHeight(
+                                index: index,
+                                time: t,
+                                level: clampedLevel,
+                                baseHeightFactor: baseHeights[index]
+                            )
+                        )
                 }
             }
             .frame(width: 36, height: 26)
         }
     }
 
-    private func barHeight(index: Int, time: TimeInterval) -> CGFloat {
-        let base: CGFloat = 8
-        let amplitude: CGFloat = 12
-        let value = sin((time * 5.2) + (Double(index) * 0.6))
-        return base + CGFloat(abs(value)) * amplitude
+    private func barHeight(index: Int, time: TimeInterval, level: CGFloat, baseHeightFactor: CGFloat) -> CGFloat {
+        let minHeight: CGFloat = 4
+        let maxHeight: CGFloat = 23
+        let levelDriven = minHeight + (14 * level * baseHeightFactor)
+        let wobble = abs(sin((time * 8.5) + (Double(index) * 0.8))) * (3 * level)
+        return min(maxHeight, levelDriven + wobble)
     }
 }
 

@@ -210,6 +210,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         realtimeRecorder?.batchInterval = currentSettings.batchInterval
         realtimeRecorder?.silenceThreshold = Float(currentSettings.silenceThreshold)
         realtimeRecorder?.silenceDuration = currentSettings.silenceDuration
+        realtimeRecorder?.onInputLevelChanged = { [weak self] level in
+            self?.recordingIndicatorWindow?.updateRecordingLevel(CGFloat(level))
+        }
+        recordingIndicatorWindow?.updateRecordingLevel(0)
 
         realtimeRecorder?.onFileCreated = { [weak self] url, localIndex in
             guard let self = self else { return }
@@ -243,6 +247,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 Logger.shared.log("Recording aborted: microphone input device is unavailable", level: .warning)
                 showTransientRecordingAttention("Microphone not detected")
             }
+            realtimeRecorder?.onInputLevelChanged = nil
+            recordingIndicatorWindow?.updateRecordingLevel(0)
             isRecording = false
             activeRecordingSessionID = nil
             destroySession(sessionID: sessionID)
@@ -274,6 +280,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         session.screenshotContext = ScreenContextExtractor.captureScreenTextContext()
         Logger.shared.log("Stopping audio recording for session \(sessionID)...", level: .info)
         realtimeRecorder?.stopRecording()
+        realtimeRecorder?.onInputLevelChanged = nil
+        recordingIndicatorWindow?.updateRecordingLevel(0)
         Logger.shared.log("Recording stopped (session \(sessionID))", level: .info)
         Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
         recordingIndicatorWindow?.showProcessing()
