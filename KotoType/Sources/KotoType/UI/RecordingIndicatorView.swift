@@ -52,7 +52,6 @@ struct RecordingIndicatorView: View {
         .padding(Self.outerPadding)
         .animation(.easeInOut(duration: 0.2), value: state)
         .animation(.easeInOut(duration: 0.2), value: attentionMessage ?? "")
-        .animation(.linear(duration: 0.08), value: recordingLevel)
     }
 
     @ViewBuilder
@@ -145,6 +144,7 @@ private struct RecordingContent: View {
             }
 
             WaveformAnimation(color: .white, level: level)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
@@ -158,57 +158,109 @@ private struct RecordingContent: View {
 private struct WaveformAnimation: View {
     let color: Color
     let level: CGFloat
-    private let barCount = 32
     private let barWidth: CGFloat = 4
     private let barSpacing: CGFloat = 3
+    private let minHeight: CGFloat = 4
+    private let maxHeight: CGFloat = 23
+    private let updateInterval: TimeInterval = 1.0 / 20.0
+    @State private var history: [CGFloat] = []
+    @State private var timer = Timer.publish(every: 1.0 / 20.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let clampedLevel = max(0, min(level, 1))
-            let boostedLevel = min(1, pow(clampedLevel, 0.55) * 1.9)
-            let baseHeights = baseHeightFactors(count: barCount)
-
+        GeometryReader { proxy in
+            let barCount = Self.barCount(
+                for: proxy.size.width,
+                barWidth: barWidth,
+                barSpacing: barSpacing
+            )
             HStack(spacing: barSpacing) {
                 ForEach(0..<barCount, id: \.self) { index in
+                    let sample = sampleValue(at: index, totalCount: barCount)
                     Capsule(style: .continuous)
                         .fill(color.opacity(0.95))
-                        .frame(
-                            width: barWidth,
-                            height: barHeight(
-                                index: index,
-                                time: t,
-                                level: boostedLevel,
-                                baseHeightFactor: baseHeights[index]
-                            )
-                        )
+                        .frame(width: barWidth, height: barHeight(for: sample))
                 }
             }
-            .frame(
-                width: (CGFloat(barCount) * barWidth) + (CGFloat(barCount - 1) * barSpacing),
-                height: 26
-            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .onAppear {
+                configureHistory(count: barCount)
+                timer = Timer.publish(every: updateInterval, on: .main, in: .common).autoconnect()
+            }
+            .onChange(of: barCount) { newCount in
+                configureHistory(count: newCount)
+            }
+            .onReceive(timer) { _ in
+                appendSample(amplifiedLevel, maxCount: barCount)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 26, maxHeight: 26, alignment: .leading)
+        .transaction { transaction in
+            transaction.animation = nil
         }
     }
 
-    private func barHeight(index: Int, time: TimeInterval, level: CGFloat, baseHeightFactor: CGFloat) -> CGFloat {
-        let minHeight: CGFloat = 4
-        let maxHeight: CGFloat = 23
-        let levelDriven = minHeight + (16 * level * baseHeightFactor)
-        let wobbleStrength = max(0.5, level)
-        let wobble = abs(sin((time * 8.5) + (Double(index) * 0.8))) * (5 * wobbleStrength)
-        return min(maxHeight, levelDriven + wobble)
+    private var amplifiedLevel: CGFloat {
+        let clampedLevel = max(0, min(level, 1))
+        return min(1, pow(clampedLevel, 0.5) * 1.85)
     }
 
-    private func baseHeightFactors(count: Int) -> [CGFloat] {
-        guard count > 1 else {
-            return [1]
+    private static func barCount(for width: CGFloat, barWidth: CGFloat, barSpacing: CGFloat) -> Int {
+        let safeWidth = max(0, width)
+        let unit = barWidth + barSpacing
+        guard unit > 0 else {
+            return 1
         }
-        let center = Double(count - 1) / 2.0
-        return (0..<count).map { index in
-            let normalizedDistance = abs(Double(index) - center) / center
-            return CGFloat(0.45 + ((1.0 - normalizedDistance) * 0.55))
+        return max(1, Int((safeWidth + barSpacing) / unit))
+    }
+
+    private func configureHistory(count: Int) {
+        guard count > 0 else {
+            history = []
+            return
         }
+        if history.count > count {
+            history = Array(history.suffix(count))
+        } else if history.count < count {
+            history = Array(repeating: 0, count: count - history.count) + history
+        }
+    }
+
+    private func appendSample(_ sample: CGFloat, maxCount: Int) {
+        guard maxCount > 0 else {
+            history = []
+            return
+        }
+        let clamped = max(0, min(sample, 1))
+        var updated = history
+        updated.append(clamped)
+        if updated.count > maxCount {
+            updated.removeFirst(updated.count - maxCount)
+        }
+        history = updated
+    }
+
+    private func sampleValue(at index: Int, totalCount: Int) -> CGFloat {
+        guard totalCount > 0 else {
+            return 0
+        }
+        guard !history.isEmpty else {
+            return 0
+        }
+
+        let missingPrefixCount = max(0, totalCount - history.count)
+        if index < missingPrefixCount {
+            return 0
+        }
+
+        let historyIndex = index - missingPrefixCount
+        guard history.indices.contains(historyIndex) else {
+            return 0
+        }
+        return history[historyIndex]
+    }
+
+    private func barHeight(for sample: CGFloat) -> CGFloat {
+        minHeight + ((maxHeight - minHeight) * max(0, min(sample, 1)))
     }
 }
 
