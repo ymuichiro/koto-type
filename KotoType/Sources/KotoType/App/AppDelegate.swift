@@ -40,6 +40,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var initialSetupWindowController: InitialSetupWindowController?
     var isRecording = false
     private var isImportingAudio = false
+    private var isCancelingImportedAudioTranscription = false
     private var didSuspendRealtimeWorkersForImport = false
     private var importedAudioTranscriptionManager: ImportedAudioTranscriptionManager?
     private var serverScriptPath: String = ""
@@ -294,26 +295,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cancelRecording() {
-        guard isRecording, let sessionID = activeRecordingSessionID else {
+        if isRecording, let sessionID = activeRecordingSessionID {
+            Logger.shared.log("Canceling audio recording for session \(sessionID)...", level: .info)
+            isRecording = false
+            activeRecordingSessionID = nil
+            realtimeRecorder?.stopRecording(discardPendingAudio: true)
+            realtimeRecorder?.onInputLevelChanged = nil
+            recordingIndicatorWindow?.updateRecordingLevel(0)
+            destroySession(sessionID: sessionID)
+
+            if indicatorPresentation.currentLiveSessionID == nil {
+                recordingIndicatorWindow?.hide()
+            } else {
+                recordingIndicatorWindow?.showProcessing()
+            }
+
+            Logger.shared.log("Recording canceled (session \(sessionID))", level: .info)
+            tryFinalizePendingSessionsIfNeeded()
             return
         }
 
-        Logger.shared.log("Canceling audio recording for session \(sessionID)...", level: .info)
-        isRecording = false
-        activeRecordingSessionID = nil
-        realtimeRecorder?.stopRecording(discardPendingAudio: true)
-        realtimeRecorder?.onInputLevelChanged = nil
-        recordingIndicatorWindow?.updateRecordingLevel(0)
-        destroySession(sessionID: sessionID)
+        if let sessionID = indicatorPresentation.currentLiveSessionID {
+            Logger.shared.log("Canceling pending transcription for session \(sessionID)...", level: .info)
+            destroySession(sessionID: sessionID)
 
-        if indicatorPresentation.currentLiveSessionID == nil {
-            recordingIndicatorWindow?.hide()
-        } else {
-            recordingIndicatorWindow?.showProcessing()
+            if indicatorPresentation.currentLiveSessionID == nil {
+                recordingIndicatorWindow?.hide()
+            } else {
+                recordingIndicatorWindow?.showProcessing()
+            }
+
+            Logger.shared.log("Pending transcription canceled (session \(sessionID))", level: .info)
+            tryFinalizePendingSessionsIfNeeded()
+            return
         }
 
-        Logger.shared.log("Recording canceled (session \(sessionID))", level: .info)
-        tryFinalizePendingSessionsIfNeeded()
+        if isImportingAudio {
+            Logger.shared.log("Canceling imported audio transcription...", level: .info)
+            isImportingAudio = false
+            isCancelingImportedAudioTranscription = true
+            importedAudioTranscriptionManager?.stop()
+            recordingIndicatorWindow?.hide()
+            resumeRealtimeTranscriptionWorkersAfterImportIfNeeded()
+            applyPendingWorkerReconfigureIfPossible()
+            return
+        }
+
+        Logger.shared.log("Cancel request ignored because there is no active recording/transcription task", level: .debug)
     }
 
     private func createRecordingSession() -> RecordingSessionContext {
@@ -534,6 +562,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.isImportingAudio = false
             self.recordingIndicatorWindow?.hide()
             self.resumeRealtimeTranscriptionWorkersAfterImportIfNeeded()
+
+            if self.isCancelingImportedAudioTranscription {
+                self.isCancelingImportedAudioTranscription = false
+                Logger.shared.log("Imported audio transcription canceled by user", level: .info)
+                return
+            }
 
             switch result {
             case let .success(output):

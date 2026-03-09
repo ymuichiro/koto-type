@@ -70,7 +70,7 @@ struct RecordingIndicatorView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
         case .processing:
-            ProcessingContent()
+            ProcessingContent(onCancelTapped: onCancelTapped)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -299,31 +299,53 @@ private struct WaveformAnimation: View {
 }
 
 private struct ProcessingContent: View {
+    let onCancelTapped: () -> Void
     @State private var rotating = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
-                    .frame(width: 20, height: 20)
+        ZStack(alignment: .topTrailing) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
+                        .frame(width: 20, height: 20)
 
-                Circle()
-                    .trim(from: 0.1, to: 0.78)
-                    .stroke(
-                        AngularGradient(
-                            colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
-                            center: .center
-                        ),
-                        style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
-                    )
-                    .frame(width: 20, height: 20)
-                    .rotationEffect(.degrees(rotating ? 360 : 0))
+                    Circle()
+                        .trim(from: 0.1, to: 0.78)
+                        .stroke(
+                            AngularGradient(
+                                colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
+                                center: .center
+                            ),
+                            style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
+                        )
+                        .frame(width: 20, height: 20)
+                        .rotationEffect(.degrees(rotating ? 360 : 0))
+                }
+
+                ProcessingDots()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            ProcessingDots()
+            Button(action: onCancelTapped) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.92))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 1)
+            .padding(.trailing, 2)
+            .help("Cancel transcription")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
                 rotating = true
