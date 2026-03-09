@@ -11,7 +11,7 @@ struct RecordingIndicatorView: View {
     let state: IndicatorState
     let attentionMessage: String?
     let recordingLevel: CGFloat
-    let onCancelTapped: (() -> Void)?
+    let onCancelTapped: () -> Void
     private static let outerPadding: CGFloat = 6
     private static let contentClipCornerRadius: CGFloat = 13
 
@@ -19,7 +19,7 @@ struct RecordingIndicatorView: View {
         state: IndicatorState,
         attentionMessage: String? = nil,
         recordingLevel: CGFloat = 0,
-        onCancelTapped: (() -> Void)? = nil
+        onCancelTapped: @escaping () -> Void = {}
     ) {
         self.state = state
         self.attentionMessage = attentionMessage
@@ -134,55 +134,33 @@ private struct IndicatorBackground: View {
 
 private struct RecordingContent: View {
     let level: CGFloat
-    let onCancelTapped: (() -> Void)?
-    @State private var pulse = false
+    let onCancelTapped: () -> Void
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             WaveformAnimation(color: .white, level: level)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-            HStack(spacing: 0) {
-                ZStack {
-                    Circle()
-                        .fill(Color.red.opacity(0.92))
-                        .frame(width: 12, height: 12)
-
-                    Circle()
-                        .stroke(Color.red.opacity(0.45), lineWidth: 2)
-                        .frame(width: 24, height: 24)
-                        .scaleEffect(pulse ? 1.28 : 0.86)
-                        .opacity(pulse ? 0.08 : 0.7)
-                }
-
-                Spacer()
-
-                if let onCancelTapped {
-                    Button(action: onCancelTapped) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.92))
-                            .frame(width: 22, height: 22)
-                            .background(
-                                Circle()
-                                    .fill(Color.black.opacity(0.38))
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help("Cancel recording")
-                }
+            Button(action: onCancelTapped) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.92))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    )
             }
+            .buttonStyle(.plain)
+            .padding(.top, 1)
+            .padding(.trailing, 2)
+            .help("Cancel recording")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
     }
 }
 
@@ -193,6 +171,8 @@ private struct WaveformAnimation: View {
     private let barSpacing: CGFloat = 3
     private let minHeight: CGFloat = 3
     private let maxHeight: CGFloat = 32
+    private let inputNoiseFloor: CGFloat = 0.08
+    private let inputGain: CGFloat = 1.45
     private let updateInterval: TimeInterval = 1.0 / 20.0
     @State private var history: [CGFloat] = []
     @State private var timer = Timer.publish(every: 1.0 / 20.0, on: .main, in: .common).autoconnect()
@@ -239,7 +219,8 @@ private struct WaveformAnimation: View {
 
     private var amplifiedLevel: CGFloat {
         let clampedLevel = max(0, min(level, 1))
-        return min(1, pow(clampedLevel, 0.5) * 1.85)
+        let gatedLevel = max(0, clampedLevel - inputNoiseFloor) / (1 - inputNoiseFloor)
+        return min(1, pow(gatedLevel, 0.75) * inputGain)
     }
 
     private static func barCount(for width: CGFloat, barWidth: CGFloat, barSpacing: CGFloat) -> Int {

@@ -115,8 +115,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("MultiProcessManager created", level: .debug)
         settingsWindowController = SettingsWindowController()
         historyWindowController = HistoryWindowController()
-        recordingIndicatorWindow = RecordingIndicatorWindow()
-        recordingIndicatorWindow?.setCancelAction { [weak self] in
+        recordingIndicatorWindow = RecordingIndicatorWindow { [weak self] in
             Task { @MainActor [weak self] in
                 self?.cancelRecording()
             }

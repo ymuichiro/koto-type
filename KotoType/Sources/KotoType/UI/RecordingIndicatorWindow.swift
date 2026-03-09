@@ -6,10 +6,11 @@ class RecordingIndicatorWindow: NSPanel {
     private var currentState: IndicatorState = .recording
     private var currentAttentionMessage: String?
     private var currentRecordingLevel: CGFloat = 0
-    private var onCancelTapped: (() -> Void)?
+    private let onCancelTapped: () -> Void
     private var visibilityToken: Int = 0
     
-    init() {
+    init(onCancelTapped: @escaping () -> Void = {}) {
+        self.onCancelTapped = onCancelTapped
         let initialSize = RecordingIndicatorView.preferredContentSize(for: .recording, attentionMessage: nil)
         let contentRect = NSRect(x: 0, y: 0, width: initialSize.width, height: initialSize.height)
         
@@ -144,17 +145,6 @@ class RecordingIndicatorWindow: NSPanel {
     
     func show() {
         showRecording()
-    }
-
-    func setCancelAction(_ action: (() -> Void)?) {
-        DispatchQueue.main.async {
-            self.onCancelTapped = action
-            self.render(
-                state: self.currentState,
-                attentionMessage: self.currentAttentionMessage,
-                ensureVisible: false
-            )
-        }
     }
     
     func hide() {
