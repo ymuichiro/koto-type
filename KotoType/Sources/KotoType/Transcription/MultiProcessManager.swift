@@ -496,7 +496,7 @@ final class MultiProcessManager: @unchecked Sendable {
         }
         recoveryInProgress.insert(processIndex)
 
-        oldManager = processes[processIndex]
+        oldManager = processes.removeValue(forKey: processIndex)
         idleProcesses.remove(processIndex)
         segmentContextByProcess.removeValue(forKey: processIndex)
         healthCheckContextByProcess.removeValue(forKey: processIndex)
