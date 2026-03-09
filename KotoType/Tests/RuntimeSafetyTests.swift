@@ -32,6 +32,24 @@ final class RuntimeSafetyTests: XCTestCase {
         )
     }
 
+    func testBackendServerLimitsFollowDevelopmentWorkerCount() {
+        let limits = AppDelegate.backendServerLimits(
+            requestedWorkers: 3,
+            bundlePath: "/tmp/koto-type/.build/debug/KotoType"
+        )
+        XCTAssertEqual(limits.maxActiveServers, 3)
+        XCTAssertEqual(limits.maxParallelModelLoads, 1)
+    }
+
+    func testBackendServerLimitsClampToOneForAppBundle() {
+        let limits = AppDelegate.backendServerLimits(
+            requestedWorkers: 4,
+            bundlePath: "/Applications/KotoType.app"
+        )
+        XCTAssertEqual(limits.maxActiveServers, 1)
+        XCTAssertEqual(limits.maxParallelModelLoads, 1)
+    }
+
     func testShouldAutoRecoverIdleTerminationDisablesSigKill() {
         XCTAssertFalse(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 9))
     }

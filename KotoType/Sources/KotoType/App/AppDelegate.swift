@@ -52,8 +52,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var finalizationQueue = RecordingFinalizationQueue()
     private var pendingSegmentFiles: [Int: URL] = [:]
     private var segmentRouter = RecordingSegmentRouter()
+    private var ignoredLateSegmentCompletions: [Int: Date] = [:]
     private let finalizationReadyDelay: TimeInterval = 0.35
     private let completionTimeoutInterval: TimeInterval = 50.0
+    private let ignoredLateSegmentTTL: TimeInterval = 120.0
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var temporaryBatchCleanupTimer: DispatchSourceTimer?
     private var adaptiveWorkerCap: Int?
@@ -74,6 +76,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return 1
         }
         return normalizedRequested
+    }
+
+    nonisolated static func backendServerLimits(
+        requestedWorkers: Int,
+        bundlePath: String = Bundle.main.bundlePath
+    ) -> (maxActiveServers: Int, maxParallelModelLoads: Int) {
+        let workerCount = resolvedWorkerCount(requested: requestedWorkers, bundlePath: bundlePath)
+        return (max(1, workerCount), 1)
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -367,6 +377,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleSegmentComplete(globalIndex: Int, output: String) {
         guard let route = segmentRouter.consume(globalIndex: globalIndex) else {
+            if shouldIgnoreLateSegmentCompletion(globalIndex: globalIndex) {
+                Logger.shared.log(
+                    "Ignoring late segment completion for cleaned-up global index=\(globalIndex).",
+                    level: .debug
+                )
+                cleanupSegmentFile(globalIndex: globalIndex)
+                return
+            }
             Logger.shared.log(
                 "Received segment completion for unknown global index=\(globalIndex). Ignoring stale callback.",
                 level: .warning
@@ -623,6 +641,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let requestedWorkerCount = currentSettings.parallelism
         let bundleResolvedWorkerCount = Self.resolvedWorkerCount(requested: requestedWorkerCount)
         let effectiveWorkerCount = effectiveRealtimeWorkerCount(requested: requestedWorkerCount)
+        let backendLimits = Self.backendServerLimits(requestedWorkers: effectiveWorkerCount)
 
         if !force && currentRealtimeWorkerCount == effectiveWorkerCount {
             return
@@ -641,10 +660,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
+        setenv("KOTOTYPE_MAX_ACTIVE_SERVERS", "\(backendLimits.maxActiveServers)", 1)
+        setenv("KOTOTYPE_MAX_PARALLEL_MODEL_LOADS", "\(backendLimits.maxParallelModelLoads)", 1)
+
         multiProcessManager.initialize(count: effectiveWorkerCount, scriptPath: serverScriptPath)
         currentRealtimeWorkerCount = effectiveWorkerCount
         Logger.shared.log(
-            "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason))",
+            "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason)); backend limits activeServers=\(backendLimits.maxActiveServers), parallelModelLoads=\(backendLimits.maxParallelModelLoads)",
             level: .info
         )
     }
@@ -836,12 +858,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func cleanupPendingSegmentFiles(forSessionID sessionID: Int) {
         let indices = segmentRouter.removeAll(forSessionID: sessionID)
+        rememberIgnoredLateSegmentCompletions(indices)
         for globalIndex in indices {
             cleanupSegmentFile(globalIndex: globalIndex)
         }
     }
 
     private func cleanupAllPendingSegmentFiles() {
+        let indices = Array(pendingSegmentFiles.keys)
+        rememberIgnoredLateSegmentCompletions(indices)
         for (_, fileURL) in pendingSegmentFiles {
             removeAudioFileIfExists(fileURL)
         }
@@ -857,6 +882,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } catch {
             Logger.shared.log("Failed to remove processed batch file: \(fileURL.path), error: \(error)", level: .warning)
+        }
+    }
+
+    private func rememberIgnoredLateSegmentCompletions(_ globalIndices: [Int]) {
+        guard !globalIndices.isEmpty else {
+            return
+        }
+        pruneIgnoredLateSegmentCompletions()
+        let now = Date()
+        for index in globalIndices {
+            ignoredLateSegmentCompletions[index] = now
+        }
+    }
+
+    private func shouldIgnoreLateSegmentCompletion(globalIndex: Int) -> Bool {
+        pruneIgnoredLateSegmentCompletions()
+        guard ignoredLateSegmentCompletions.removeValue(forKey: globalIndex) != nil else {
+            return false
+        }
+        return true
+    }
+
+    private func pruneIgnoredLateSegmentCompletions(now: Date = Date()) {
+        ignoredLateSegmentCompletions = ignoredLateSegmentCompletions.filter { _, timestamp in
+            now.timeIntervalSince(timestamp) <= ignoredLateSegmentTTL
         }
     }
     
