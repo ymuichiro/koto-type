@@ -96,10 +96,6 @@ final class IntegrationTests: XCTestCase {
             self.multiProcessManager?.processFile(url: url, index: index, settings: AppSettings())
         }
 
-        batchTranscriptionManager.onTranscriptionComplete = { text in
-            XCTAssertFalse(text.isEmpty, "Transcription should not be empty")
-        }
-
         multiProcessManager.outputReceived = { processIndex, output in
             XCTAssertFalse(output.isEmpty, "Output should not be empty")
         }

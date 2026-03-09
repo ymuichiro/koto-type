@@ -168,7 +168,7 @@ struct SettingsView: View {
                     Label("Debug", systemImage: "ladybug")
                 }
         }
-        .frame(width: 600, height: 600)
+        .frame(minWidth: 600, minHeight: 600, alignment: .topLeading)
     }
 
     private var generalSettings: some View {

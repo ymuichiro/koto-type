@@ -9,25 +9,78 @@ enum IndicatorState {
 
 struct RecordingIndicatorView: View {
     let state: IndicatorState
+    let attentionMessage: String?
+    let recordingLevel: CGFloat
+    let onCancelTapped: () -> Void
+    private static let outerPadding: CGFloat = 6
+    private static let contentClipCornerRadius: CGFloat = 13
+
+    init(
+        state: IndicatorState,
+        attentionMessage: String? = nil,
+        recordingLevel: CGFloat = 0,
+        onCancelTapped: @escaping () -> Void = {}
+    ) {
+        self.state = state
+        self.attentionMessage = attentionMessage
+        self.recordingLevel = max(0, min(recordingLevel, 1))
+        self.onCancelTapped = onCancelTapped
+    }
+
+    private static func frameSize(for state: IndicatorState, attentionMessage: String?) -> CGSize {
+        let hasAttentionMessage = state == .attention && !(attentionMessage?.isEmpty ?? true)
+        if hasAttentionMessage {
+            return CGSize(width: 260, height: 68)
+        }
+
+        let width: CGFloat = (state == .recording || state == .processing) ? 368 : 124
+        return CGSize(width: width, height: 68)
+    }
+
+    static func preferredContentSize(for state: IndicatorState, attentionMessage: String?) -> CGSize {
+        let frameSize = Self.frameSize(for: state, attentionMessage: attentionMessage)
+        let padding = Self.outerPadding * 2
+        return CGSize(width: frameSize.width + padding, height: frameSize.height + padding)
+    }
+
+    private var preferredFrameSize: CGSize {
+        Self.frameSize(for: state, attentionMessage: attentionMessage)
+    }
 
     var body: some View {
         ZStack {
             IndicatorBackground(state: state)
 
-            switch state {
-            case .recording:
-                RecordingContent()
-            case .processing:
-                ProcessingContent()
-            case .completed:
-                CompletedContent()
-            case .attention:
-                AttentionContent()
-            }
+            stateContent
+                .frame(width: preferredFrameSize.width, height: preferredFrameSize.height)
+                .clipShape(RoundedRectangle(cornerRadius: Self.contentClipCornerRadius, style: .continuous))
         }
-        .frame(width: state == .recording || state == .processing ? 92 : 124, height: 56)
-        .padding(6)
+        .frame(width: preferredFrameSize.width, height: preferredFrameSize.height)
+        .padding(Self.outerPadding)
         .animation(.easeInOut(duration: 0.2), value: state)
+        .animation(.easeInOut(duration: 0.2), value: attentionMessage ?? "")
+    }
+
+    @ViewBuilder
+    private var stateContent: some View {
+        switch state {
+        case .recording:
+            RecordingContent(level: recordingLevel, onCancelTapped: onCancelTapped)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+        case .processing:
+            ProcessingContent(onCancelTapped: onCancelTapped)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+        case .completed:
+            CompletedContent()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        case .attention:
+            AttentionContent(message: attentionMessage)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
     }
 }
 
@@ -47,103 +100,251 @@ private struct IndicatorBackground: View {
                 )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(borderColor, lineWidth: 1.0)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.14),
+                                Color.white.opacity(0.03),
+                                Color.clear,
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .padding(1)
             )
-            .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+            .shadow(color: accentColor.opacity(0.12), radius: 8, x: 0, y: 2)
+            .shadow(color: .black.opacity(0.22), radius: 8, x: 0, y: 4)
     }
 
-    private var borderColor: Color {
+    private var accentColor: Color {
         switch state {
         case .recording:
-            return Color.red.opacity(0.55)
+            return .red
         case .processing:
-            return Color.blue.opacity(0.55)
+            return .blue
         case .completed:
-            return Color.green.opacity(0.55)
+            return .green
         case .attention:
-            return Color.orange.opacity(0.55)
+            return .orange
         }
     }
 }
 
 private struct RecordingContent: View {
-    @State private var pulse = false
+    let level: CGFloat
+    let onCancelTapped: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.red.opacity(0.92))
-                    .frame(width: 12, height: 12)
+        ZStack(alignment: .topTrailing) {
+            WaveformAnimation(color: .white, level: level)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-                Circle()
-                    .stroke(Color.red.opacity(0.45), lineWidth: 2)
-                    .frame(width: 24, height: 24)
-                    .scaleEffect(pulse ? 1.28 : 0.86)
-                    .opacity(pulse ? 0.08 : 0.7)
+            Button(action: onCancelTapped) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.92))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    )
             }
-
-            WaveformAnimation(color: .white)
+            .buttonStyle(.plain)
+            .padding(.top, 1)
+            .padding(.trailing, 2)
+            .help("Cancel recording")
         }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
 private struct WaveformAnimation: View {
     let color: Color
+    let level: CGFloat
+    private let barWidth: CGFloat = 4
+    private let barSpacing: CGFloat = 3
+    private let minHeight: CGFloat = 3
+    private let maxHeight: CGFloat = 32
+    private let inputNoiseFloor: CGFloat = 0.08
+    private let inputGain: CGFloat = 1.45
+    private let updateInterval: TimeInterval = 1.0 / 20.0
+    @State private var history: [CGFloat] = []
+    @State private var timer = Timer.publish(every: 1.0 / 20.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-
-            HStack(spacing: 3) {
-                ForEach(0..<7, id: \.self) { index in
+        GeometryReader { proxy in
+            let barCount = Self.barCount(
+                for: proxy.size.width,
+                barWidth: barWidth,
+                barSpacing: barSpacing
+            )
+            let spacing = Self.interBarSpacing(
+                for: proxy.size.width,
+                barCount: barCount,
+                barWidth: barWidth,
+                fallbackSpacing: barSpacing
+            )
+            HStack(spacing: spacing) {
+                ForEach(0..<barCount, id: \.self) { index in
+                    let sample = sampleValue(at: index, totalCount: barCount)
                     Capsule(style: .continuous)
                         .fill(color.opacity(0.95))
-                        .frame(width: 3, height: barHeight(index: index, time: t))
+                        .frame(width: barWidth, height: barHeight(for: sample))
                 }
             }
-            .frame(width: 36, height: 26)
+            .frame(width: proxy.size.width, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .leading)
+            .onAppear {
+                configureHistory(count: barCount)
+                timer = Timer.publish(every: updateInterval, on: .main, in: .common).autoconnect()
+            }
+            .onChange(of: barCount) { newCount in
+                configureHistory(count: newCount)
+            }
+            .onReceive(timer) { _ in
+                appendSample(amplifiedLevel, maxCount: barCount)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 39, maxHeight: 39, alignment: .leading)
+        .transaction { transaction in
+            transaction.animation = nil
         }
     }
 
-    private func barHeight(index: Int, time: TimeInterval) -> CGFloat {
-        let base: CGFloat = 8
-        let amplitude: CGFloat = 12
-        let value = sin((time * 5.2) + (Double(index) * 0.6))
-        return base + CGFloat(abs(value)) * amplitude
+    private var amplifiedLevel: CGFloat {
+        let clampedLevel = max(0, min(level, 1))
+        let gatedLevel = max(0, clampedLevel - inputNoiseFloor) / (1 - inputNoiseFloor)
+        return min(1, pow(gatedLevel, 0.75) * inputGain)
+    }
+
+    private static func barCount(for width: CGFloat, barWidth: CGFloat, barSpacing: CGFloat) -> Int {
+        let safeWidth = max(0, width)
+        let unit = barWidth + barSpacing
+        guard unit > 0 else {
+            return 1
+        }
+        return max(1, Int((safeWidth + barSpacing) / unit))
+    }
+
+    private static func interBarSpacing(
+        for width: CGFloat,
+        barCount: Int,
+        barWidth: CGFloat,
+        fallbackSpacing: CGFloat
+    ) -> CGFloat {
+        guard barCount > 1 else {
+            return 0
+        }
+        let totalBarWidth = CGFloat(barCount) * barWidth
+        let remaining = max(0, width - totalBarWidth)
+        let computed = remaining / CGFloat(barCount - 1)
+        return computed.isFinite ? computed : fallbackSpacing
+    }
+
+    private func configureHistory(count: Int) {
+        guard count > 0 else {
+            history = []
+            return
+        }
+        if history.count > count {
+            history = Array(history.suffix(count))
+        } else if history.count < count {
+            history = Array(repeating: 0, count: count - history.count) + history
+        }
+    }
+
+    private func appendSample(_ sample: CGFloat, maxCount: Int) {
+        guard maxCount > 0 else {
+            history = []
+            return
+        }
+        let clamped = max(0, min(sample, 1))
+        var updated = history
+        updated.append(clamped)
+        if updated.count > maxCount {
+            updated.removeFirst(updated.count - maxCount)
+        }
+        history = updated
+    }
+
+    private func sampleValue(at index: Int, totalCount: Int) -> CGFloat {
+        guard totalCount > 0 else {
+            return 0
+        }
+        guard !history.isEmpty else {
+            return 0
+        }
+
+        let missingPrefixCount = max(0, totalCount - history.count)
+        if index < missingPrefixCount {
+            return 0
+        }
+
+        let historyIndex = index - missingPrefixCount
+        guard history.indices.contains(historyIndex) else {
+            return 0
+        }
+        return history[historyIndex]
+    }
+
+    private func barHeight(for sample: CGFloat) -> CGFloat {
+        minHeight + ((maxHeight - minHeight) * max(0, min(sample, 1)))
     }
 }
 
 private struct ProcessingContent: View {
+    let onCancelTapped: () -> Void
     @State private var rotating = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
-                    .frame(width: 20, height: 20)
+        ZStack(alignment: .topTrailing) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
+                        .frame(width: 20, height: 20)
 
-                Circle()
-                    .trim(from: 0.1, to: 0.78)
-                    .stroke(
-                        AngularGradient(
-                            colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
-                            center: .center
-                        ),
-                        style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
-                    )
-                    .frame(width: 20, height: 20)
-                    .rotationEffect(.degrees(rotating ? 360 : 0))
+                    Circle()
+                        .trim(from: 0.1, to: 0.78)
+                        .stroke(
+                            AngularGradient(
+                                colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
+                                center: .center
+                            ),
+                            style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
+                        )
+                        .frame(width: 20, height: 20)
+                        .rotationEffect(.degrees(rotating ? 360 : 0))
+                }
+
+                ProcessingDots()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            ProcessingDots()
+            Button(action: onCancelTapped) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.92))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 1)
+            .padding(.trailing, 2)
+            .help("Cancel transcription")
         }
         .onAppear {
             withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
@@ -186,14 +387,17 @@ private struct CompletedContent: View {
 }
 
 private struct AttentionContent: View {
+    let message: String?
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.orange.opacity(0.92))
                 .font(.system(size: 14, weight: .semibold))
-            Text("Check focus")
+            Text(message ?? "Check focus")
                 .foregroundStyle(Color.white.opacity(0.95))
                 .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
         }
     }
 }

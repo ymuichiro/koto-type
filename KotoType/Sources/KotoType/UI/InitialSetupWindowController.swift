@@ -2,24 +2,60 @@ import AppKit
 import SwiftUI
 
 final class InitialSetupWindowController: NSWindowController {
+    private static let minimumContentSize = NSSize(width: 700, height: 620)
+    private static let screenVerticalMargin: CGFloat = 120
+
+    private static func maximumContentHeight(for window: NSWindow) -> CGFloat {
+        guard let screen = window.screen ?? NSScreen.main else {
+            return minimumContentSize.height
+        }
+        return max(minimumContentSize.height, screen.visibleFrame.height - screenVerticalMargin)
+    }
+
+    private static func applyPreferredContentHeight(_ preferredHeight: CGFloat, to window: NSWindow) {
+        let currentContentSize = window.contentRect(forFrameRect: window.frame).size
+        let targetHeight = min(
+            max(preferredHeight, minimumContentSize.height),
+            maximumContentHeight(for: window)
+        )
+        let targetSize = NSSize(
+            width: max(currentContentSize.width, minimumContentSize.width),
+            height: targetHeight
+        )
+
+        guard abs(currentContentSize.height - targetSize.height) > 1 else {
+            return
+        }
+        window.setContentSize(targetSize)
+    }
+
     convenience init(
         diagnosticsService: InitialSetupDiagnosticsService = InitialSetupDiagnosticsService(),
         onComplete: @escaping () -> Void
     ) {
-        let content = InitialSetupView(
-            diagnosticsService: diagnosticsService,
-            onComplete: onComplete
-        )
-        let hostingController = NSHostingController(rootView: content)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 620),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: Self.minimumContentSize.width,
+                height: Self.minimumContentSize.height
+            ),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
+        let content = InitialSetupView(
+            diagnosticsService: diagnosticsService,
+            onComplete: onComplete,
+            onPreferredContentHeightChange: { [weak window] preferredHeight in
+                guard let window else { return }
+                Self.applyPreferredContentHeight(preferredHeight, to: window)
+            }
+        )
+        let hostingController = NSHostingController(rootView: content)
         window.center()
         window.title = "Initial Setup"
-        window.minSize = NSSize(width: 700, height: 620)
+        window.minSize = Self.minimumContentSize
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
         self.init(window: window)
@@ -31,6 +67,7 @@ struct InitialSetupView: View {
     private static let ffmpegInstallCommand = "brew install ffmpeg && ffmpeg -version"
     private let diagnosticsService: InitialSetupDiagnosticsService
     private let onComplete: () -> Void
+    private let onPreferredContentHeightChange: (CGFloat) -> Void
     private let bannerImage: NSImage?
 
     @State private var report = InitialSetupReport(items: [])
@@ -41,222 +78,250 @@ struct InitialSetupView: View {
     @State private var hasCopiedAccessibilityResetCommand = false
     @State private var hasCopiedFfmpegInstallCommand = false
     @State private var accessibilityRefreshTask: Task<Void, Never>?
+    @State private var lastReportedContentHeight: CGFloat = 0
 
     init(
         diagnosticsService: InitialSetupDiagnosticsService,
-        onComplete: @escaping () -> Void
+        onComplete: @escaping () -> Void,
+        onPreferredContentHeightChange: @escaping (CGFloat) -> Void = { _ in }
     ) {
         self.diagnosticsService = diagnosticsService
         self.onComplete = onComplete
+        self.onPreferredContentHeightChange = onPreferredContentHeightChange
         self.bannerImage = Self.loadBannerImage()
         _report = State(initialValue: diagnosticsService.evaluate())
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if let bannerImage {
-                HStack {
-                    Spacer()
-                    Image(nsImage: bannerImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 520)
-                    Spacer()
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("KotoType Initial Setup")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                Text("Before you start, confirm required permissions and FFmpeg availability.")
-                    .foregroundColor(.secondary)
-            }
-
-            if let nextRequiredItem {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Guided Setup")
-                        .font(.headline)
-                    Text("Next step: \(nextRequiredItem.title)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(guidedDetail(for: nextRequiredItem.id))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    HStack(spacing: 10) {
-                        Button(guidedActionTitle(for: nextRequiredItem.id)) {
-                            runAction(for: nextRequiredItem.id)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        if nextRequiredItem.id == "ffmpeg" && hasCopiedFfmpegInstallCommand {
-                            Text("Copied. Run in Terminal, then click Re-check.")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if let bannerImage {
+                    HStack {
+                        Spacer()
+                        Image(nsImage: bannerImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 520)
+                        Spacer()
                     }
                 }
-                .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(8)
-            }
 
-            List(report.items, id: \.id) { item in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: item.status == .passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundColor(item.status == .passed ? .green : .red)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(item.title)
-                                .font(.headline)
-                            if item.required {
-                                Text("Required")
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.red.opacity(0.15))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        Text(item.detail)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("KotoType Initial Setup")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Text("Before you start, confirm required permissions and FFmpeg availability.")
+                        .foregroundColor(.secondary)
+                }
+
+                if let nextRequiredItem {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Guided Setup")
+                            .font(.headline)
+                        Text("Next step: \(nextRequiredItem.title)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text(guidedDetail(for: nextRequiredItem.id))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 10) {
+                            Button(guidedActionTitle(for: nextRequiredItem.id)) {
+                                runAction(for: nextRequiredItem.id)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            if nextRequiredItem.id == "ffmpeg" && hasCopiedFfmpegInstallCommand {
+                                Text("Copied. Run in Terminal, then click Re-check.")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
+                }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(report.items, id: \.id) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: item.status == .passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(item.status == .passed ? .green : .red)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(item.title)
+                                        .font(.headline)
+                                    if item.required {
+                                        Text("Required")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.red.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text(item.detail)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        if item.id != report.items.last?.id {
+                            Divider()
+                        }
                     }
                 }
-                .padding(.vertical, 4)
-            }
-            .frame(height: 320)
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
 
-            if !failingRequiredItems.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Quick fixes")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    ForEach(failingRequiredItems, id: \.id) { item in
-                        HStack(alignment: .top) {
-                            Text("• \(item.title)")
-                                .font(.caption)
-                            Spacer()
-                            Button(guidedActionTitle(for: item.id)) {
-                                runAction(for: item.id)
+                if !failingRequiredItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Quick fixes")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        ForEach(failingRequiredItems, id: \.id) { item in
+                            HStack(alignment: .top) {
+                                Text("• \(item.title)")
+                                    .font(.caption)
+                                Spacer()
+                                Button(guidedActionTitle(for: item.id)) {
+                                    runAction(for: item.id)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
+                }
+
+                HStack(spacing: 10) {
+                    Button("Grant Accessibility") {
+                        runAccessibilityFlow()
+                    }
+                    Button("Grant Microphone") {
+                        runMicrophoneFlow()
+                    }
+                    .disabled(isRequestingMicrophone)
+                    Button("Grant Screen Recording") {
+                        runScreenRecordingFlow()
+                    }
+                    .disabled(isRequestingScreenRecording)
+                    Button("Open System Settings") {
+                        openAccessibilitySettings()
+                    }
+                    Spacer()
+                    Button("Re-check") {
+                        refreshChecks()
+                        shouldShowAccessibilityRestartHint = !isAccessibilityGranted
+                    }
+                    if !isAccessibilityGranted {
+                        Button("Restart App") {
+                            restartApp()
+                        }
+                    }
+                }
+
+                if isWaitingForAccessibilityUpdate {
+                    Text("Checking whether accessibility permission changes have taken effect...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else if shouldShowAccessibilityRestartHint && !isAccessibilityGranted {
+                    Text("Accessibility permission changes may take a few seconds to apply or may require a restart. After granting permission, click \"Restart App\".")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+
+                if !isAccessibilityGranted {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Accessibility Permission Troubleshooting")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("If permission changes do not apply, reset KotoType accessibility permission with the command below, then restart the app.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(Self.accessibilityResetCommand)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(nsColor: .textBackgroundColor))
+                            .cornerRadius(6)
+
+                        HStack(spacing: 10) {
+                            Button("Copy command") {
+                                copyAccessibilityResetCommand()
                             }
                             .buttonStyle(.bordered)
+
+                            if hasCopiedAccessibilityResetCommand {
+                                Text("Copied. Run it in Terminal.")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
                         }
                     }
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
                 }
-                .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(8)
-            }
 
-            HStack(spacing: 10) {
-                Button("Grant Accessibility") {
-                    runAccessibilityFlow()
-                }
-                Button("Grant Microphone") {
-                    runMicrophoneFlow()
-                }
-                .disabled(isRequestingMicrophone)
-                Button("Grant Screen Recording") {
-                    runScreenRecordingFlow()
-                }
-                .disabled(isRequestingScreenRecording)
-                Button("Open System Settings") {
-                    openAccessibilitySettings()
-                }
-                Spacer()
-                Button("Re-check") {
-                    refreshChecks()
-                    shouldShowAccessibilityRestartHint = !isAccessibilityGranted
-                }
-                if !isAccessibilityGranted {
-                    Button("Restart App") {
-                        restartApp()
-                    }
-                }
-            }
-
-            if isWaitingForAccessibilityUpdate {
-                Text("Checking whether accessibility permission changes have taken effect...")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else if shouldShowAccessibilityRestartHint && !isAccessibilityGranted {
-                Text("Accessibility permission changes may take a few seconds to apply or may require a restart. After granting permission, click \"Restart App\".")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-            }
-
-            if !isAccessibilityGranted {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Accessibility Permission Troubleshooting")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Notes")
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                    Text("If permission changes do not apply, reset KotoType accessibility permission with the command below, then restart the app.")
+                    Text("This app does not bundle FFmpeg. Install it with `brew install ffmpeg`, then run Re-check. The Python backend and dependencies are prepared automatically on first launch in development, or bundled in release builds.")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(Self.accessibilityResetCommand)
-                        .font(.system(.caption, design: .monospaced))
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .cornerRadius(6)
+                }
 
-                    HStack(spacing: 10) {
-                        Button("Copy command") {
-                            copyAccessibilityResetCommand()
+                if report.canStartApplication {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("After setup: next 3 actions")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("1. Click any text field.\n2. Hold hotkey while speaking.\n3. Release hotkey to transcribe.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Button("Show first recording test steps") {
+                            showFirstRecordingGuide()
                         }
                         .buttonStyle(.bordered)
-
-                        if hasCopiedAccessibilityResetCommand {
-                            Text("Copied. Run it in Terminal.")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                        }
                     }
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
                 }
-                .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(8)
-            }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Notes")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                Text("This app does not bundle FFmpeg. Install it with `brew install ffmpeg`, then run Re-check. The Python backend and dependencies are prepared automatically on first launch in development, or bundled in release builds.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            if report.canStartApplication {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("After setup: next 3 actions")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    Text("1. Click any text field.\n2. Hold hotkey while speaking.\n3. Release hotkey to transcribe.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Button("Show first recording test steps") {
-                        showFirstRecordingGuide()
+                HStack {
+                    Spacer()
+                    Button("Finish setup and start") {
+                        onComplete()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!report.canStartApplication)
                 }
-                .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(8)
             }
-
-            HStack {
-                Spacer()
-                Button("Finish setup and start") {
-                    onComplete()
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: InitialSetupContentHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!report.canStartApplication)
-            }
+            )
         }
-        .padding(24)
         .frame(minWidth: 700, minHeight: 620, alignment: .topLeading)
+        .onPreferenceChange(InitialSetupContentHeightPreferenceKey.self) { measuredHeight in
+            guard measuredHeight.isFinite, measuredHeight > 0 else { return }
+            let normalizedHeight = ceil(measuredHeight)
+            guard abs(normalizedHeight - lastReportedContentHeight) > 1 else { return }
+            lastReportedContentHeight = normalizedHeight
+            onPreferredContentHeightChange(normalizedHeight)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshChecks()
         }
@@ -435,5 +500,13 @@ struct InitialSetupView: View {
 
     private static func loadBannerImage() -> NSImage? {
         AppImageLoader.loadPNG(named: "koto-tyoe_banner_transparent")
+    }
+}
+
+private struct InitialSetupContentHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

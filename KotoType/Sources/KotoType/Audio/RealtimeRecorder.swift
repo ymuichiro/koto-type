@@ -1,6 +1,13 @@
 import AVFoundation
 
+enum RecordingStartFailureReason: Equatable {
+    case noInputDevice
+    case failedToGetInputNode
+    case failedToStartAudioEngine
+}
+
 final class RealtimeRecorder: NSObject, @unchecked Sendable {
+    private static let tempBatchDirectoryName = "koto-type-batch-recordings"
     private var audioEngine: AVAudioEngine?
     private var audioBuffer: [Float] = []
     private var fileCount = 0
@@ -11,6 +18,8 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     
     var recordingURL: URL? { lastFileURL }
     var onFileCreated: ((URL, Int) -> Void)?
+    var onInputLevelChanged: ((Float) -> Void)?
+    private(set) var lastStartFailureReason: RecordingStartFailureReason?
 
     var batchInterval: TimeInterval
     var silenceThreshold: Float
@@ -19,6 +28,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     private var lastSoundTime: TimeInterval = 0
     private var recordingStartTime: TimeInterval = 0
     private var hasRecordedContent = false
+    private var lastReportedInputLevel: Float = 0
     
     init(batchInterval: TimeInterval = 10.0, silenceThreshold: Float = -40.0, silenceDuration: TimeInterval = 0.5) {
         self.batchInterval = batchInterval
@@ -32,6 +42,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         Logger.shared.log("RealtimeRecorder: startRecording called", level: .info)
         lock.lock()
         defer { lock.unlock() }
+        lastStartFailureReason = nil
         
         guard !isRecording else {
             Logger.shared.log("RealtimeRecorder: already recording", level: .warning)
@@ -42,6 +53,18 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         let inputNode = audioEngine?.inputNode
         guard let node = inputNode else {
             Logger.shared.log("RealtimeRecorder: failed to get input node", level: .error)
+            lastStartFailureReason = .failedToGetInputNode
+            return false
+        }
+
+        let inputFormat = node.inputFormat(forBus: 0)
+        guard Self.hasUsableInputFormat(inputFormat) else {
+            Logger.shared.log(
+                "RealtimeRecorder: no usable microphone input format (channels=\(inputFormat.channelCount), sampleRate=\(inputFormat.sampleRate))",
+                level: .warning
+            )
+            audioEngine = nil
+            lastStartFailureReason = .noInputDevice
             return false
         }
         
@@ -53,6 +76,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         lastSoundTime = Date().timeIntervalSince1970
         recordingStartTime = Date().timeIntervalSince1970
         hasRecordedContent = false
+        reportInputLevel(0, force: true)
         
         node.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             self?.processAudio(buffer: buffer)
@@ -65,11 +89,12 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             return true
         } catch {
             Logger.shared.log("RealtimeRecorder: failed to start audio engine: \(error)", level: .error)
+            lastStartFailureReason = .failedToStartAudioEngine
             return false
         }
     }
     
-    func stopRecording() {
+    func stopRecording(discardPendingAudio: Bool = false) {
         Logger.shared.log("RealtimeRecorder: stopRecording called", level: .info)
         lock.lock()
         defer { lock.unlock() }
@@ -84,12 +109,17 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             engine.inputNode.removeTap(onBus: 0)
         }
         
-        if hasRecordedContent && !audioBuffer.isEmpty {
+        if !discardPendingAudio && hasRecordedContent && !audioBuffer.isEmpty {
             createAudioFile(force: true)
         }
         
+        if discardPendingAudio {
+            audioBuffer.removeAll()
+        }
+        hasRecordedContent = false
         isRecording = false
         audioEngine = nil
+        reportInputLevel(0, force: true)
         Logger.shared.log("RealtimeRecorder: recording stopped", level: .info)
     }
     
@@ -103,6 +133,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         let maxAmplitude = Self.appendSamples(samples, to: &audioBuffer)
         
         let amplitudeInDb = 20 * log10(max(maxAmplitude, 1e-10))
+        reportInputLevel(Self.normalizedInputLevel(maxAmplitude: maxAmplitude, silenceThreshold: silenceThreshold))
         let currentTime = Date().timeIntervalSince1970
         let elapsedTime = currentTime - recordingStartTime
         
@@ -112,7 +143,12 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         }
         
         let timeSinceLastSound = currentTime - lastSoundTime
-        let shouldSplit = elapsedTime >= batchInterval && timeSinceLastSound >= silenceDuration
+        let shouldSplit = Self.shouldSplitChunk(
+            elapsedTime: elapsedTime,
+            timeSinceLastSound: timeSinceLastSound,
+            batchInterval: batchInterval,
+            silenceDuration: silenceDuration
+        )
         
         if shouldSplit && hasRecordedContent && audioBuffer.count >= 4096 {
             Logger.shared.log("RealtimeRecorder: splitting batch - elapsedTime=\(String(format: "%.1f", elapsedTime))s, timeSinceLastSound=\(String(format: "%.1f", timeSinceLastSound))s", level: .debug)
@@ -141,10 +177,25 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             }
         }
         
-        let timestamp = Int(Date().timeIntervalSince1970)
-        let documentsPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
-        let filePath = (documentsPath as NSString).appendingPathComponent("batch_\(timestamp)_\(fileCount).wav")
-        let fileURL = URL(fileURLWithPath: filePath)
+        let tempBatchDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(Self.tempBatchDirectoryName, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: tempBatchDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            Logger.shared.log(
+                "RealtimeRecorder: failed to create temporary batch directory \(tempBatchDirectory.path): \(error)",
+                level: .error
+            )
+            return
+        }
+
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let fileURL = tempBatchDirectory.appendingPathComponent(
+            "batch_\(timestamp)_\(fileCount)_\(UUID().uuidString).wav"
+        )
         
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatLinearPCM),
@@ -163,12 +214,14 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             fileCount += 1
             
             Logger.shared.log(
-                "RealtimeRecorder: created audio file: \(filePath) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(currentFileCount))",
+                "RealtimeRecorder: created audio file: \(fileURL.path) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(currentFileCount))",
                 level: .info
             )
-            
+
+            let onFileCreatedHandler = onFileCreated
             DispatchQueue.main.async { [weak self] in
-                self?.onFileCreated?(fileURL, currentFileCount)
+                guard self != nil else { return }
+                onFileCreatedHandler?(fileURL, currentFileCount)
             }
             
             audioBuffer.removeAll()
@@ -194,5 +247,49 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             return 16_000.0
         }
         return sampleRate
+    }
+
+    static func hasUsableInputFormat(_ format: AVAudioFormat) -> Bool {
+        format.channelCount > 0 && format.sampleRate.isFinite && format.sampleRate > 0
+    }
+
+    static func normalizedInputLevel(maxAmplitude: Float, silenceThreshold: Float) -> Float {
+        let clampedAmplitude = max(0, min(maxAmplitude, 1))
+        guard clampedAmplitude > 0 else {
+            return 0
+        }
+
+        let amplitudeDb = 20 * log10(clampedAmplitude)
+        let floorDb = min(-1, silenceThreshold)
+        let normalized = (amplitudeDb - floorDb) / -floorDb
+        return max(0, min(normalized, 1))
+    }
+
+    static func shouldSplitChunk(
+        elapsedTime: TimeInterval,
+        timeSinceLastSound: TimeInterval,
+        batchInterval: TimeInterval,
+        silenceDuration: TimeInterval
+    ) -> Bool {
+        let normalizedElapsed = max(0, elapsedTime)
+        let normalizedSilence = max(0, timeSinceLastSound)
+        let normalizedBatchInterval = max(0.1, batchInterval)
+        let normalizedSilenceDuration = max(0, silenceDuration)
+
+        return normalizedElapsed >= normalizedBatchInterval &&
+            normalizedSilence >= normalizedSilenceDuration
+    }
+
+    private func reportInputLevel(_ level: Float, force: Bool = false) {
+        let clamped = max(0, min(level, 1))
+        if !force && abs(clamped - lastReportedInputLevel) < 0.015 {
+            return
+        }
+        lastReportedInputLevel = clamped
+
+        let handler = onInputLevelChanged
+        DispatchQueue.main.async {
+            handler?(clamped)
+        }
     }
 }

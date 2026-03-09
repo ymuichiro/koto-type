@@ -27,7 +27,7 @@ final class MultiProcessManagerTests: XCTestCase {
 
         let manager = MultiProcessManager {
             let mock = MockMultiProcessPythonManager(sendSucceeds: false)
-            mock.onSend = { _ in
+            mock.onSend = { _, _ in
                 sendAttempts.increment()
             }
             return mock
@@ -51,6 +51,72 @@ final class MultiProcessManagerTests: XCTestCase {
         XCTAssertEqual(sendAttempts.value, 3)
     }
 
+    func testSegmentTimeoutRetriesAndCompletesWithEmptyWhenNoOutputArrives() {
+        let sendAttempts = LockedInt()
+        let completion = expectation(description: "segment completes with empty after timeout retries")
+
+        let manager = MultiProcessManager(
+            processManagerFactory: {
+                let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+                mock.onSend = { _, _ in
+                    sendAttempts.increment()
+                }
+                return mock
+            },
+            segmentProcessingTimeoutSeconds: 0.2,
+            watchdogIntervalSeconds: 0.05,
+            healthCheckIntervalSeconds: 5.0,
+            healthCheckTimeoutSeconds: 1.0,
+            healthCheckStartupGraceSeconds: 5.0
+        )
+
+        manager.segmentComplete = { index, text in
+            if index == 11 {
+                XCTAssertEqual(text, "")
+                completion.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/timeout.wav"),
+            index: 11,
+            settings: AppSettings()
+        )
+
+        wait(for: [completion], timeout: 4.0)
+        XCTAssertEqual(sendAttempts.value, 3)
+    }
+
+    func testIdleHealthCheckRequestIsSentAndAccepted() {
+        let healthCheckSeen = expectation(description: "health check request sent")
+        healthCheckSeen.assertForOverFulfill = false
+        let tokenPrefix = "__KOTOTYPE_HEALTHCHECK__:"
+        let okPrefix = "__KOTOTYPE_HEALTHCHECK_OK__:"
+
+        let manager = MultiProcessManager(
+            processManagerFactory: {
+                let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+                mock.onSend = { instance, inputText in
+                    guard inputText.hasPrefix(tokenPrefix) else { return }
+                    let token = String(inputText.dropFirst(tokenPrefix.count))
+                    instance.outputReceived?("\(okPrefix)\(token)")
+                    healthCheckSeen.fulfill()
+                }
+                return mock
+            },
+            segmentProcessingTimeoutSeconds: 60.0,
+            watchdogIntervalSeconds: 0.05,
+            healthCheckIntervalSeconds: 0.05,
+            healthCheckTimeoutSeconds: 0.2,
+            healthCheckStartupGraceSeconds: 0.01
+        )
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        wait(for: [healthCheckSeen], timeout: 2.0)
+        XCTAssertEqual(manager.getProcessCount(), 1)
+    }
+
     func testStatus9DuringProcessingCompletesWithoutRetryAndSuppressesImmediateRecovery() {
         let sendAttempts = LockedInt()
         let completion = expectation(description: "segment completes with empty after fatal termination")
@@ -58,7 +124,7 @@ final class MultiProcessManagerTests: XCTestCase {
 
         let manager = MultiProcessManager {
             let mock = MockMultiProcessPythonManager(sendSucceeds: true)
-            mock.onSend = { instance in
+            mock.onSend = { instance, _ in
                 sendAttempts.increment()
                 instance.simulateTermination(status: 9)
             }
@@ -130,7 +196,7 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
     private var running = false
     private let sendSucceeds: Bool
     var onStart: ((MockMultiProcessPythonManager) -> Void)?
-    var onSend: ((MockMultiProcessPythonManager) -> Void)?
+    var onSend: ((MockMultiProcessPythonManager, String) -> Void)?
 
     init(sendSucceeds: Bool) {
         self.sendSucceeds = sendSucceeds
@@ -159,7 +225,7 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
         autoGainMaxDb: Double,
         screenshotContext: String?
     ) -> Bool {
-        onSend?(self)
+        onSend?(self, text)
         return sendSucceeds
     }
 

@@ -3,9 +3,16 @@ import SwiftUI
 
 class RecordingIndicatorWindow: NSPanel {
     private var hostingController: NSHostingController<RecordingIndicatorView>?
+    private var currentState: IndicatorState = .recording
+    private var currentAttentionMessage: String?
+    private var currentRecordingLevel: CGFloat = 0
+    private let onCancelTapped: () -> Void
+    private var visibilityToken: Int = 0
     
-    init() {
-        let contentRect = NSRect(x: 0, y: 0, width: 104, height: 72)
+    init(onCancelTapped: @escaping () -> Void = {}) {
+        self.onCancelTapped = onCancelTapped
+        let initialSize = RecordingIndicatorView.preferredContentSize(for: .recording, attentionMessage: nil)
+        let contentRect = NSRect(x: 0, y: 0, width: initialSize.width, height: initialSize.height)
         
         super.init(
             contentRect: contentRect,
@@ -22,7 +29,7 @@ class RecordingIndicatorWindow: NSPanel {
         self.level = .floating
         self.isMovable = false
         self.isMovableByWindowBackground = false
-        self.hasShadow = true
+        self.hasShadow = false
         self.backgroundColor = .clear
         self.isOpaque = false
         
@@ -32,10 +39,15 @@ class RecordingIndicatorWindow: NSPanel {
     }
     
     private func setupContent() {
-        let view = RecordingIndicatorView(state: .recording)
+        let view = RecordingIndicatorView(
+            state: currentState,
+            attentionMessage: currentAttentionMessage,
+            recordingLevel: currentRecordingLevel,
+            onCancelTapped: onCancelTapped
+        )
         hostingController = NSHostingController(rootView: view)
-        
         self.contentView = hostingController?.view
+        updatePanelSize(state: currentState, attentionMessage: currentAttentionMessage)
     }
     
     private func positionWindow() {
@@ -46,8 +58,8 @@ class RecordingIndicatorWindow: NSPanel {
         let windowHeight = self.contentRect(forFrameRect: self.frame).height
         let margin: CGFloat = 50
         
-        let x = (screenFrame.width - windowWidth) / 2
-        let y = margin
+        let x = screenFrame.origin.x + ((screenFrame.width - windowWidth) / 2)
+        let y = screenFrame.origin.y + margin
         
         self.setFrame(
             NSRect(x: x, y: y, width: windowWidth, height: windowHeight),
@@ -55,36 +67,79 @@ class RecordingIndicatorWindow: NSPanel {
         )
     }
     
+    private func updatePanelSize(state: IndicatorState, attentionMessage: String?) {
+        let size = RecordingIndicatorView.preferredContentSize(for: state, attentionMessage: attentionMessage)
+        if contentRect(forFrameRect: frame).size != size {
+            setContentSize(size)
+            positionWindow()
+        }
+    }
+
+    private func render(state: IndicatorState, attentionMessage: String?, ensureVisible: Bool) {
+        currentState = state
+        currentAttentionMessage = attentionMessage
+        if state != .recording {
+            currentRecordingLevel = 0
+        }
+        hostingController?.rootView = RecordingIndicatorView(
+            state: state,
+            attentionMessage: attentionMessage,
+            recordingLevel: currentRecordingLevel,
+            onCancelTapped: onCancelTapped
+        )
+        updatePanelSize(state: state, attentionMessage: attentionMessage)
+        if ensureVisible {
+            visibilityToken += 1
+            contentView?.alphaValue = 1.0
+            orderFrontRegardless()
+            alphaValue = 1.0
+        }
+    }
+
     func showRecording() {
         DispatchQueue.main.async {
-            self.orderFrontRegardless()
-            self.alphaValue = 0
-            
-            let view = RecordingIndicatorView(state: .recording)
-            self.hostingController = NSHostingController(rootView: view)
-            self.contentView = self.hostingController?.view
-            
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.3
-                self.animator().alphaValue = 1.0
+            let shouldAnimate = !self.isVisible || self.alphaValue < 0.99
+            self.render(state: .recording, attentionMessage: nil, ensureVisible: true)
+
+            if shouldAnimate {
+                self.alphaValue = 0
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    self.animator().alphaValue = 1.0
+                }
             }
         }
     }
     
     func showProcessing() {
         DispatchQueue.main.async {
-            let view = RecordingIndicatorView(state: .processing)
-            self.hostingController = NSHostingController(rootView: view)
-            self.contentView = self.hostingController?.view
+            self.render(state: .processing, attentionMessage: nil, ensureVisible: true)
         }
     }
 
     func showCompleted(success: Bool) {
         DispatchQueue.main.async {
-            self.orderFrontRegardless()
-            let view = RecordingIndicatorView(state: success ? .completed : .attention)
-            self.hostingController = NSHostingController(rootView: view)
-            self.contentView = self.hostingController?.view
+            self.render(state: success ? .completed : .attention, attentionMessage: nil, ensureVisible: true)
+        }
+    }
+
+    func showAttention(message: String) {
+        DispatchQueue.main.async {
+            self.render(state: .attention, attentionMessage: message, ensureVisible: true)
+        }
+    }
+
+    func updateRecordingLevel(_ level: CGFloat) {
+        DispatchQueue.main.async {
+            let clamped = max(0, min(level, 1))
+            guard abs(clamped - self.currentRecordingLevel) >= 0.01 else {
+                return
+            }
+            self.currentRecordingLevel = clamped
+            guard self.currentState == .recording else {
+                return
+            }
+            self.render(state: .recording, attentionMessage: nil, ensureVisible: false)
         }
     }
     
@@ -94,13 +149,19 @@ class RecordingIndicatorWindow: NSPanel {
     
     func hide() {
         DispatchQueue.main.async {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.3
-                context.completionHandler = {
+            self.visibilityToken += 1
+            let hideToken = self.visibilityToken
+
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.25
+                self.contentView?.animator().alphaValue = 0
+            }, completionHandler: {
+                DispatchQueue.main.async {
+                    guard self.visibilityToken == hideToken else { return }
                     self.orderOut(nil)
+                    self.contentView?.alphaValue = 1.0
                 }
-                self.animator().alphaValue = 0
-            }
+            })
         }
     }
 }

@@ -1,9 +1,10 @@
-.PHONY: help run-app run-server test-transcription test-benchmark test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
 
 PYTHON := uv run python
+PYTHON_UNITTEST := $(PYTHON) -m unittest
 SERVER_SCRIPT := python/whisper_server.py
 PYTHON_TEST_DIR := tests/python
 
@@ -15,10 +16,10 @@ help:
 	@echo "  make run-server     - Pythonサーバーを起動（テスト用）"
 	@echo ""
 	@echo "テスト:"
-	@echo "  make test-transcription - 音声文字起こしテスト"
-	@echo "  make test-benchmark - 速度ベンチマークテスト"
+	@echo "  make test-transcription - 音声前処理/文字起こし関連ユニットテスト"
+	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
-	@echo "  make test-all       - すべてのテストを実行"
+	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
 	@echo "ビルド:"
 	@echo "  make build-server  - Pythonサーバーバイナリをビルド"
@@ -39,19 +40,23 @@ run-server:
 	@echo "Pythonサーバーを起動中..."
 	$(PYTHON) $(SERVER_SCRIPT)
 
-test-transcription:
-	@echo "音声文字起こしテストを実行中..."
-	$(PYTHON) $(PYTHON_TEST_DIR)/test_transcription.py
+test-transcription: test-audio-preprocess
 
-test-benchmark:
-	@echo "Whisper速度ベンチマークを実行中..."
-	$(PYTHON) $(PYTHON_TEST_DIR)/test_benchmark.py
+test-audio-preprocess:
+	@echo "音声前処理/文字起こし関連ユニットテストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_audio_preprocess.py
+
+test-benchmark: test-smoke-server
+
+test-smoke-server:
+	@echo "whisper_server バイナリのスモークテストを実行中..."
+	$(PYTHON) $(PYTHON_TEST_DIR)/smoke_whisper_server_binary.py
 
 test-user-dictionary:
 	@echo "辞書機能ユニットテストを実行中..."
-	$(PYTHON) $(PYTHON_TEST_DIR)/test_user_dictionary.py
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_user_dictionary.py
 
-test-all: test-transcription test-benchmark test-user-dictionary
+test-all: test-audio-preprocess test-user-dictionary
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 
