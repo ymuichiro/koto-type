@@ -94,7 +94,8 @@ BUNDLE_NAME="${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_NAME}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
-ICON_SOURCE="../assets/logo/koto-tyoe_logo_dark.png"
+# Finder/Dock icon source (Big Sur+ style rounded app icon)
+ICON_SOURCE="../assets/logo/kototype_app_icon_1024.png"
 EXECUTABLE_SOURCE=""
 
 if [ -n "${KOTOTYPE_BUILD_CONFIG:-}" ]; then
