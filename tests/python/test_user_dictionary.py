@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import ast
 import json
 import sys
 import tempfile
@@ -93,6 +94,49 @@ class UserDictionaryTests(unittest.TestCase):
         self.assertNotIn("3. 14", processed)
         self.assertNotIn("a. b@example. com", processed)
         self.assertTrue(processed.endswith("."))
+
+    def test_main_guard_calls_freeze_support_before_main(self):
+        source = (PROJECT_ROOT / "python" / "whisper_server.py").read_text(
+            encoding="utf-8"
+        )
+        module = ast.parse(source)
+
+        main_guards = []
+        for node in module.body:
+            if not isinstance(node, ast.If):
+                continue
+            if not isinstance(node.test, ast.Compare):
+                continue
+            if len(node.test.ops) != 1 or not isinstance(node.test.ops[0], ast.Eq):
+                continue
+            if len(node.test.comparators) != 1:
+                continue
+            if not isinstance(node.test.left, ast.Name) or node.test.left.id != "__name__":
+                continue
+            comparator = node.test.comparators[0]
+            if isinstance(comparator, ast.Constant) and comparator.value == "__main__":
+                main_guards.append(node)
+
+        self.assertTrue(main_guards, "Expected __name__ == '__main__' guard")
+
+        call_names = []
+        for statement in main_guards[0].body:
+            if not isinstance(statement, ast.Expr):
+                continue
+            if not isinstance(statement.value, ast.Call):
+                continue
+            function = statement.value.func
+            if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
+                call_names.append(f"{function.value.id}.{function.attr}")
+            elif isinstance(function, ast.Name):
+                call_names.append(function.id)
+
+        self.assertIn("multiprocessing.freeze_support", call_names)
+        self.assertIn("main", call_names)
+        self.assertLess(
+            call_names.index("multiprocessing.freeze_support"),
+            call_names.index("main"),
+        )
 
 
 if __name__ == "__main__":
