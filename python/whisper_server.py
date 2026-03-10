@@ -3,6 +3,7 @@
 
 import os
 import base64
+import multiprocessing
 import re
 import sys
 import traceback
@@ -972,4 +973,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # Required for PyInstaller-frozen binaries that spawn multiprocessing
+    # helper processes (e.g. resource_tracker). Without this, helper process
+    # invocations can re-enter main() and recursively relaunch the server.
+    multiprocessing.freeze_support()
     main()
