@@ -123,9 +123,12 @@ jobs:
         env:
           SIGN_UPDATE_BIN: ${{ github.workspace }}/build/sparkle-tools/bin/sign_update
           KOTOTYPE_SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
-          KOTOTYPE_VERSION: ${{ env.KOTOTYPE_VERSION }}
         run: |
           cd KotoType
+          if [ -z "${KOTOTYPE_VERSION}" ]; then
+            echo "Missing KOTOTYPE_VERSION from workflow environment."
+            exit 1
+          fi
           ZIP_PATH="KotoType-${KOTOTYPE_VERSION}.zip"
           APPCAST_PATH="appcast.xml"
           if [ ! -f "${APPCAST_PATH}" ]; then

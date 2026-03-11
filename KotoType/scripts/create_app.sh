@@ -42,6 +42,26 @@ validate_required_resources() {
         exit 1
     fi
 }
+
+validate_required_frameworks() {
+    local bundle_path="$1"
+    local frameworks_dir="${bundle_path}/Contents/Frameworks"
+    local required_frameworks=(
+        "Sparkle.framework"
+    )
+    local missing=0
+
+    for framework_name in "${required_frameworks[@]}"; do
+        if [ ! -d "${frameworks_dir}/${framework_name}" ]; then
+            echo "❌ Error: Missing required framework: ${frameworks_dir}/${framework_name}"
+            missing=1
+        fi
+    done
+
+    if [ "${missing}" -ne 0 ]; then
+        exit 1
+    fi
+}
 strip_code_signature_if_present() {
     local target_path="$1"
 
@@ -94,6 +114,7 @@ BUNDLE_NAME="${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_NAME}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+FRAMEWORKS_DIR="${CONTENTS_DIR}/Frameworks"
 SPARKLE_FEED_URL="${KOTOTYPE_SPARKLE_FEED_URL:-https://github.com/ymuichiro/koto-type/releases/latest/download/appcast.xml}"
 SPARKLE_PUBLIC_ED_KEY="${KOTOTYPE_SPARKLE_PUBLIC_ED_KEY:-}"
 # Finder/Dock icon source (Big Sur+ style rounded app icon)
@@ -132,12 +153,23 @@ fi
 echo "Creating bundle structure..."
 mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
+mkdir -p "${FRAMEWORKS_DIR}"
 
 # 実行ファイルをコピー
 echo "Copying executable..."
 cp "${EXECUTABLE_SOURCE}" "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 strip_code_signature_if_present "${MACOS_DIR}/${APP_NAME}"
+
+SPARKLE_FRAMEWORK_SOURCE="$(dirname "${EXECUTABLE_SOURCE}")/Sparkle.framework"
+if [ -d "${SPARKLE_FRAMEWORK_SOURCE}" ]; then
+    echo "Copying Sparkle framework..."
+    cp -R "${SPARKLE_FRAMEWORK_SOURCE}" "${FRAMEWORKS_DIR}/"
+else
+    echo "❌ Error: Sparkle.framework not found at ${SPARKLE_FRAMEWORK_SOURCE}"
+    echo "Please run: swift build -c release"
+    exit 1
+fi
 
 # whisper_serverバイナリをコピー
 if [ -f "../dist/whisper_server" ]; then
@@ -251,6 +283,8 @@ echo "Validating app bundle layout..."
 validate_app_bundle_layout "${BUNDLE_NAME}"
 echo "Validating required app resources..."
 validate_required_resources "${BUNDLE_NAME}"
+echo "Validating required app frameworks..."
+validate_required_frameworks "${BUNDLE_NAME}"
 
 echo "✅ ${BUNDLE_NAME} created successfully!"
 echo "Bundle location: $(pwd)/${BUNDLE_NAME}"
