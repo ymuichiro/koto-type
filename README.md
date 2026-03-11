@@ -442,14 +442,19 @@ make install-deps  # Install dependencies
 make build-all     # Build Python + Swift
 cd KotoType
 ./scripts/create_app.sh    # Create .app bundle
+./scripts/create_update_zip.sh  # Create Sparkle update .zip
 ./scripts/create_dmg.sh    # Create .dmg disk image (optional)
 ```
 
 ## Release Process
 
 - Pushing to `main` branch triggers GitHub Actions to create a tag in format `v<VERSION>.<run_number>`
-- Tag push triggers `.github/workflows/release.yml` to build `.dmg`
-- Generated `.dmg` is automatically attached to the GitHub Release
+- Tag push triggers `.github/workflows/release.yml` to build `.dmg` / `.zip` / `appcast.xml`
+- Generated artifacts are automatically attached to the GitHub Release
+- `appcast.xml` must be regenerated for every release (Sparkle update feed)
+- Required GitHub secrets for Sparkle signing:
+  - `SPARKLE_PUBLIC_ED_KEY` (embedded in app bundle)
+  - `SPARKLE_PRIVATE_ED_KEY` (used only in CI for appcast/update signing)
 - Release DMG does not include FFmpeg, so the initial setup requires system `ffmpeg`
 
 Update the `VERSION` file to reflect in future tags and distribution versions.
@@ -526,6 +531,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed information on:
 - **[DESIGN.md](DESIGN.md)**: Technical design documentation
 - **[SECURITY.md](SECURITY.md)**: Security policy and reporting
 - **[SUPPORT.md](SUPPORT.md)**: Getting help and troubleshooting
+- **[docs/operations/sparkle-release-runbook.md](docs/operations/sparkle-release-runbook.md)**: Sparkle release and key-management runbook
 
 ## Acknowledgments
 
@@ -553,7 +559,7 @@ Made with ❤️ by [KotoType Contributors](CONTRIBUTORS.md)
 
 - [ ] Multi-language support
 - [ ] Customizable keyboard shortcuts
-- [ ] Auto-update functionality
+- [x] Auto-update functionality (Sparkle + appcast feed)
 - [ ] Enhanced settings UI
 
 ## Documentation

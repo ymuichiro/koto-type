@@ -12,11 +12,15 @@ let package = Package(
             targets: ["KotoType"]
         )
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.9.0")
+    ],
     targets: [
         .executableTarget(
             name: "KotoType",
-            dependencies: [],
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             path: "Sources",
             resources: [
                 .process("KotoType/Resources")

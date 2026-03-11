@@ -34,6 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var hotkeyManager: HotkeyManager?
     var realtimeRecorder: RealtimeRecorder?
     var multiProcessManager: MultiProcessManager?
+    private var appUpdater: AppUpdater?
     var settingsWindowController: SettingsWindowController?
     var historyWindowController: HistoryWindowController?
     var recordingIndicatorWindow: RecordingIndicatorWindow?
@@ -119,6 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         menuBarController = MenuBarController()
         Logger.shared.log("MenuBarController created", level: .debug)
+        appUpdater = AppUpdater()
 
         realtimeRecorder = RealtimeRecorder()
         Logger.shared.log("RealtimeRecorder created", level: .debug)
@@ -142,6 +144,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.importAudioFile = { [weak self] in
             self?.presentImportAudioPanel()
         }
+        menuBarController?.checkForUpdates = { [weak self] in
+            self?.appUpdater?.checkForUpdates()
+        }
+        menuBarController?.setCheckForUpdatesEnabled(appUpdater?.isConfigured == true)
         settingsWindowController?.onImportAudioRequested = { [weak self] in
             self?.presentImportAudioPanel()
         }

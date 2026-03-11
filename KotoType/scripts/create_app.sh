@@ -94,6 +94,8 @@ BUNDLE_NAME="${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_NAME}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+SPARKLE_FEED_URL="${KOTOTYPE_SPARKLE_FEED_URL:-https://github.com/ymuichiro/koto-type/releases/latest/download/appcast.xml}"
+SPARKLE_PUBLIC_ED_KEY="${KOTOTYPE_SPARKLE_PUBLIC_ED_KEY:-}"
 # Finder/Dock icon source (Big Sur+ style rounded app icon)
 ICON_SOURCE="../assets/logo/kototype_app_icon_1024.png"
 EXECUTABLE_SOURCE=""
@@ -216,6 +218,10 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>他のアプリと連携するためにApple Eventsを使用します</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
 </dict>
 </plist>
 EOF
@@ -223,6 +229,13 @@ EOF
 # バージョン埋め込み
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :SUFeedURL string ${SPARKLE_FEED_URL}" "${CONTENTS_DIR}/Info.plist"
+
+if [ -n "${SPARKLE_PUBLIC_ED_KEY}" ]; then
+    /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${SPARKLE_PUBLIC_ED_KEY}" "${CONTENTS_DIR}/Info.plist"
+else
+    echo "⚠️  Warning: KOTOTYPE_SPARKLE_PUBLIC_ED_KEY is not set. Sparkle updates will remain disabled."
+fi
 
 echo "Applying ad-hoc signatures..."
 ad_hoc_sign "${RESOURCES_DIR}/whisper_server"

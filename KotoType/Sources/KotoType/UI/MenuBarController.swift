@@ -4,9 +4,11 @@ import os.log
 @MainActor
 class MenuBarController: NSObject {
     private var statusItem: NSStatusItem?
+    private var checkForUpdatesItem: NSMenuItem?
     var showSettings: (() -> Void)?
     var showHistory: (() -> Void)?
     var importAudioFile: (() -> Void)?
+    var checkForUpdates: (() -> Void)?
     
     override init() {
         super.init()
@@ -38,6 +40,15 @@ class MenuBarController: NSObject {
         let historyItem = NSMenuItem(title: "History...", action: #selector(showHistoryMenu), keyEquivalent: "h")
         historyItem.target = self
         menu.addItem(historyItem)
+
+        let checkForUpdatesItem = NSMenuItem(
+            title: "Check for Updates...",
+            action: #selector(checkForUpdatesMenu),
+            keyEquivalent: ""
+        )
+        checkForUpdatesItem.target = self
+        menu.addItem(checkForUpdatesItem)
+        self.checkForUpdatesItem = checkForUpdatesItem
         
         menu.addItem(NSMenuItem.separator())
         
@@ -61,9 +72,17 @@ class MenuBarController: NSObject {
     @objc private func importAudioFileMenu() {
         importAudioFile?()
     }
+
+    @objc private func checkForUpdatesMenu() {
+        checkForUpdates?()
+    }
     
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    func setCheckForUpdatesEnabled(_ isEnabled: Bool) {
+        checkForUpdatesItem?.isEnabled = isEnabled
     }
     
     private func loadMenuBarIconImage() -> NSImage? {

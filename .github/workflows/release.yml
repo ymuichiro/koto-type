@@ -51,6 +51,17 @@ jobs:
           uv venv
           source .venv/bin/activate
           uv sync --extra dev
+
+      - name: Validate Sparkle secrets
+        run: |
+          if [ -z "${{ secrets.SPARKLE_PUBLIC_ED_KEY }}" ]; then
+            echo "Missing SPARKLE_PUBLIC_ED_KEY secret."
+            exit 1
+          fi
+          if [ -z "${{ secrets.SPARKLE_PRIVATE_ED_KEY }}" ]; then
+            echo "Missing SPARKLE_PRIVATE_ED_KEY secret."
+            exit 1
+          fi
       
       - name: Test Python
         run: |
@@ -74,37 +85,119 @@ jobs:
           .venv/bin/python tests/python/smoke_whisper_server_binary.py dist/whisper_server
       
       - name: Create App Bundle
+        env:
+          KOTOTYPE_SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml
+          KOTOTYPE_SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: |
           cd KotoType
           export KOTOTYPE_BUILD_CONFIG=release
           ./scripts/create_app.sh
+
+      - name: Create update ZIP
+        run: |
+          cd KotoType
+          ./scripts/create_update_zip.sh
+
+      - name: Install Sparkle tools
+        run: |
+          ./scripts/fetch_sparkle_tools.sh 2.9.0 build/sparkle-tools
+
+      - name: Generate appcast
+        env:
+          GENERATE_APPCAST_BIN: ${{ github.workspace }}/build/sparkle-tools/bin/generate_appcast
+          KOTOTYPE_SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          KOTOTYPE_SPARKLE_DOWNLOAD_URL_PREFIX: https://github.com/${{ github.repository }}/releases/download/${{ steps.release_tag.outputs.tag }}/
+        run: |
+          if [ -z "${KOTOTYPE_SPARKLE_PRIVATE_ED_KEY}" ]; then
+            echo "Missing SPARKLE_PRIVATE_ED_KEY secret."
+            exit 1
+          fi
+          if [ -z "${{ secrets.SPARKLE_PUBLIC_ED_KEY }}" ]; then
+            echo "Missing SPARKLE_PUBLIC_ED_KEY secret."
+            exit 1
+          fi
+          cd KotoType
+          ./scripts/generate_appcast.sh
+
+      - name: Verify appcast signatures
+        env:
+          SIGN_UPDATE_BIN: ${{ github.workspace }}/build/sparkle-tools/bin/sign_update
+          KOTOTYPE_SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          KOTOTYPE_VERSION: ${{ env.KOTOTYPE_VERSION }}
+        run: |
+          cd KotoType
+          ZIP_PATH="KotoType-${KOTOTYPE_VERSION}.zip"
+          APPCAST_PATH="appcast.xml"
+          if [ ! -f "${APPCAST_PATH}" ]; then
+            echo "Missing appcast.xml"
+            exit 1
+          fi
+          if [ ! -f "${ZIP_PATH}" ]; then
+            echo "Missing ${ZIP_PATH}"
+            exit 1
+          fi
+          printf '%s' "${KOTOTYPE_SPARKLE_PRIVATE_ED_KEY}" | "${SIGN_UPDATE_BIN}" --verify --ed-key-file - "${APPCAST_PATH}"
+          ZIP_SIGNATURE="$(python3 - <<'PY'
+import xml.etree.ElementTree as ET
+root = ET.parse("appcast.xml").getroot()
+for node in root.iter():
+    if node.tag.endswith("enclosure"):
+        for key, value in node.attrib.items():
+            if key.endswith("edSignature"):
+                print(value)
+                raise SystemExit(0)
+raise SystemExit(1)
+PY
+)"
+          if [ -z "${ZIP_SIGNATURE}" ]; then
+            echo "Could not extract enclosure signature from appcast.xml"
+            exit 1
+          fi
+          printf '%s' "${KOTOTYPE_SPARKLE_PRIVATE_ED_KEY}" | "${SIGN_UPDATE_BIN}" --verify --ed-key-file - "${ZIP_PATH}" "${ZIP_SIGNATURE}"
       
       - name: Create DMG
         run: |
           cd KotoType
           ./scripts/create_dmg.sh
 
-      - name: Verify DMG output
+      - name: Verify release outputs
         run: |
           shopt -s nullglob
-          files=(KotoType/*.dmg)
-          if [ ${#files[@]} -eq 0 ]; then
+          dmg_files=(KotoType/*.dmg)
+          zip_files=(KotoType/*.zip)
+          appcast_files=(KotoType/appcast.xml)
+          if [ ${#dmg_files[@]} -eq 0 ]; then
             echo "No DMG files were generated."
             exit 1
           fi
-          printf 'Generated DMG:\n%s\n' "${files[@]}"
+          if [ ${#zip_files[@]} -eq 0 ]; then
+            echo "No ZIP files were generated."
+            exit 1
+          fi
+          if [ ${#appcast_files[@]} -eq 0 ]; then
+            echo "appcast.xml was not generated."
+            exit 1
+          fi
+          files=("${dmg_files[@]}" "${zip_files[@]}" "${appcast_files[@]}")
+          printf 'Generated release files:\n%s\n' "${files[@]}"
       
-      - name: Upload DMG
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: KotoType-dmg-${{ steps.release_tag.outputs.tag }}
-          path: KotoType/*.dmg
+          name: KotoType-release-assets-${{ steps.release_tag.outputs.tag }}
+          path: |
+            KotoType/*.dmg
+            KotoType/*.zip
+            KotoType/appcast.xml
       
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
-          files: KotoType/*.dmg
+          files: |
+            KotoType/*.dmg
+            KotoType/*.zip
+            KotoType/appcast.xml
           draft: false
           prerelease: false
           generate_release_notes: true

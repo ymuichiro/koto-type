@@ -40,6 +40,12 @@ make run-server      # Run Python server for testing
 make run-app         # Run Swift application
 ```
 
+### Release Requirements (Sparkle)
+
+- Every release must update and publish `appcast.xml` together with release artifacts (`.dmg` and update `.zip`)
+- `appcast.xml` is the source of truth for Sparkle update discovery; do not ship a release without refreshing it
+- Keep Sparkle signing keys out of git and provide them via secure local keychain / CI secrets
+
 ## Code Style Guidelines
 
 ### Python Style
