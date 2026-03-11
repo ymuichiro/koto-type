@@ -44,7 +44,7 @@ jobs:
       - name: Install UV
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       
       - name: Setup Python
         run: |
@@ -180,7 +180,7 @@ jobs:
             KotoType/appcast.xml
       
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
           files: |
