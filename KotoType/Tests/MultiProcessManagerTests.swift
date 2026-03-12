@@ -185,6 +185,55 @@ final class MultiProcessManagerTests: XCTestCase {
         XCTAssertEqual(created.count, 1)
         XCTAssertEqual(manager.getProcessCount(), 0)
     }
+
+    func testStatus0AtStartupDoesNotRestartImmediately() {
+        var created: [MockMultiProcessPythonManager] = []
+        let terminated = expectation(description: "startup process terminated with status 0")
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            mock.onStart = { instance in
+                instance.simulateTermination(status: 0)
+                terminated.fulfill()
+            }
+            created.append(mock)
+            return mock
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        wait(for: [terminated], timeout: 2.0)
+
+        let settle = expectation(description: "startup loop suppressed for status 0")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            settle.fulfill()
+        }
+        wait(for: [settle], timeout: 2.0)
+
+        XCTAssertEqual(created.count, 1)
+        XCTAssertEqual(manager.getProcessCount(), 0)
+    }
+
+    func testStatus1AtStartupRecoversAutomatically() {
+        var created: [MockMultiProcessPythonManager] = []
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            mock.onStart = { instance in
+                instance.simulateTermination(status: 1)
+            }
+            created.append(mock)
+            return mock
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+
+        let settle = expectation(description: "wait for automatic recovery")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            settle.fulfill()
+        }
+        wait(for: [settle], timeout: 2.0)
+
+        XCTAssertGreaterThanOrEqual(created.count, 2)
+    }
 }
 
 private final class MockMultiProcessPythonManager: PythonProcessManaging {

@@ -54,7 +54,11 @@ final class RuntimeSafetyTests: XCTestCase {
         XCTAssertFalse(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 9))
     }
 
-    func testShouldAutoRecoverIdleTerminationAllowsOtherStatuses() {
+    func testShouldAutoRecoverIdleTerminationDisablesStatus0() {
+        XCTAssertFalse(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 0))
+    }
+
+    func testShouldAutoRecoverIdleTerminationAllowsRecoverableStatuses() {
         XCTAssertTrue(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 1))
         XCTAssertTrue(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 15))
     }

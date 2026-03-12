@@ -42,9 +42,14 @@ final class MultiProcessManager: @unchecked Sendable {
     var segmentComplete: ((Int, String) -> Void)?
 
     static func shouldAutoRecoverIdleTermination(status: Int32) -> Bool {
+        // Exit status 0 while idle usually means stdin was closed (EOF) and the server
+        // shut down cleanly. Immediate recovery can create an endless restart loop.
+        if status == 0 {
+            return false
+        }
         // SIGKILL indicates external termination (often memory pressure).
         // Auto-restarting immediately can amplify the pressure and create a restart storm.
-        status != 9
+        return status != 9
     }
 
     init(
