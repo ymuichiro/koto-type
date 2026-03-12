@@ -74,6 +74,21 @@ strip_code_signature_if_present() {
     fi
 }
 
+ensure_framework_rpath() {
+    local executable_path="$1"
+    local required_rpath='@executable_path/../Frameworks'
+
+    if otool -l "${executable_path}" | grep -Fq "${required_rpath}"; then
+        return
+    fi
+
+    echo "Adding missing rpath to executable: ${required_rpath}"
+    if ! install_name_tool -add_rpath "${required_rpath}" "${executable_path}"; then
+        echo "❌ Error: Failed to add rpath ${required_rpath} to ${executable_path}"
+        exit 1
+    fi
+}
+
 ad_hoc_sign() {
     local target_path="$1"
 
@@ -160,6 +175,7 @@ echo "Copying executable..."
 cp "${EXECUTABLE_SOURCE}" "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 strip_code_signature_if_present "${MACOS_DIR}/${APP_NAME}"
+ensure_framework_rpath "${MACOS_DIR}/${APP_NAME}"
 
 SPARKLE_FRAMEWORK_SOURCE="$(dirname "${EXECUTABLE_SOURCE}")/Sparkle.framework"
 if [ -d "${SPARKLE_FRAMEWORK_SOURCE}" ]; then
