@@ -140,7 +140,7 @@ jobs:
             exit 1
           fi
           printf '%s' "${KOTOTYPE_SPARKLE_PRIVATE_ED_KEY}" | "${SIGN_UPDATE_BIN}" --verify --ed-key-file - "${APPCAST_PATH}"
-          ZIP_SIGNATURE="$(python3 -c 'import xml.etree.ElementTree as ET; root = ET.parse(\"appcast.xml\").getroot(); sig = next((v for n in root.iter() if n.tag.endswith(\"enclosure\") for k, v in n.attrib.items() if k.endswith(\"edSignature\")), \"\"); print(sig); raise SystemExit(0 if sig else 1)')"
+          ZIP_SIGNATURE="$(python3 -c 'import xml.etree.ElementTree as ET; root = ET.parse("appcast.xml").getroot(); sig = next((v for n in root.iter() if n.tag.endswith("enclosure") for k, v in n.attrib.items() if k.endswith("edSignature")), ""); print(sig); raise SystemExit(0 if sig else 1)')"
           if [ -z "${ZIP_SIGNATURE}" ]; then
             echo "Could not extract enclosure signature from appcast.xml"
             exit 1
