@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct PythonLaunchCommand: Equatable {
     let executablePath: String
@@ -63,10 +64,12 @@ final class PythonProcessManager: @unchecked Sendable {
         process?.standardError = errorPipe
         process?.standardInput = inputPipe
         process?.currentDirectoryURL = URL(fileURLWithPath: launchCommand.workingDirectory)
-        process?.environment = Self.runtimeEnvironment(
+        var environment = Self.runtimeEnvironment(
             base: ProcessInfo.processInfo.environment,
             bundlePath: runtime.bundlePath()
         )
+        environment["KOTOTYPE_PARENT_PID"] = "\(ProcessInfo.processInfo.processIdentifier)"
+        process?.environment = environment
         process?.terminationHandler = { [weak self] terminatedProcess in
             guard let self = self else { return }
             if self.isStoppingProcess {
@@ -182,7 +185,12 @@ final class PythonProcessManager: @unchecked Sendable {
         isStoppingProcess = true
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe?.fileHandleForReading.readabilityHandler = nil
-        process?.terminate()
+        let processToStop = process
+        if let rootPID = processToStop?.processIdentifier {
+            Self.terminateProcessTree(rootPID: rootPID)
+        } else {
+            processToStop?.terminate()
+        }
         process = nil
         outputPipe = nil
         errorPipe = nil
@@ -260,6 +268,70 @@ final class PythonProcessManager: @unchecked Sendable {
         }
 
         return lines
+    }
+
+    static func descendantProcessIdentifiers(rootPID: Int32, psOutput: String) -> [Int32] {
+        var childrenByParent: [Int32: [Int32]] = [:]
+
+        for rawLine in psOutput.split(whereSeparator: \.isNewline) {
+            let columns = rawLine.split(whereSeparator: \.isWhitespace)
+            guard columns.count >= 2,
+                  let pid = Int32(columns[0]),
+                  let parentPID = Int32(columns[1]) else {
+                continue
+            }
+            childrenByParent[parentPID, default: []].append(pid)
+        }
+
+        var descendants: [Int32] = []
+        var stack = childrenByParent[rootPID] ?? []
+
+        while let pid = stack.popLast() {
+            descendants.append(pid)
+            stack.append(contentsOf: childrenByParent[pid] ?? [])
+        }
+
+        return descendants
+    }
+
+    private static func terminateProcessTree(rootPID: Int32) {
+        guard rootPID > 0 else { return }
+
+        let psOutput = currentProcessList()
+        let descendantPIDs = descendantProcessIdentifiers(rootPID: rootPID, psOutput: psOutput)
+        let processTree = descendantPIDs + [rootPID]
+
+        signalProcesses(processTree.reversed(), signal: SIGTERM)
+        usleep(300_000)
+        signalProcesses(processTree.reversed(), signal: SIGKILL)
+    }
+
+    private static func signalProcesses<S: Sequence>(_ pids: S, signal: Int32) where S.Element == Int32 {
+        for pid in pids where pid > 0 {
+            _ = Darwin.kill(pid, signal)
+        }
+    }
+
+    private static func currentProcessList() -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,ppid="]
+
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                return ""
+            }
+            let data = stdout.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return ""
+        }
     }
 }
 

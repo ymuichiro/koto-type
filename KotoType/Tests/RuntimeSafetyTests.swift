@@ -50,11 +50,63 @@ final class RuntimeSafetyTests: XCTestCase {
         XCTAssertEqual(limits.maxParallelModelLoads, 1)
     }
 
+    func testLaunchAtLoginManagementAllowsInstalledApplicationsBundle() {
+        XCTAssertTrue(
+            LaunchAtLoginManager.canManageLaunchAtLogin(
+                bundlePath: "/Applications/KotoType.app"
+            )
+        )
+    }
+
+    func testLaunchAtLoginManagementAllowsInstalledApplicationsExecutablePath() {
+        XCTAssertTrue(
+            LaunchAtLoginManager.canManageLaunchAtLogin(
+                bundlePath: "/Applications/KotoType.app/Contents/MacOS/KotoType"
+            )
+        )
+    }
+
+    func testLaunchAtLoginManagementAllowsUserApplicationsBundle() {
+        XCTAssertTrue(
+            LaunchAtLoginManager.canManageLaunchAtLogin(
+                bundlePath: "\(NSHomeDirectory())/Applications/KotoType.app"
+            )
+        )
+    }
+
+    func testLaunchAtLoginManagementRejectsRepositoryBundle() {
+        XCTAssertFalse(
+            LaunchAtLoginManager.canManageLaunchAtLogin(
+                bundlePath: "/Users/example/src/koto-type/KotoType/KotoType.app"
+            )
+        )
+    }
+
+    func testLaunchAtLoginManagementRejectsRepositoryBundleExecutablePath() {
+        XCTAssertFalse(
+            LaunchAtLoginManager.canManageLaunchAtLogin(
+                bundlePath: "/Users/example/src/koto-type/KotoType/KotoType.app/Contents/MacOS/KotoType"
+            )
+        )
+    }
+
+    func testLaunchAtLoginManagementRejectsDevelopmentExecutable() {
+        XCTAssertFalse(
+            LaunchAtLoginManager.canManageLaunchAtLogin(
+                bundlePath: "/tmp/koto-type/.build/debug/KotoType"
+            )
+        )
+    }
+
     func testShouldAutoRecoverIdleTerminationDisablesSigKill() {
         XCTAssertFalse(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 9))
     }
 
-    func testShouldAutoRecoverIdleTerminationAllowsOtherStatuses() {
+    func testShouldAutoRecoverIdleTerminationDisablesStatus0() {
+        XCTAssertFalse(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 0))
+    }
+
+    func testShouldAutoRecoverIdleTerminationAllowsRecoverableStatuses() {
         XCTAssertTrue(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 1))
         XCTAssertTrue(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 15))
     }

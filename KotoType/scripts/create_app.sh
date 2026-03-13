@@ -42,6 +42,26 @@ validate_required_resources() {
         exit 1
     fi
 }
+
+validate_required_frameworks() {
+    local bundle_path="$1"
+    local frameworks_dir="${bundle_path}/Contents/Frameworks"
+    local required_frameworks=(
+        "Sparkle.framework"
+    )
+    local missing=0
+
+    for framework_name in "${required_frameworks[@]}"; do
+        if [ ! -d "${frameworks_dir}/${framework_name}" ]; then
+            echo "❌ Error: Missing required framework: ${frameworks_dir}/${framework_name}"
+            missing=1
+        fi
+    done
+
+    if [ "${missing}" -ne 0 ]; then
+        exit 1
+    fi
+}
 strip_code_signature_if_present() {
     local target_path="$1"
 
@@ -51,6 +71,21 @@ strip_code_signature_if_present() {
             echo "❌ Error: Failed to remove code signature from ${target_path}"
             exit 1
         fi
+    fi
+}
+
+ensure_framework_rpath() {
+    local executable_path="$1"
+    local required_rpath='@executable_path/../Frameworks'
+
+    if otool -l "${executable_path}" | grep -Fq "${required_rpath}"; then
+        return
+    fi
+
+    echo "Adding missing rpath to executable: ${required_rpath}"
+    if ! install_name_tool -add_rpath "${required_rpath}" "${executable_path}"; then
+        echo "❌ Error: Failed to add rpath ${required_rpath} to ${executable_path}"
+        exit 1
     fi
 }
 
@@ -94,6 +129,9 @@ BUNDLE_NAME="${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_NAME}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+FRAMEWORKS_DIR="${CONTENTS_DIR}/Frameworks"
+SPARKLE_FEED_URL="${KOTOTYPE_SPARKLE_FEED_URL:-https://github.com/ymuichiro/koto-type/releases/latest/download/appcast.xml}"
+SPARKLE_PUBLIC_ED_KEY="${KOTOTYPE_SPARKLE_PUBLIC_ED_KEY:-}"
 # Finder/Dock icon source (Big Sur+ style rounded app icon)
 ICON_SOURCE="../assets/logo/kototype_app_icon_1024.png"
 EXECUTABLE_SOURCE=""
@@ -130,12 +168,24 @@ fi
 echo "Creating bundle structure..."
 mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
+mkdir -p "${FRAMEWORKS_DIR}"
 
 # 実行ファイルをコピー
 echo "Copying executable..."
 cp "${EXECUTABLE_SOURCE}" "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 strip_code_signature_if_present "${MACOS_DIR}/${APP_NAME}"
+ensure_framework_rpath "${MACOS_DIR}/${APP_NAME}"
+
+SPARKLE_FRAMEWORK_SOURCE="$(dirname "${EXECUTABLE_SOURCE}")/Sparkle.framework"
+if [ -d "${SPARKLE_FRAMEWORK_SOURCE}" ]; then
+    echo "Copying Sparkle framework..."
+    cp -R "${SPARKLE_FRAMEWORK_SOURCE}" "${FRAMEWORKS_DIR}/"
+else
+    echo "❌ Error: Sparkle.framework not found at ${SPARKLE_FRAMEWORK_SOURCE}"
+    echo "Please run: swift build -c release"
+    exit 1
+fi
 
 # whisper_serverバイナリをコピー
 if [ -f "../dist/whisper_server" ]; then
@@ -216,6 +266,10 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>他のアプリと連携するためにApple Eventsを使用します</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
 </dict>
 </plist>
 EOF
@@ -223,6 +277,13 @@ EOF
 # バージョン埋め込み
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :SUFeedURL string ${SPARKLE_FEED_URL}" "${CONTENTS_DIR}/Info.plist"
+
+if [ -n "${SPARKLE_PUBLIC_ED_KEY}" ]; then
+    /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${SPARKLE_PUBLIC_ED_KEY}" "${CONTENTS_DIR}/Info.plist"
+else
+    echo "⚠️  Warning: KOTOTYPE_SPARKLE_PUBLIC_ED_KEY is not set. Sparkle updates will remain disabled."
+fi
 
 echo "Applying ad-hoc signatures..."
 ad_hoc_sign "${RESOURCES_DIR}/whisper_server"
@@ -238,6 +299,8 @@ echo "Validating app bundle layout..."
 validate_app_bundle_layout "${BUNDLE_NAME}"
 echo "Validating required app resources..."
 validate_required_resources "${BUNDLE_NAME}"
+echo "Validating required app frameworks..."
+validate_required_frameworks "${BUNDLE_NAME}"
 
 echo "✅ ${BUNDLE_NAME} created successfully!"
 echo "Bundle location: $(pwd)/${BUNDLE_NAME}"
