@@ -1006,8 +1006,8 @@ def main():
 
 
 if __name__ == "__main__":
-    # PyInstaller onefile builds re-execute the frozen binary for multiprocessing
-    # helpers such as resource_tracker. freeze_support() prevents those helper
-    # processes from running the full server main loop again.
+    # PyInstaller-frozen onefile binaries can re-execute for multiprocessing
+    # helpers (for example, resource_tracker). freeze_support() prevents those
+    # helper invocations from re-entering the full server main loop.
     multiprocessing.freeze_support()
     main()
