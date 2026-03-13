@@ -2,7 +2,7 @@
 
 ## 0. 結論
 - 専用のファイルサーバーは必須ではない。
-- `GitHub Releases` と `GitHub Pages`（またはRaw配信）だけで運用可能。
+- 現在の実装は `GitHub Releases` の asset 配信だけで運用する。
 - Sparkleは `GitHub Release API` を直接たたくのではなく、**`appcast.xml`** を取得して更新先を判断する。
 - 更新時はSparkleがアプリ差し替えを実行するため、ユーザーに「古い.appを手動削除させる」運用は不要。
 
@@ -15,18 +15,37 @@
 
 Sparkleは `SUFeedURL` のXMLを読み、`<enclosure url="...">` で指定されたアーカイブをダウンロードする。
 
-### 1.2 推奨アーキテクチャ（サーバーなし）
-- appcast: GitHub Pages上に配置（固定URL）
-  - 例: `https://ymuichiro.github.io/koto-type/appcast.xml`
-- 配布アーカイブ: GitHub Releasesのasset
+### 1.2 現在の実装アーキテクチャ（サーバーなし）
+- appcast: GitHub Releases の latest asset を固定URLとして利用
+  - `https://github.com/ymuichiro/koto-type/releases/latest/download/appcast.xml`
+- 配布アーカイブ: GitHub Releases の各tag asset
   - 例: `https://github.com/ymuichiro/koto-type/releases/download/v1.2.3/KotoType-1.2.3.zip`
 
-この構成なら「URL固定のappcast」と「バージョンごとの実体ファイル」を自然に分離できる。
+この構成では、アプリは常に同じ `SUFeedURL` を見にいく。新しいリリースを公開すると、
+`releases/latest/download/appcast.xml` が新しい release asset を指すようになるため、
+既存アプリは次回更新チェック時に新しい appcast を取得できる。
+
+補足:
+- 古い release tag に添付済みの `appcast.xml` を更新する必要はない。
+- 各リリースで新しい `appcast.xml` を生成し、そのリリースに添付する。
+- 「固定URLのappcast」は GitHub Pages ではなく `latest/download` リダイレクトで実現している。
 
 ### 1.3 GitHub Release APIは使うべきか
 - Sparkle標準では不要。
 - API直接利用は独自実装になり、レート制限・互換性・保守コストが増える。
 - 標準の `appcast.xml` 運用が最小リスク。
+
+### 1.4 バージョン検知の仕組み
+- アプリは起動後、`SUFeedURL` から `appcast.xml` を取得する。
+- `appcast.xml` の `<item>` / `<enclosure>` に含まれるバージョン情報と、ローカルの
+  `CFBundleVersion` / `CFBundleShortVersionString` を Sparkle が比較する。
+- feed 内に自分より新しいバージョンが見つかった場合だけ、更新候補として提示される。
+
+実運用イメージ:
+1. `v1.0.0` を使っているアプリが固定URLの `appcast.xml` を取得
+2. GitHub Releases の latest が `v1.1.0` に変わっていれば、新しい `appcast.xml` が返る
+3. その XML 内の `KotoType-1.1.0.zip` が更新候補として採用される
+4. 旧 release の `appcast.xml` はそのままでよい
 
 ## 2. インストール/更新の実動作
 
@@ -87,8 +106,8 @@ Sparkleは `SUFeedURL` のXMLを読み、`<enclosure url="...">` で指定され
 3. `Info.plist` に `SUFeedURL` / `SUPublicEDKey` / 更新設定キー追加
 4. リリース成果物に `DMG` に加えて `ZIP` を追加
 5. `generate_appcast` を使った `appcast.xml` 生成ステップ追加
-6. 生成した `appcast.xml` を固定URLへ公開（GitHub Pages）
-7. GitHub Actionsで「ビルド→署名→appcast生成→Release添付→appcast公開」を自動化
+6. 生成した `appcast.xml` を GitHub Release asset として添付
+7. GitHub Actionsで「ビルド→署名→appcast生成→Release添付」を自動化
 8. 鍵管理ルール（作成・バックアップ・ローテーション・事故対応）を文書化
 
 ### 4.3 対応事項（テスト/検証）
@@ -100,10 +119,16 @@ Sparkleは `SUFeedURL` のXMLを読み、`<enclosure url="...">` で指定され
 
 ### 4.4 完了条件（Definition of Done）
 - タグ作成でReleaseに `DMG` と `ZIP` が添付される
-- `appcast.xml` が固定URLで配信される
+- `appcast.xml` が `releases/latest/download/appcast.xml` で配信される
 - 旧版から最新版へアプリ内更新が成功する
 - 鍵管理手順がドキュメント化され、運用者が実行可能
 
-## 5. 非機能上の注意（本PR範囲外になり得るもの）
+## 5. 運用上の注意
+- 現在の実装では、feed の正本は「最新の GitHub Release に添付された `appcast.xml`」である。
+- そのため、更新対象として見せたい stable release が常に `latest` になる運用が前提となる。
+- 将来、beta/stable の複数チャネル、段階配信、release metadata の手動制御を強く求めるなら、
+  `appcast.xml` だけを GitHub Pages などの固定ホスティングへ分離する構成のほうが扱いやすい。
+
+## 6. 非機能上の注意（本PR範囲外になり得るもの）
 - Developer ID署名/Notarization未導入の場合、初回インストール時のGatekeeper体験は残る。
 - ただし、一度インストールされた利用者に対する更新体験はSparkle導入で大幅に改善可能。
