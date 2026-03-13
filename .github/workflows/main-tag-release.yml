@@ -9,7 +9,28 @@ permissions:
   contents: write
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      release_enabled: ${{ steps.check.outputs.release_enabled }}
+    steps:
+      - name: Check Sparkle secrets
+        id: check
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          if [ -n "${SPARKLE_PUBLIC_ED_KEY}" ] && [ -n "${SPARKLE_PRIVATE_ED_KEY}" ]; then
+            echo "release_enabled=true" >> "${GITHUB_OUTPUT}"
+            echo "Sparkle secrets are configured."
+          else
+            echo "release_enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Sparkle secrets are not configured. Skipping automatic tag and release."
+          fi
+
   create-tag:
+    needs: preflight
+    if: needs.preflight.outputs.release_enabled == 'true'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -40,8 +61,19 @@ jobs:
           git push origin "${TAG}"
 
   release:
-    needs: create-tag
+    needs:
+      - preflight
+      - create-tag
+    if: needs.preflight.outputs.release_enabled == 'true'
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.create-tag.outputs.tag }}
     secrets: inherit
+
+  release-skipped:
+    needs: preflight
+    if: needs.preflight.outputs.release_enabled != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report skipped release
+        run: echo "Skipping release because Sparkle secrets are not configured."
