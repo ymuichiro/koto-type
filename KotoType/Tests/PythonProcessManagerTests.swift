@@ -180,6 +180,40 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(path, "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
     }
 
+    func testDescendantProcessIdentifiersFindsRecursiveChildren() {
+        let psOutput = """
+        100 1
+        101 100
+        102 101
+        103 100
+        200 2
+        """
+
+        let descendants = PythonProcessManager.descendantProcessIdentifiers(
+            rootPID: 100,
+            psOutput: psOutput
+        )
+
+        XCTAssertEqual(Set(descendants), Set([101, 102, 103]))
+    }
+
+    func testDescendantProcessIdentifiersIgnoresMalformedRows() {
+        let psOutput = """
+        garbage
+        100 1
+        101 100
+        bad 200
+        102 101
+        """
+
+        let descendants = PythonProcessManager.descendantProcessIdentifiers(
+            rootPID: 100,
+            psOutput: psOutput
+        )
+
+        XCTAssertEqual(Set(descendants), Set([101, 102]))
+    }
+
     private func makeRuntime(
         currentDirectoryPath: String,
         bundlePath: String,

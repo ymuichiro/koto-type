@@ -3,8 +3,10 @@
 
 import os
 import base64
+import multiprocessing
 import re
 import sys
+import threading
 import traceback
 import atexit
 import signal
@@ -69,6 +71,31 @@ def pid_exists(pid):
         return False
 
     return True
+
+
+def start_parent_watchdog(parent_pid, log, cleanup, interval_seconds=1.0):
+    if parent_pid <= 0:
+        return None
+
+    def _watch():
+        while True:
+            time.sleep(interval_seconds)
+            if pid_exists(parent_pid):
+                continue
+
+            log(f"Parent process {parent_pid} no longer exists, shutting down server")
+            try:
+                cleanup()
+            finally:
+                os._exit(0)
+
+    thread = threading.Thread(
+        target=_watch,
+        name="parent-watchdog",
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
 def load_server_state(path):
@@ -725,6 +752,7 @@ def main():
     state_path = default_server_state_path()
     lock_path = default_server_state_lock_path()
     current_pid = os.getpid()
+    parent_pid = parse_int(os.environ.get("KOTOTYPE_PARENT_PID"), 0)
     max_active_servers = max(1, parse_int(os.environ.get("KOTOTYPE_MAX_ACTIVE_SERVERS"), 1))
     max_parallel_model_loads = max(1, parse_int(os.environ.get("KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"), 1))
     model_load_wait_timeout = max(1, parse_int(os.environ.get("KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"), 120))
@@ -757,6 +785,12 @@ def main():
                 raise SystemExit(0)
 
             signal.signal(sig, _handler)
+
+    start_parent_watchdog(
+        parent_pid=parent_pid,
+        log=log,
+        cleanup=cleanup_server_state,
+    )
 
     wait_started = time.time()
     while True:
@@ -972,4 +1006,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # PyInstaller onefile builds re-execute the frozen binary for multiprocessing
+    # helpers such as resource_tracker. freeze_support() prevents those helper
+    # processes from running the full server main loop again.
+    multiprocessing.freeze_support()
     main()
