@@ -172,13 +172,20 @@ struct SettingsView: View {
     }
 
     private var generalSettings: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        let canManageLaunchAtLogin = LaunchAtLoginManager.canManageLaunchAtLogin()
+
+        return VStack(alignment: .leading, spacing: 20) {
             Text("General Settings")
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Launch at login", isOn: $pendingLaunchAtLogin)
-                Text("When enabled, KotoType launches automatically when you sign in to macOS.")
+                    .disabled(!canManageLaunchAtLogin)
+                Text(
+                    canManageLaunchAtLogin
+                        ? "When enabled, KotoType launches automatically when you sign in to macOS."
+                        : "Launch at login can only be configured from an installed app in /Applications or ~/Applications. Development builds do not register login items."
+                )
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
