@@ -874,10 +874,11 @@ def main():
                     screenshot_context = base64.b64decode(screenshot_context_base64).decode("utf-8")
                 except Exception as decode_error:
                     log(f"Failed to decode screenshot context: {decode_error}")
+            screenshot_context_base64 = ""
 
             actual_language = None if language == "auto" else language
             log(
-                f"Received: audio={audio_path}, language={language}, actual_language={actual_language}, temp={temperature}, beam={beam_size}, "
+                f"Received: audio_path_len={len(audio_path)}, language={language}, actual_language={actual_language}, temp={temperature}, beam={beam_size}, "
                 f"no_speech_threshold={no_speech_threshold}, compression_ratio_threshold={compression_ratio_threshold}, "
                 f"task={task}, best_of={best_of}, vad_threshold={vad_threshold}, auto_punctuation={auto_punctuation}, "
                 f"auto_gain_enabled={auto_gain_enabled}, auto_gain_weak_threshold_dbfs={auto_gain_weak_threshold_dbfs}, "
@@ -897,7 +898,7 @@ def main():
                 continue
 
             if not os.path.exists(audio_path):
-                log(f"Error: File not found: {audio_path}")
+                log("Error: input audio file not found")
                 print("", file=sys.stdout)
                 sys.stdout.flush()
                 continue
@@ -933,13 +934,15 @@ def main():
                 user_words=user_words,
                 screenshot_context=screenshot_context,
             )
+            # OCR context is only used to build the prompt and should not linger in memory.
+            screenshot_context = None
 
             start_time = time.time()
             vad_parameters = build_vad_parameters(vad_threshold)
 
             log("Starting transcription with Whisper...")
             log(
-                f"Transcription parameters: audio={transcription_audio_path}, language={actual_language}, task={task}, temperature={temperature}, beam_size={beam_size}, best_of={best_of}, vad_parameters={vad_parameters}, auto_punctuation={auto_punctuation}, initial_prompt={initial_prompt[:50] if initial_prompt else None}..."
+                f"Transcription parameters: audio_path_len={len(transcription_audio_path)}, language={actual_language}, task={task}, temperature={temperature}, beam_size={beam_size}, best_of={best_of}, vad_parameters={vad_parameters}, auto_punctuation={auto_punctuation}, initial_prompt_present={initial_prompt is not None}"
             )
 
             transcribe_kwargs = {
@@ -965,6 +968,8 @@ def main():
                     default=True,
                 ),
             )
+            transcribe_kwargs["initial_prompt"] = None
+            initial_prompt = None
 
             detected_language = (
                 info.language if actual_language is None else actual_language
@@ -975,7 +980,6 @@ def main():
             )
 
             transcription = " ".join([segment.text for segment in segments]).strip()
-            log(f"Transcription result (raw): '{transcription}'")
             log(f"Transcription length: {len(transcription)} characters")
 
             transcription = post_process_text(
@@ -983,7 +987,7 @@ def main():
                 detected_language,
                 auto_punctuation=auto_punctuation,
             )
-            log(f"Transcription result (post-processed): '{transcription}'")
+            log(f"Post-processed transcription length: {len(transcription)} characters")
 
             print(transcription, file=sys.stdout)
             sys.stdout.flush()
@@ -994,7 +998,7 @@ def main():
             ):
                 try:
                     os.remove(transcription_audio_path)
-                    log(f"Cleaned up temporary file: {transcription_audio_path}")
+                    log("Cleaned up temporary preprocessed file")
                 except Exception as e:
                     log(f"Error removing temporary file: {str(e)}")
 

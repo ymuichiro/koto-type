@@ -267,7 +267,7 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
 	<key>NSAppleEventsUsageDescription</key>
 	<string>他のアプリと連携するためにApple Eventsを使用します</string>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUAutomaticallyUpdate</key>
 	<false/>
 </dict>

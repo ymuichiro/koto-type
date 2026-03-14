@@ -5,7 +5,6 @@ final class KeystrokeSimulator {
     
     static func typeText(_ text: String) {
         Logger.shared.log("KeystrokeSimulator: typeText called with text length: \(text.count)", level: .debug)
-        Logger.shared.log("KeystrokeSimulator: text content: \(text)", level: .debug)
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
