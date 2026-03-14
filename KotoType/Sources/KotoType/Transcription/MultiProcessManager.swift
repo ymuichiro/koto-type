@@ -133,12 +133,18 @@ final class MultiProcessManager: @unchecked Sendable {
             }
 
             Logger.shared.log("MultiProcessManager: no idle process available, queuing file: \(url.path)", level: .warning)
+            if screenshotContext != nil {
+                Logger.shared.log(
+                    "MultiProcessManager: dropping queued screenshot context for segment \(index) to avoid retaining OCR text in memory",
+                    level: .warning
+                )
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.processFile(
                     url: url,
                     index: index,
                     settings: settings,
-                    screenshotContext: screenshotContext,
+                    screenshotContext: nil,
                     retryCount: retryCount,
                     queueAttempt: queueAttempt + 1
                 )
@@ -153,13 +159,13 @@ final class MultiProcessManager: @unchecked Sendable {
                 url: url,
                 index: index,
                 settings: settings,
-                retryCount: retryCount,
-                screenshotContext: screenshotContext
-            )
+                retryCount: retryCount
+            ),
+            screenshotContext: screenshotContext
         )
     }
     
-    private func assignProcess(processIndex: Int, context: SegmentContext) {
+    private func assignProcess(processIndex: Int, context: SegmentContext, screenshotContext: String?) {
         var assignedContext = context
         assignedContext.assignedAt = Date()
 
@@ -201,7 +207,7 @@ final class MultiProcessManager: @unchecked Sendable {
             autoGainWeakThresholdDbfs: assignedContext.settings.autoGainWeakThresholdDbfs,
             autoGainTargetPeakDbfs: assignedContext.settings.autoGainTargetPeakDbfs,
             autoGainMaxDb: assignedContext.settings.autoGainMaxDb,
-            screenshotContext: assignedContext.screenshotContext
+            screenshotContext: screenshotContext
         )
 
         if !sendSucceeded {
@@ -210,7 +216,10 @@ final class MultiProcessManager: @unchecked Sendable {
     }
     
     private func handleOutput(processIndex: Int, output: String) {
-        Logger.shared.log("MultiProcessManager: handleOutput called - processIndex=\(processIndex), output='\(output)'", level: .info)
+        Logger.shared.log(
+            "MultiProcessManager: handleOutput called - processIndex=\(processIndex), outputLength=\(output.count)",
+            level: .info
+        )
         let now = Date()
         
         processLock.lock()
@@ -227,7 +236,7 @@ final class MultiProcessManager: @unchecked Sendable {
             }
             processLock.unlock()
             Logger.shared.log(
-                "MultiProcessManager: invalid health check response from process \(processIndex): '\(output)'",
+                "MultiProcessManager: invalid health check response from process \(processIndex) (length=\(output.count))",
                 level: .warning
             )
             recoverProcess(processIndex: processIndex)
@@ -367,7 +376,7 @@ final class MultiProcessManager: @unchecked Sendable {
                 url: context.url,
                 index: context.index,
                 settings: context.settings,
-                screenshotContext: context.screenshotContext,
+                screenshotContext: nil,
                 retryCount: nextRetry,
                 queueAttempt: 0
             )
@@ -833,7 +842,6 @@ private struct SegmentContext {
     let index: Int
     let settings: AppSettings
     let retryCount: Int
-    let screenshotContext: String?
     var assignedAt: Date = .distantPast
 }
 

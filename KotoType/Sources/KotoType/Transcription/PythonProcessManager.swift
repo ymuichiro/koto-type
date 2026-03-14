@@ -107,7 +107,10 @@ final class PythonProcessManager: @unchecked Sendable {
                 self.ioLock.unlock()
 
                 for line in lines {
-                    Logger.shared.log("Python stdout line received: '\(line)'", level: .debug)
+                    Logger.shared.log(
+                        "Python stdout line received (length=\(line.count))",
+                        level: .debug
+                    )
                     self.outputReceived?(line)
                 }
             }
@@ -154,7 +157,7 @@ final class PythonProcessManager: @unchecked Sendable {
             .base64EncodedString() ?? ""
         let input = "\(text)|\(language)|\(temperature)|\(beamSize)|\(noSpeechThreshold)|\(compressionRatioThreshold)|\(task)|\(bestOf)|\(vadThreshold)|\(punctuationFlag)|\(autoGainFlag)|\(autoGainWeakThresholdDbfs)|\(autoGainTargetPeakDbfs)|\(autoGainMaxDb)|\(screenshotContextBase64)"
         Logger.shared.log(
-            "Sending input to Python: audioPath=\(text), language=\(language), task=\(task), screenshotContextLength=\(screenshotContext?.count ?? 0)",
+            "Sending input to Python: audioPathLength=\(text.count), language=\(language), task=\(task), screenshotContextLength=\(screenshotContext?.count ?? 0)",
             level: .debug
         )
         guard let process = process, process.isRunning else {

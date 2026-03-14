@@ -46,7 +46,8 @@ final class Logger {
             fileHandle?.write(data)
         }
         
-        os_log("%{public}@", log: logger, type: level.osLogType, message)
+        // Never mark logs as public to avoid exposing sensitive values in unified logging.
+        os_log("%{private}@", log: logger, type: level.osLogType, message)
         
         print(logMessage, terminator: "")
     }

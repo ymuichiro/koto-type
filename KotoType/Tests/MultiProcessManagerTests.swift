@@ -234,6 +234,41 @@ final class MultiProcessManagerTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(created.count, 2)
     }
+
+    func testScreenshotContextIsDroppedAfterFirstSendAttempt() {
+        let completion = expectation(description: "segment completes with empty")
+        let capturedContexts = LockedOptionalStringArray()
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: false)
+            mock.onSendDetailed = { _, _, screenshotContext in
+                capturedContexts.append(screenshotContext)
+            }
+            return mock
+        }
+
+        manager.segmentComplete = { index, text in
+            if index == 21 {
+                XCTAssertEqual(text, "")
+                completion.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/context.wav"),
+            index: 21,
+            settings: AppSettings(),
+            screenshotContext: "sensitive screen context"
+        )
+
+        wait(for: [completion], timeout: 3.0)
+
+        let values = capturedContexts.value
+        XCTAssertEqual(values.count, 3)
+        XCTAssertEqual(values[0], "sensitive screen context")
+        XCTAssertTrue(values.dropFirst().allSatisfy { $0 == nil })
+    }
 }
 
 private final class MockMultiProcessPythonManager: PythonProcessManaging {
@@ -246,6 +281,7 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
     private let sendSucceeds: Bool
     var onStart: ((MockMultiProcessPythonManager) -> Void)?
     var onSend: ((MockMultiProcessPythonManager, String) -> Void)?
+    var onSendDetailed: ((MockMultiProcessPythonManager, String, String?) -> Void)?
 
     init(sendSucceeds: Bool) {
         self.sendSucceeds = sendSucceeds
@@ -275,6 +311,7 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
         screenshotContext: String?
     ) -> Bool {
         onSend?(self, text)
+        onSendDetailed?(self, text, screenshotContext)
         return sendSucceeds
     }
 
@@ -306,6 +343,23 @@ private final class LockedInt {
     func increment() {
         lock.lock()
         storage += 1
+        lock.unlock()
+    }
+}
+
+private final class LockedOptionalStringArray {
+    private let lock = NSLock()
+    private var storage: [String?] = []
+
+    var value: [String?] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: String?) {
+        lock.lock()
+        storage.append(value)
         lock.unlock()
     }
 }

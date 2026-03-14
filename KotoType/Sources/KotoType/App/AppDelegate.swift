@@ -10,7 +10,7 @@ private final class RecordingSessionContext {
     let batchTranscriptionManager: BatchTranscriptionManager
     var finalizationReadyWorkItem: DispatchWorkItem?
     var completionTimeoutWorkItem: DispatchWorkItem?
-    var screenshotContext: String?
+    private var screenshotContext: String?
 
     init(id: Int) {
         self.id = id
@@ -25,6 +25,19 @@ private final class RecordingSessionContext {
     func cancelFinalizationReadyWorkItem() {
         finalizationReadyWorkItem?.cancel()
         finalizationReadyWorkItem = nil
+    }
+
+    func setScreenshotContext(_ context: String?) {
+        screenshotContext = context
+    }
+
+    func consumeScreenshotContext() -> String? {
+        defer { screenshotContext = nil }
+        return screenshotContext
+    }
+
+    func clearScreenshotContext() {
+        screenshotContext = nil
     }
 }
 
@@ -168,7 +181,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         multiProcessManager?.outputReceived = { [weak self] processIndex, output in
             guard self != nil else { return }
-            Logger.shared.log("Transcription received from process \(processIndex): '\(output)'", level: .info)
+            Logger.shared.log(
+                "Transcription received from process \(processIndex) (length=\(output.count))",
+                level: .info
+            )
             
             if output.isEmpty {
                 Logger.shared.log("Empty transcription received, skipping", level: .warning)
@@ -177,7 +193,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         multiProcessManager?.segmentComplete = { [weak self] segmentIndex, output in
             guard let self = self else { return }
-            Logger.shared.log("Segment complete - index=\(segmentIndex), output='\(output)'", level: .info)
+            Logger.shared.log(
+                "Segment complete - index=\(segmentIndex), outputLength=\(output.count)",
+                level: .info
+            )
             self.handleSegmentComplete(globalIndex: segmentIndex, output: output)
         }
 
@@ -254,11 +273,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             self.pendingSegmentFiles[globalIndex] = url
             currentSession.batchTranscriptionManager.addSegment(url: url, index: localIndex)
+            let screenshotContext = currentSession.consumeScreenshotContext()
             self.multiProcessManager?.processFile(
                 url: url,
                 index: globalIndex,
                 settings: self.currentSettings,
-                screenshotContext: currentSession.screenshotContext
+                screenshotContext: screenshotContext
             )
         }
 
@@ -298,7 +318,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         isRecording = false
         activeRecordingSessionID = nil
-        session.screenshotContext = ScreenContextExtractor.captureScreenTextContext()
+        session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.sessionByID[sessionID]?.clearScreenshotContext()
+        }
         Logger.shared.log("Stopping audio recording for session \(sessionID)...", level: .info)
         realtimeRecorder?.stopRecording()
         realtimeRecorder?.onInputLevelChanged = nil
@@ -478,7 +501,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let finalText = session.batchTranscriptionManager.finalize() ?? ""
         let didInsertText: Bool
         if !finalText.isEmpty {
-            Logger.shared.log("Typing text into active window (session \(sessionID)): '\(finalText)'", level: .info)
+            Logger.shared.log(
+                "Typing text into active window (session \(sessionID), length=\(finalText.count))",
+                level: .info
+            )
             KeystrokeSimulator.typeText(finalText)
             Logger.shared.log("Text typing completed (session \(sessionID))", level: .info)
             TranscriptionHistoryManager.shared.addEntry(

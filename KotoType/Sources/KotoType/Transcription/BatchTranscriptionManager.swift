@@ -19,7 +19,10 @@ final class BatchTranscriptionManager: @unchecked Sendable {
     }
     
     func completeSegment(index: Int, text: String) {
-        Logger.shared.log("BatchTranscriptionManager: completeSegment called - index=\(index), text='\(text)'", level: .info)
+        Logger.shared.log(
+            "BatchTranscriptionManager: completeSegment called - index=\(index), textLength=\(text.count)",
+            level: .info
+        )
         lock.lock()
         defer { lock.unlock() }
         
@@ -36,7 +39,10 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         let combined = combineSegments()
         
         if !combined.isEmpty {
-            Logger.shared.log("BatchTranscriptionManager: final transcription: '\(combined)'", level: .info)
+            Logger.shared.log(
+                "BatchTranscriptionManager: final transcription ready (length=\(combined.count))",
+                level: .info
+            )
             return combined
         } else {
             Logger.shared.log("BatchTranscriptionManager: no transcriptions to finalize", level: .warning)
