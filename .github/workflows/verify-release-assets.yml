@@ -1,0 +1,130 @@
+name: Verify Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify (empty means latest)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve target release tag
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "${TAG}" ]; then
+            TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          fi
+          if [ -z "${TAG}" ]; then
+            echo "Could not resolve target release tag."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "Target release tag: ${TAG}"
+
+      - name: Validate Sparkle secrets
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          if [ -z "${SPARKLE_PUBLIC_ED_KEY}" ]; then
+            echo "Missing SPARKLE_PUBLIC_ED_KEY secret."
+            exit 1
+          fi
+          if [ -z "${SPARKLE_PRIVATE_ED_KEY}" ]; then
+            echo "Missing SPARKLE_PRIVATE_ED_KEY secret."
+            exit 1
+          fi
+
+      - name: Install Sparkle tools
+        run: |
+          ./scripts/fetch_sparkle_tools.sh 2.9.0 build/sparkle-tools
+
+      - name: Validate Sparkle key pair
+        env:
+          GENERATE_KEYS_BIN: ${{ github.workspace }}/build/sparkle-tools/bin/generate_keys
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          TMP_DIR="$(mktemp -d)"
+          ACCOUNT="ci-release-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          PRIVATE_KEY_FILE="${TMP_DIR}/sparkle_private.key"
+          trap 'rm -rf "${TMP_DIR}"' EXIT
+          printf '%s' "${SPARKLE_PRIVATE_ED_KEY}" > "${PRIVATE_KEY_FILE}"
+          "${GENERATE_KEYS_BIN}" --account "${ACCOUNT}" -f "${PRIVATE_KEY_FILE}" >/dev/null
+          DERIVED_PUBLIC_KEY="$("${GENERATE_KEYS_BIN}" --account "${ACCOUNT}" -p)"
+          if [ "${DERIVED_PUBLIC_KEY}" != "${SPARKLE_PUBLIC_ED_KEY}" ]; then
+            echo "SPARKLE_PUBLIC_ED_KEY does not match SPARKLE_PRIVATE_ED_KEY."
+            exit 1
+          fi
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p verify_release
+          cd verify_release
+          gh release download "${{ steps.target.outputs.tag }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "KotoType-*.zip" \
+            --pattern "appcast.xml"
+          ls -la
+
+      - name: Verify appcast and update signatures
+        env:
+          SIGN_UPDATE_BIN: ${{ github.workspace }}/build/sparkle-tools/bin/sign_update
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          cd verify_release
+          APPCAST_PATH="appcast.xml"
+          ZIP_PATH="$(find . -maxdepth 1 -type f -name "KotoType-*.zip" -print -quit)"
+          if [ -z "${ZIP_PATH}" ]; then
+            echo "Release ZIP asset was not found."
+            exit 1
+          fi
+          printf '%s' "${SPARKLE_PRIVATE_ED_KEY}" | "${SIGN_UPDATE_BIN}" --verify --ed-key-file - "${APPCAST_PATH}"
+          ZIP_SIGNATURE="$(python3 -c 'import xml.etree.ElementTree as ET; root = ET.parse("appcast.xml").getroot(); sig = next((v for n in root.iter() if n.tag.endswith("enclosure") for k, v in n.attrib.items() if k.endswith("edSignature")), ""); print(sig); raise SystemExit(0 if sig else 1)')"
+          printf '%s' "${SPARKLE_PRIVATE_ED_KEY}" | "${SIGN_UPDATE_BIN}" --verify --ed-key-file - "${ZIP_PATH}" "${ZIP_SIGNATURE}"
+
+      - name: Verify embedded SUPublicEDKey
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          cd verify_release
+          ZIP_PATH="$(find . -maxdepth 1 -type f -name "KotoType-*.zip" -print -quit)"
+          rm -rf unpacked
+          mkdir -p unpacked
+          ditto -x -k "${ZIP_PATH}" unpacked
+          INFO_PLIST="$(find unpacked -path "*/KotoType.app/Contents/Info.plist" -print -quit)"
+          if [ -z "${INFO_PLIST}" ]; then
+            echo "Could not find KotoType.app/Contents/Info.plist in release ZIP."
+            exit 1
+          fi
+          EMBEDDED_PUBLIC_KEY="$(
+            /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "${INFO_PLIST}" 2>/dev/null || true
+          )"
+          if [ -z "${EMBEDDED_PUBLIC_KEY}" ]; then
+            echo "SUPublicEDKey is missing in release ZIP app bundle."
+            exit 1
+          fi
+          if [ "${EMBEDDED_PUBLIC_KEY}" != "${SPARKLE_PUBLIC_ED_KEY}" ]; then
+            echo "SUPublicEDKey in release ZIP does not match SPARKLE_PUBLIC_ED_KEY."
+            exit 1
+          fi
+
+      - name: Report verification result
+        run: |
+          echo "Verified release ${{ steps.target.outputs.tag }} with configured Sparkle keys."
