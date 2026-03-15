@@ -1,3 +1,4 @@
+import Dispatch
 import XCTest
 @testable import KotoType
 
@@ -109,5 +110,21 @@ final class RuntimeSafetyTests: XCTestCase {
     func testShouldAutoRecoverIdleTerminationAllowsRecoverableStatuses() {
         XCTAssertTrue(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 1))
         XCTAssertTrue(MultiProcessManager.shouldAutoRecoverIdleTermination(status: 15))
+    }
+
+    @MainActor
+    func testMainActorDispatchHandlerHopsToMainActorFromBackgroundQueue() async {
+        let expectation = expectation(description: "main actor handler executed")
+        var executedOnMainThread = false
+
+        let handler = AppDelegate.makeMainActorDispatchHandler {
+            executedOnMainThread = Thread.isMainThread
+            expectation.fulfill()
+        }
+
+        DispatchQueue.global(qos: .utility).async(execute: handler)
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+        XCTAssertTrue(executedOnMainThread)
     }
 }

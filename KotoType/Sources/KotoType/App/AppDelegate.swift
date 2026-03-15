@@ -86,6 +86,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let workerCount = resolvedWorkerCount(requested: requestedWorkers, bundlePath: bundlePath)
         return (max(1, workerCount), 1)
     }
+
+    // Dispatch source handlers run on their configured queue, so create a nonisolated
+    // trampoline and explicitly hop back to the main actor before touching AppDelegate state.
+    nonisolated static func makeMainActorDispatchHandler(
+        _ operation: @escaping @MainActor () -> Void
+    ) -> () -> Void {
+        {
+            Task { @MainActor in
+                operation()
+            }
+        }
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.shared.log("Application did finish launching", level: .info)
@@ -685,13 +697,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             eventMask: [.warning, .critical],
             queue: DispatchQueue.global(qos: .utility)
         )
-        source.setEventHandler { [weak self] in
+        source.setEventHandler(handler: Self.makeMainActorDispatchHandler { [weak self] in
             guard let self else { return }
-            let event = source.data
-            Task { @MainActor [weak self] in
-                self?.handleMemoryPressureEvent(event)
-            }
-        }
+            self.handleMemoryPressureEvent(source.data)
+        })
         source.resume()
         memoryPressureSource = source
     }
@@ -761,11 +770,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             deadline: .now() + temporaryBatchCleanupInterval,
             repeating: temporaryBatchCleanupInterval
         )
-        timer.setEventHandler { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.cleanupStaleTemporaryBatchFiles()
-            }
-        }
+        timer.setEventHandler(handler: Self.makeMainActorDispatchHandler { [weak self] in
+            self?.cleanupStaleTemporaryBatchFiles()
+        })
         timer.resume()
         temporaryBatchCleanupTimer = timer
     }
