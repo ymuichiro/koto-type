@@ -160,6 +160,7 @@
           <article class="card">
             <h3>1. Install the app</h3>
             <p>Download the latest release, open the DMG, and drag KotoType.app into Applications.</p>
+            <p><strong>Update note:</strong> After upgrading to a new version, you need to grant macOS permissions again.</p>
           </article>
           <article class="card">
             <h3>2. Install FFmpeg (required)</h3>
@@ -335,6 +336,10 @@ ffmpeg -version</code></pre>
         <details>
           <summary>How do I install FFmpeg?</summary>
           <p>Run <code>brew install ffmpeg</code> in Terminal, then verify with <code>ffmpeg -version</code>.</p>
+        </details>
+        <details>
+          <summary>Do I need to reconfigure anything after updating?</summary>
+          <p>Yes. After upgrading to a new version, macOS permissions for <code>Accessibility</code>, <code>Microphone</code>, and <code>Screen Recording</code> need to be granted again. Restart KotoType if needed and complete the setup checks again before dictation.</p>
         </details>
         <details>
           <summary>Does KotoType send audio to the cloud?</summary>

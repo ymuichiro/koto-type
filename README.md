@@ -52,6 +52,9 @@ A Mac-native voice-to-text application with high-accuracy transcription powered 
 3. Drag KotoType.app to your Applications folder
 4. On first launch, click "Open" when prompted by the security warning
 
+> **Update note**: After upgrading KotoType to a newer version, macOS permissions must be granted again.
+> Re-open KotoType and re-allow **Accessibility**, **Microphone**, and **Screen Recording** in `System Settings > Privacy & Security` if prompted.
+
 ### Install FFmpeg (Required)
 
 KotoType validates `ffmpeg` during the initial setup and cannot proceed without it.
@@ -212,6 +215,14 @@ ffmpeg -version
 1. Click the text field where you want output.
 2. Hold your hotkey while speaking.
 3. Release the hotkey and wait for automatic text insertion.
+
+#### After updating to a new version
+
+If you update KotoType, macOS permissions need to be assigned again for the new app version.
+
+1. Reopen KotoType after the update finishes.
+2. Re-check **Accessibility**, **Microphone**, and **Screen Recording** in `System Settings > Privacy & Security`.
+3. If KotoType shows the setup window again, complete the permission checks before using dictation.
 
 #### Fast fixes (first day)
 

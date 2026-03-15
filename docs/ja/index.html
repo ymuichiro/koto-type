@@ -160,6 +160,7 @@
           <article class="card">
             <h3>1. アプリをインストール</h3>
             <p>最新版をダウンロードし、DMG を開いて KotoType.app を Applications にドラッグします。</p>
+            <p><strong>アップデート時の注意:</strong> 新しいバージョンへ更新した後は、macOS の権限を再度許可し直す必要があります。</p>
           </article>
           <article class="card">
             <h3>2. FFmpeg をインストール（必須）</h3>
@@ -335,6 +336,10 @@ ffmpeg -version</code></pre>
         <details>
           <summary>FFmpeg はどうやってインストールしますか？</summary>
           <p>Terminal で <code>brew install ffmpeg</code> を実行し、<code>ffmpeg -version</code> で確認します。</p>
+        </details>
+        <details>
+          <summary>アップデート後に再設定が必要なものはありますか？</summary>
+          <p>あります。新しいバージョンへ更新すると、macOS の <code>Accessibility</code>、<code>Microphone</code>、<code>Screen Recording</code> の権限を再度許可し直す必要があります。必要に応じて KotoType を再起動し、セットアップ画面のチェックをやり直してください。</p>
         </details>
         <details>
           <summary>KotoType は音声をクラウドに送信しますか？</summary>
