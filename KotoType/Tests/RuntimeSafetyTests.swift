@@ -113,18 +113,23 @@ final class RuntimeSafetyTests: XCTestCase {
     }
 
     @MainActor
-    func testMainActorDispatchHandlerHopsToMainActorFromBackgroundQueue() async {
+    func testMainActorDispatchHandlerCapturesQueueStateBeforeHoppingToMainActor() async {
         let expectation = expectation(description: "main actor handler executed")
-        var executedOnMainThread = false
+        var captureWasOnMainThread: Bool?
+        var operationWasOnMainThread = false
 
-        let handler = AppDelegate.makeMainActorDispatchHandler {
-            executedOnMainThread = Thread.isMainThread
+        let handler = AppDelegate.makeMainActorDispatchHandler(capture: {
+            Thread.isMainThread
+        }) { wasOnMainThread in
+            captureWasOnMainThread = wasOnMainThread
+            operationWasOnMainThread = Thread.isMainThread
             expectation.fulfill()
         }
 
         DispatchQueue.global(qos: .utility).async(execute: handler)
 
         await fulfillment(of: [expectation], timeout: 1.0)
-        XCTAssertTrue(executedOnMainThread)
+        XCTAssertEqual(captureWasOnMainThread, false)
+        XCTAssertTrue(operationWasOnMainThread)
     }
 }

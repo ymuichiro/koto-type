@@ -88,13 +88,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // Dispatch source handlers run on their configured queue, so create a nonisolated
-    // trampoline and explicitly hop back to the main actor before touching AppDelegate state.
+    // trampoline that captures queue-local state before hopping back to the main actor.
     nonisolated static func makeMainActorDispatchHandler(
         _ operation: @escaping @MainActor () -> Void
     ) -> () -> Void {
+        makeMainActorDispatchHandler(capture: { () }) { _ in
+            operation()
+        }
+    }
+
+    nonisolated static func makeMainActorDispatchHandler<State: Sendable>(
+        capture value: @escaping @Sendable () -> State,
+        _ operation: @escaping @MainActor (State) -> Void
+    ) -> () -> Void {
         {
+            let capturedValue = value()
             Task { @MainActor in
-                operation()
+                operation(capturedValue)
             }
         }
     }
@@ -697,9 +707,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             eventMask: [.warning, .critical],
             queue: DispatchQueue.global(qos: .utility)
         )
-        source.setEventHandler(handler: Self.makeMainActorDispatchHandler { [weak self] in
+        source.setEventHandler(handler: Self.makeMainActorDispatchHandler(capture: { source.data.rawValue }) { [weak self] rawValue in
             guard let self else { return }
-            self.handleMemoryPressureEvent(source.data)
+            self.handleMemoryPressureEvent(.init(rawValue: rawValue))
         })
         source.resume()
         memoryPressureSource = source
