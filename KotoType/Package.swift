@@ -24,6 +24,12 @@ let package = Package(
             path: "Sources",
             resources: [
                 .process("KotoType/Resources")
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks"
+                ], .when(platforms: [.macOS]))
             ]
         ),
         .testTarget(
