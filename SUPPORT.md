@@ -27,7 +27,7 @@ Welcome to the KotoType support page. Here you'll find resources to help you get
 - [Installation Guide](README.md#installation)
 - [Usage Guide](README.md#usage)
 - [Troubleshooting](README.md#troubleshooting)
-- [API Documentation](README.md#api)
+- [Security Policy](SECURITY.md)
 
 ## Getting Started
 
@@ -46,6 +46,7 @@ Before using KotoType, ensure you have:
 - FFmpeg installed (for audio file conversion, e.g., `brew install ffmpeg`)
 - Microphone access granted
 - Accessibility permissions granted (for hotkeys)
+- Screen Recording permission granted (for screen context support)
 
 ## Troubleshooting
 
@@ -64,7 +65,7 @@ Before using KotoType, ensure you have:
 **Symptoms**: Recording fails or no audio is captured
 
 **Solutions**:
-1. Check System Preferences > Security & Privacy > Microphone
+1. Check System Settings > Privacy & Security > Microphone
 2. Ensure KotoType is listed and enabled
 3. Try restarting the app
 4. Check if other apps are using the microphone
@@ -74,7 +75,7 @@ Before using KotoType, ensure you have:
 **Symptoms**: Holding and releasing the configured hotkey does not start/stop recording
 
 **Solutions**:
-1. Check System Preferences > Security & Privacy > Accessibility
+1. Check System Settings > Privacy & Security > Accessibility
 2. Ensure KotoType is listed and enabled
 3. Verify no other apps are using the same hotkey
 4. Try restarting the app
@@ -84,10 +85,10 @@ Before using KotoType, ensure you have:
 **Symptoms**: Audio records but transcription doesn't work
 
 **Solutions**:
-1. Check internet connection (Whisper model download)
+1. Ensure the initial Whisper model download can complete
 2. Verify FFmpeg is installed: `ffmpeg -version`
 3. Review server logs: `make view-log`
-4. Ensure sufficient disk space (~3GB for Whisper model)
+4. Ensure sufficient disk space for the `large-v3-turbo` model download
 
 ### Gatekeeper Warning
 
@@ -98,7 +99,7 @@ Before using KotoType, ensure you have:
 2. Select "Open"
 3. Click "Open" in the security dialog
 
-This is normal for unsigned apps. After this, KotoType will launch normally.
+This is normal for apps that are not Developer ID signed and notarized. Current release bundles are ad-hoc signed, but macOS may still require manual approval on first launch.
 
 ### Slow Transcription
 
@@ -158,7 +159,7 @@ We welcome feature requests! To suggest a new feature:
 
 - **GitHub Issues**: For bug reports and feature requests
 - **GitHub Discussions**: For questions and general discussion (if enabled)
-- **Email**: Contact maintainers for sensitive issues
+- **Security reports**: Follow [SECURITY.md](SECURITY.md) for private vulnerability reporting
 
 ### Contributing
 
@@ -194,7 +195,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 For questions or suggestions that aren't covered by the above resources, please:
 
 1. Check the [README.md](README.md) first
-2. Search [GitHub Issues](https://github.com/yourusername/koto-type/issues)
+2. Search [GitHub Issues](https://github.com/ymuichiro/koto-type/issues)
 3. Create a new issue if your question hasn't been answered
 
 Thank you for using KotoType!

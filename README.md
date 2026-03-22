@@ -6,17 +6,17 @@
 
 A Mac-native voice-to-text application with high-accuracy transcription powered by OpenAI Whisper.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/koto-type/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/ymuichiro/koto-type/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)](https://swift.org)
 [![Python](https://img.shields.io/badge/Python-3.13-blue.svg)](https://python.org)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos)
 [![Code of Conduct](https://img.shields.io/badge/code%20of%20conduct-enabled-brightgreen.svg)](CODE_OF_CONDUCT.md)
 
-[![GitHub stars](https://img.shields.io/github/stars/yourusername/koto-type?style=social)](https://github.com/yourusername/koto-type/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/yourusername/koto-type?style=social)](https://github.com/yourusername/koto-type/network/members)
-[![GitHub issues](https://img.shields.io/github/issues/yourusername/koto-type)](https://github.com/yourusername/koto-type/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/yourusername/koto-type)](https://github.com/yourusername/koto-type/pulls)
+[![GitHub stars](https://img.shields.io/github/stars/ymuichiro/koto-type?style=social)](https://github.com/ymuichiro/koto-type/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/ymuichiro/koto-type?style=social)](https://github.com/ymuichiro/koto-type/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/ymuichiro/koto-type)](https://github.com/ymuichiro/koto-type/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/ymuichiro/koto-type)](https://github.com/ymuichiro/koto-type/pulls)
 
 **[Documentation](#documentation) • [Installation](#installation) • [Usage](#usage) • [Contributing](#contributing) • [Support](#support)**
 
@@ -47,7 +47,7 @@ A Mac-native voice-to-text application with high-accuracy transcription powered 
 
 ### Install from DMG (Recommended)
 
-1. Download the latest [KotoType.dmg](https://github.com/yourusername/koto-type/releases/latest)
+1. Download the latest [KotoType.dmg](https://github.com/ymuichiro/koto-type/releases/latest)
 2. Double-click the downloaded DMG file
 3. Drag KotoType.app to your Applications folder
 4. On first launch, click "Open" when prompted by the security warning
@@ -87,7 +87,7 @@ sudo port install ffmpeg
 
 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/koto-type.git
+git clone https://github.com/ymuichiro/koto-type.git
 cd koto-type
 ```
 
@@ -129,8 +129,10 @@ make help
 
 #### Testing Commands
 
-- `make test-transcription` - Run transcription tests
-- `make test-benchmark` - Run performance benchmarks
+- `make test-transcription` - Run audio preprocessing and transcription-related unit tests
+- `make test-user-dictionary` - Run user dictionary unit tests
+- `make test-smoke-server` - Run packaged server smoke tests
+- `make test-benchmark` - Legacy alias for `make test-smoke-server`
 - `make test-all` - Run all tests
 
 #### Build Commands
@@ -267,7 +269,7 @@ ffmpeg -version
 
 ## Security Warning
 
-This app is currently distributed without Apple Developer signing, so you may see a Gatekeeper warning on first launch.
+This app is currently distributed without Apple Developer ID signing or notarization, so you may see a Gatekeeper warning on first launch.
 
 ### Unsigned App Launch Steps by macOS Version
 
@@ -293,7 +295,7 @@ Apple references:
 1. Go to System Settings, then open Privacy & Security
 2. Click "Open"
 
-This is normal behavior for apps without Apple Developer Program signing. After this, the app will launch without warnings.
+This is normal behavior for apps that are not Developer ID signed and notarized. After approval, the app will launch normally.
 
 ## Project Structure
 
@@ -303,8 +305,9 @@ koto-type/
 │   └── whisper_server.py       # Whisper server
 ├── tests/
 │   └── python/                 # Python tests
-│       ├── test_transcription.py
-│       └── test_benchmark.py
+│       ├── smoke_whisper_server_binary.py
+│       ├── test_audio_preprocess.py
+│       └── test_user_dictionary.py
 ├── KotoType/                     # Swift app
 │   ├── Sources/KotoType/
 │   │   ├── App/               # Entry point and path resolution
@@ -330,7 +333,10 @@ koto-type/
 # Transcription tests
 make test-transcription
 
-# Performance benchmark tests
+# Packaged server smoke tests
+make test-smoke-server
+
+# Compatibility alias for the packaged server smoke test
 make test-benchmark
 
 # Run all tests
@@ -340,11 +346,14 @@ make test-all
 ### Manual Testing
 
 ```bash
-# Transcription tests
-uv run python3 tests/python/test_transcription.py
+# Audio preprocessing / transcription-related tests
+uv run python tests/python/test_audio_preprocess.py
 
-# Performance benchmark tests
-uv run python3 tests/python/test_benchmark.py
+# User dictionary tests
+uv run python tests/python/test_user_dictionary.py
+
+# Packaged server smoke test (after `make build-server`)
+uv run python tests/python/smoke_whisper_server_binary.py dist/whisper_server
 ```
 
 ### Viewing Server Logs
@@ -485,7 +494,7 @@ The Python server is packaged as a single executable using PyInstaller:
 Allow microphone access on first launch when prompted.
 
 ### Whisper Model Download
-The Whisper model (large-v3, ~3GB) is downloaded on first launch.
+The Whisper model (`large-v3-turbo`) is downloaded on first launch. Expect a several-GB initial download.
 
 ### Hotkey Not Working
 Enable KotoType in System Settings > Privacy & Security > Accessibility, and confirm you are holding the configured hotkey (default: `⌘+⌥`).
@@ -501,7 +510,7 @@ make install-deps
 
 ## Releases
 
-Release binaries are available on the [Releases page](https://github.com/yourusername/koto-type/releases).
+Release binaries are available on the [Releases page](https://github.com/ymuichiro/koto-type/releases).
 
 ## Contributing
 
@@ -564,36 +573,12 @@ Made with ❤️ by [KotoType Contributors](CONTRIBUTORS.md)
 
 - **Microphone Permission**: Must be granted in System Settings
 - **Accessibility Permission**: Required for hotkeys and keyboard simulation
-- **Whisper Model**: ~3GB download on first launch
+- **Whisper Model**: `large-v3-turbo` download on first launch (several GB)
 
 ## Roadmap
 
-- [ ] Multi-language support
-- [ ] Customizable keyboard shortcuts
-- [x] Auto-update functionality (Sparkle + appcast feed)
+- [x] Multiple transcription language options
+- [x] Customizable keyboard shortcuts
+- [x] Manual update checks (Sparkle + appcast feed)
+- [ ] Automatic update checks and installation
 - [ ] Enhanced settings UI
-
-## Documentation
-
-- **[CHANGELOG.md](CHANGELOG.md)**: Version history and release notes
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Guidelines for contributors
-- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**: Community code of conduct
-- **[DESIGN.md](DESIGN.md)**: Technical design documentation
-- **[SECURITY.md](SECURITY.md)**: Security policy and reporting
-- **[SUPPORT.md](SUPPORT.md)**: Getting help and troubleshooting
-
-## Acknowledgments
-
-- [OpenAI Whisper](https://github.com/openai/whisper) for the speech recognition model
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for the optimized Whisper implementation
-- The open-source community for various tools and libraries
-
----
-
-<div align="center">
-
-Made with ❤️ by [KotoType Contributors](CONTRIBUTORS.md)
-
-[⬆ Back to top](#kototype)
-
-</div>

@@ -2,168 +2,141 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| Version | Supported |
+| ------- | --------- |
+| 1.0.x   | Yes       |
+| < 1.0   | No        |
+
+Older versions may contain unfixed bugs or security issues. Please upgrade to the latest 1.0.x release before reporting a vulnerability whenever possible.
 
 ## Reporting a Vulnerability
 
-This project takes security seriously. If you discover a security vulnerability, please report it responsibly.
+Do not open a public GitHub issue for a suspected security vulnerability.
 
-### How to Report
+Please report vulnerabilities privately by email:
 
-**Do not** create a public issue for security vulnerabilities.
+- `ym.u.ichiro@icloud.com`
 
-Instead, please send an email to: [INSERT SECURITY EMAIL]
+If GitHub private vulnerability reporting is enabled for this repository, you may use that channel instead of email.
 
-Your email should include:
+Include the following in your report when possible:
 
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if known)
+- KotoType version
+- macOS version
+- clear reproduction steps
+- expected behavior and actual behavior
+- impact assessment
+- logs, screenshots, or sample files with sensitive information removed
 
-### What to Expect
+We will make a best effort to acknowledge new reports within 3 business days and will coordinate disclosure with the reporter before publishing details.
 
-1. **Confirmation**: You'll receive an acknowledgement of your report within 48 hours
-2. **Assessment**: We'll assess the severity and validity of the report
-3. **Resolution**: We'll work on a fix and aim to release a patch promptly
-4. **Credit**: We'll credit you in the release notes (unless you request otherwise)
-5. **Coordinated Disclosure**: We'll coordinate public disclosure with you
-
-### Response Time
-
-We aim to respond to security reports within 48 hours and provide regular updates on our progress.
-
-## Security Best Practices
-
-### For Users
-
-1. **Keep Updated**: Always use the latest version of KotoType
-2. **Verify Downloads**: Only download from official sources (GitHub Releases)
-3. **Check Permissions**: Review and manage app permissions
-4. **Review Logs**: Periodically check application logs for unusual activity
-5. **Secure System**: Keep your macOS system and dependencies updated
-
-### For Developers
-
-When contributing to KotoType:
-
-1. **Input Validation**: Validate all user inputs
-2. **Error Handling**: Handle errors securely without exposing sensitive information
-3. **Dependencies**: Keep dependencies updated and review for vulnerabilities
-4. **Sensitive Data**: Avoid logging or storing sensitive data
-5. **Permissions**: Request minimal necessary permissions
-
-## Known Security Considerations
+## Security Overview
 
 ### Permissions
 
-KotoType requires the following macOS permissions:
+KotoType currently requests the following macOS permissions:
 
-1. **Microphone Access**: For audio recording
-2. **Accessibility**: For global hotkey monitoring and keyboard input simulation
+1. **Microphone**: required for live audio recording.
+2. **Accessibility**: required for global hotkey handling and simulated text insertion.
+3. **Screen Recording**: currently required for screen-context capture used to improve transcription context.
 
-**Note**: These permissions are essential for the application's core functionality and are handled securely.
+At the moment, the initial setup flow treats all three permissions as required for normal use.
 
-### Third-Party Dependencies
+### Local Data Handling
 
-KotoType uses the following third-party components:
+KotoType is designed for local transcription. During normal operation, it stores data on the local Mac only.
 
-- **OpenAI Whisper**: For speech recognition
-- **faster-whisper**: Optimized Whisper implementation
-- **FFmpeg**: For audio file processing
+The application may write the following local files:
 
-We keep these dependencies updated and monitor for security advisories.
+- app settings in `~/Library/Application Support/koto-type/settings.json`
+- transcription history in `~/Library/Application Support/koto-type/transcription_history.json`
+- user dictionary terms in `~/Library/Application Support/koto-type/user_dictionary.json`
+- Swift app logs in `~/Library/Application Support/koto-type/`
+- Python backend log in `~/Library/Application Support/koto-type/server.log`
+- temporary audio chunks in the system temporary directory during recording and preprocessing
 
-### Data Handling
+Notes:
 
-- **Audio Files**: Temporary audio files are created during recording and deleted after transcription
-- **Transcription History**: Saved locally in Application Support directory
-- **No Cloud Upload**: No data is sent to external servers (except model download)
-- **Local Processing**: All transcription happens locally on your Mac
+- Transcription history is stored locally until the user clears it.
+- Logs are intended for troubleshooting and may contain operational metadata such as file paths, settings values, and stack traces.
+- Automatic text insertion currently uses pasteboard-based paste simulation. Transcribed text may briefly pass through the macOS pasteboard.
 
 ### Network Access
 
-KotoType requires network access only for:
+KotoType does not intentionally upload recordings or transcriptions to external services during normal transcription.
 
-- **Initial Model Download**: Whisper model (~3GB) is downloaded once on first run
-- **Optional Updates**: If auto-update functionality is added in the future
+Network access is currently used for:
 
-No ongoing data transmission occurs during normal operation.
+- downloading Whisper model assets when they are not already present locally
+- manual update checks via Sparkle appcast retrieval
+- downloading signed update archives when the user chooses to update
 
-## Security Features
+Automatic background update checks and automatic installation are currently disabled by default.
 
-### Code Signing
+### Update Security
 
-Current status: **Unsigned distribution (no Apple Developer signing)**
+KotoType uses Sparkle for application updates.
 
-- KotoType is currently distributed without code signing
-- This may trigger Gatekeeper warnings on first launch
-- Users can bypass with "Right-click → Open"
-- Future releases may include proper Apple Developer signing
+Current update model:
 
-### Privacy
+- the app embeds a Sparkle public verification key
+- release automation signs update metadata and update ZIP archives with the matching private key
+- the app verifies Sparkle signatures before applying updates
+- the app uses a GitHub Releases-hosted `appcast.xml` feed
+- update checks are user-initiated rather than automatic
 
-- **Local Processing**: All speech recognition happens on your device
-- **No Data Collection**: We don't collect or transmit user data
-- **No Telemetry**: No analytics or usage data is sent
-- **Open Source**: Full code is available for audit
+Sparkle signing keys must never be committed to git. They should be provided through secure local key storage or CI secrets.
 
-### Encryption
+### Code Signing and Notarization
 
-- **Not Applicable**: KotoType doesn't store sensitive data requiring encryption
-- **Future Considerations**: If sensitive features are added, encryption will be implemented
+Current status:
 
-## Vulnerability Management
+- release bundles are ad-hoc signed for bundle integrity
+- Apple Developer ID signing is not currently part of the release process
+- notarization is not currently part of the release process
 
-### Severity Levels
+Because Developer ID signing and notarization are not yet in place, first launch may still require the user to explicitly approve the app in macOS security prompts.
 
-We use the following severity classification:
+## Developer Expectations
 
-- **Critical**: Security vulnerability that can be exploited without user interaction
-- **High**: Security vulnerability that requires some user interaction or complex exploit
-- **Medium**: Security vulnerability with limited impact
-- **Low**: Minor security issues with minimal impact
+When contributing to KotoType:
 
-### Patch Process
+1. validate inputs crossing the Swift-Python boundary
+2. avoid logging transcript content or other sensitive user data unless strictly necessary for debugging
+3. keep dependencies and release tooling up to date
+4. preserve least-privilege behavior around permissions and local storage
+5. keep signing keys and other secrets out of the repository
 
-1. **Assessment**: Evaluate severity and impact
-2. **Development**: Create fix and test thoroughly
-3. **Review**: Security review of the fix
-4. **Release**: Publish security update
-5. **Announcement**: Public disclosure with credit to reporter
+## Disclosure and Remediation
 
-### Patch Timeline
+We classify reports roughly as:
 
-We aim to release patches within the following timeframes:
+- **Critical**: can be exploited with minimal user interaction and causes severe impact
+- **High**: realistic exploitation with meaningful security or privacy impact
+- **Medium**: limited impact or stronger preconditions
+- **Low**: minor issues or defense-in-depth improvements
 
-- **Critical**: Within 7 days
-- **High**: Within 14 days
-- **Medium**: Within 30 days
-- **Low**: In next scheduled release
+We aim to:
 
-## Security Audits
+1. assess the report
+2. confirm the scope and affected versions
+3. develop and verify a fix
+4. publish an update when needed
+5. credit the reporter in release notes unless they prefer otherwise
 
-We welcome security audits of KotoType. If you're interested in conducting a security audit:
+## Security Notes for Users
 
-1. Contact us at [INSERT SECURITY EMAIL]
-2. Provide details about your organization
-3. Coordinate with us before publishing findings
+- Download releases only from the official GitHub Releases page.
+- Re-check macOS permissions after updating to a new app bundle.
+- Review local logs before sharing them publicly, because they may contain environment-specific details.
+- Keep FFmpeg, macOS, and KotoType up to date.
 
-## Compliance
+## Questions
 
-KotoType aims to comply with:
+For security questions that are not vulnerability reports, use the same private contact:
 
-- **macOS Security Guidelines**: Apple's security best practices
-- **Open Source Security**: OWASP guidelines for open source projects
-- **Privacy Standards**: Data protection and privacy best practices
-
-## Questions?
-
-If you have questions about this security policy or KotoType's security practices, please contact us at [INSERT SECURITY EMAIL].
+- `ym.u.ichiro@icloud.com`
 
 ---
 
-**Last Updated**: 2025-02-08
+**Last Updated**: 2026-03-22

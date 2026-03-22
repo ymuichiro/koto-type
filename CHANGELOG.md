@@ -7,18 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Documentation translation from Japanese to English
-- OSS-standard documentation structure
-- Comprehensive contributing guidelines
-- Enhanced README with proper installation and usage instructions
+### Changed
+- Documentation updated to match the current repository URLs, test layout, release behavior, and security guidance
 
 ## [1.0.0] - 2025-02-08
 
 ### Added
 - Initial release of KotoType
 - Menu bar resident application
-- Global hotkey (Ctrl+Option+Space) for recording
+- Global hotkey (default: Command+Option) for recording
 - OpenAI Whisper integration with large-v3-turbo model
 - Automatic text input at cursor position
 - Audio preprocessing with noise reduction
@@ -26,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio file import (wav/mp3) support
 - Auto-start at login toggle
 - First-time setup wizard
-- Accessibility and microphone permission checks
+- Accessibility, microphone, and screen recording permission checks
 - FFmpeg dependency validation
 - Multi-language documentation (Japanese)
 - Comprehensive test suite
@@ -48,15 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CGEvent for keyboard input simulation
 - AVFoundation for audio recording
 
-## [Unreleased]
-
 ### Planned
-- Multi-language support beyond Japanese
-- Customizable keyboard shortcuts
-- Auto-update functionality
+- Automatic update checks and installation
 - Enhanced settings UI
+- Additional language coverage and tuning improvements
 
 ---
 
-[Unreleased]: https://github.com/yourusername/koto-type/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/yourusername/koto-type/releases/tag/v1.0.0
+[Unreleased]: https://github.com/ymuichiro/koto-type/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ymuichiro/koto-type/releases/tag/v1.0.0
