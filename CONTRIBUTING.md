@@ -32,12 +32,12 @@ This project adheres to a code of conduct. By participating, you are expected to
 - Xcode 15.0 or later
 - Python 3.13
 - [uv](https://github.com/astral-sh/uv) package manager
-- FFmpeg (optional, but recommended)
+- FFmpeg (required for setup validation, audio conversion, and end-to-end app runs)
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/koto-type.git
+git clone https://github.com/ymuichiro/koto-type.git
 cd koto-type
 ```
 
@@ -52,7 +52,7 @@ uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
-uv sync
+uv sync --extra dev
 ```
 
 ### 3. Build Swift Application
@@ -130,8 +130,9 @@ This process is mandatory for all code changes, with no exceptions.
 make test-all
 
 # Run specific tests
-uv run python tests/python/test_transcription.py
-uv run python tests/python/test_benchmark.py
+uv run python tests/python/test_audio_preprocess.py
+uv run python tests/python/test_user_dictionary.py
+uv run python tests/python/smoke_whisper_server_binary.py dist/whisper_server
 ```
 
 ### Swift Tests
@@ -247,7 +248,7 @@ Describe testing performed
 
 ### Review Process
 
-1. Automated checks (CI/CD) must pass
+1. Required local checks must pass, and any configured CI/CD checks must pass before merge
 2. At least one maintainer approval required
 3. Address all review comments
 4. Keep PR focused and small for easier review
@@ -349,7 +350,7 @@ By contributing to KotoType, you agree that your contributions will be licensed 
 
 - **GitHub Issues**: For bug reports and feature requests
 - **Discussions**: For questions and general discussion (if enabled)
-- **Email**: Contact maintainers for sensitive issues
+- **Security reports**: Follow [SECURITY.md](SECURITY.md) for private vulnerability reporting
 
 ## Recognition
 

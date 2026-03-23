@@ -18,6 +18,7 @@ help:
 	@echo "テスト:"
 	@echo "  make test-transcription - 音声前処理/文字起こし関連ユニットテスト"
 	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
+	@echo "  make test-benchmark - test-smoke-server の互換エイリアス"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
 	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
