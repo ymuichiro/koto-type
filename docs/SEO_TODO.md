@@ -1,4 +1,4 @@
-# SEO / Social Meta TODO (GitHub Pages)
+# SEO / Social Meta TODO
 
 Current status of `/docs/index.html`:
 - Done: `title`, `description`, `viewport`, `favicon`, `apple-touch-icon`
@@ -7,7 +7,7 @@ Current status of `/docs/index.html`:
 ## P0 (must do before promotion)
 
 - [x] Add canonical URL
-  - `<link rel="canonical" href="https://ymuichiro.github.io/koto-type/" />`
+  - `<link rel="canonical" href="https://koto-type.notelligent.app/" />`
 - [x] Add robots meta
   - `<meta name="robots" content="index,follow,max-image-preview:large" />`
 - [x] Add Open Graph tags
@@ -52,7 +52,7 @@ Current status of `/docs/index.html`:
 - [ ] Add FAQ section with real query phrasing
   - "Does KotoType send audio to the cloud?"
   - "How do I transcribe into any app on macOS?"
-- [ ] Add internal links from repo docs to GitHub Pages URL
+- [ ] Add internal links from repo docs to the public site URL
   - `README.md`, release notes, and project description
 
 ## Validation checklist
