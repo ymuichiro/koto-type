@@ -257,8 +257,10 @@ ffmpeg -version
 5. Keep holding the hotkey while speaking.
 6. Release the hotkey to stop recording and trigger finalization.
 7. After you release the hotkey, KotoType finalizes transcription and inserts only finalized text.
-8. If you start another recording before a previous finalize completes, KotoType queues both and finalizes each recording independently in stop order.
-9. If no text is inserted, re-check Accessibility permission and confirm the cursor is focused in an editable field.
+8. The live-dictation processing timer starts only after you release the hotkey. It covers queue wait, transcription, and final text insertion. Time while you are still holding the hotkey and recording is not counted.
+9. The default post-recording finalize timeout is 10 minutes, and values above 10 minutes are not available. You can change it in "Settings... > Batch > Post-recording finalize timeout".
+10. If you start another recording before a previous finalize completes, KotoType queues both and finalizes each recording independently in stop order.
+11. If no text is inserted, re-check Accessibility permission and confirm the cursor is focused in an editable field.
 
 #### Other daily operations
 

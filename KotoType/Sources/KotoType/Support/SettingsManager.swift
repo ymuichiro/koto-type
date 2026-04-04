@@ -1,6 +1,10 @@
 import Foundation
 
 struct AppSettings: Codable {
+    static let defaultRecordingCompletionTimeout: Double = 600.0
+    static let minimumRecordingCompletionTimeout: Double = 30.0
+    static let maximumRecordingCompletionTimeout: Double = 600.0
+
     var hotkeyConfig: HotkeyConfiguration
     var language: String
     var autoPunctuation: Bool
@@ -20,6 +24,7 @@ struct AppSettings: Codable {
     var autoGainWeakThresholdDbfs: Double
     var autoGainTargetPeakDbfs: Double
     var autoGainMaxDb: Double
+    var recordingCompletionTimeout: Double
 
     init(
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
@@ -40,7 +45,8 @@ struct AppSettings: Codable {
         autoGainEnabled: Bool = true,
         autoGainWeakThresholdDbfs: Double = -18.0,
         autoGainTargetPeakDbfs: Double = -10.0,
-        autoGainMaxDb: Double = 18.0
+        autoGainMaxDb: Double = 18.0,
+        recordingCompletionTimeout: Double = AppSettings.defaultRecordingCompletionTimeout
     ) {
         self.hotkeyConfig = hotkeyConfig
         self.language = language
@@ -61,6 +67,9 @@ struct AppSettings: Codable {
         self.autoGainWeakThresholdDbfs = autoGainWeakThresholdDbfs
         self.autoGainTargetPeakDbfs = autoGainTargetPeakDbfs
         self.autoGainMaxDb = autoGainMaxDb
+        self.recordingCompletionTimeout = Self.normalizedRecordingCompletionTimeout(
+            recordingCompletionTimeout
+        )
     }
 
     init(from decoder: Decoder) throws {
@@ -84,6 +93,21 @@ struct AppSettings: Codable {
         autoGainWeakThresholdDbfs = try container.decodeIfPresent(Double.self, forKey: .autoGainWeakThresholdDbfs) ?? -18.0
         autoGainTargetPeakDbfs = try container.decodeIfPresent(Double.self, forKey: .autoGainTargetPeakDbfs) ?? -10.0
         autoGainMaxDb = try container.decodeIfPresent(Double.self, forKey: .autoGainMaxDb) ?? 18.0
+        recordingCompletionTimeout = Self.normalizedRecordingCompletionTimeout(
+            try container.decodeIfPresent(Double.self, forKey: .recordingCompletionTimeout) ??
+                Self.defaultRecordingCompletionTimeout
+        )
+    }
+
+    private static func normalizedRecordingCompletionTimeout(_ value: Double) -> Double {
+        guard value.isFinite else {
+            return defaultRecordingCompletionTimeout
+        }
+
+        return min(
+            max(value, minimumRecordingCompletionTimeout),
+            maximumRecordingCompletionTimeout
+        )
     }
 }
 
@@ -103,7 +127,7 @@ final class SettingsManager: @unchecked Sendable {
     
     func save(_ settings: AppSettings) {
         Logger.shared.log("SettingsManager.save: saving to \(settingsURL.path)")
-        Logger.shared.log("SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold), launchAtLogin=\(settings.launchAtLogin), autoGainEnabled=\(settings.autoGainEnabled), autoGainWeakThresholdDbfs=\(settings.autoGainWeakThresholdDbfs), autoGainTargetPeakDbfs=\(settings.autoGainTargetPeakDbfs), autoGainMaxDb=\(settings.autoGainMaxDb)")
+        Logger.shared.log("SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold), launchAtLogin=\(settings.launchAtLogin), autoGainEnabled=\(settings.autoGainEnabled), autoGainWeakThresholdDbfs=\(settings.autoGainWeakThresholdDbfs), autoGainTargetPeakDbfs=\(settings.autoGainTargetPeakDbfs), autoGainMaxDb=\(settings.autoGainMaxDb), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)")
         do {
             let data = try JSONEncoder().encode(settings)
             try data.write(to: settingsURL)
@@ -120,7 +144,7 @@ final class SettingsManager: @unchecked Sendable {
             Logger.shared.log("No saved settings found, returning defaults")
             return AppSettings()
         }
-        Logger.shared.log("SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold), launchAtLogin=\(settings.launchAtLogin), autoGainEnabled=\(settings.autoGainEnabled), autoGainWeakThresholdDbfs=\(settings.autoGainWeakThresholdDbfs), autoGainTargetPeakDbfs=\(settings.autoGainTargetPeakDbfs), autoGainMaxDb=\(settings.autoGainMaxDb)")
+        Logger.shared.log("SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), lang=\(settings.language), punctuation=\(settings.autoPunctuation), temp=\(settings.temperature), beam=\(settings.beamSize), noSpeech=\(settings.noSpeechThreshold), compression=\(settings.compressionRatioThreshold), task=\(settings.task), bestOf=\(settings.bestOf), vad=\(settings.vadThreshold), launchAtLogin=\(settings.launchAtLogin), autoGainEnabled=\(settings.autoGainEnabled), autoGainWeakThresholdDbfs=\(settings.autoGainWeakThresholdDbfs), autoGainTargetPeakDbfs=\(settings.autoGainTargetPeakDbfs), autoGainMaxDb=\(settings.autoGainMaxDb), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)")
         return settings
     }
 }

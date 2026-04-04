@@ -276,6 +276,15 @@ ffmpeg -version</code></pre>
       </section>
 
       <section class="flow reveal">
+        <h2>処理時間の上限</h2>
+        <ol>
+          <li>ライブ音声入力のタイマーは、ホットキーを離して録音が止まった時点から開始します。</li>
+          <li>同じタイマーの中に、待ち行列での待機、文字起こし処理、最終テキストの挿入までが含まれます。</li>
+          <li>ホットキーを押して録音している時間は 10 分に含まれません。既定値は 10 分で、Settings &gt; Batch から変更できますが、10 分を超える値は設定できません。</li>
+        </ol>
+      </section>
+
+      <section class="flow reveal">
         <h2>セットアップ後の3アクション</h2>
         <ol>
           <li>KotoType に入力させたいテキスト欄をクリックします。</li>
@@ -332,6 +341,10 @@ ffmpeg -version</code></pre>
         <details>
           <summary>録音は止まるのに文字が挿入されません。なぜですか？</summary>
           <p>入力先アプリで編集可能カーソルが有効か確認し、セットアップ画面から Accessibility 権限を再チェックしてください。</p>
+        </details>
+        <details>
+          <summary>10 分の上限はどこからどこまでですか？</summary>
+          <p>ホットキーを離して録音が止まった後から始まり、そのライブ音声入力の待ち行列での待機、文字起こし、最終テキスト挿入までを含みます。ホットキーを押して録音している時間は含まれません。既定値は 10 分で、Settings &gt; Batch から変更できますが、10 分を超える値は設定できません。</p>
         </details>
         <details>
           <summary>FFmpeg はどうやってインストールしますか？</summary>
