@@ -21,6 +21,7 @@ struct SettingsView: View {
     @State private var autoGainWeakThresholdDbfs: Double
     @State private var autoGainTargetPeakDbfs: Double
     @State private var autoGainMaxDb: Double
+    @State private var recordingCompletionTimeout: Double
     @State private var dictionaryWords: [String]
     @Binding var isPresented: Bool
     
@@ -48,6 +49,7 @@ struct SettingsView: View {
     @State private var pendingAutoGainWeakThresholdDbfs: Double
     @State private var pendingAutoGainTargetPeakDbfs: Double
     @State private var pendingAutoGainMaxDb: Double
+    @State private var pendingRecordingCompletionTimeout: Double
     @State private var pendingDictionaryWords: [String]
     @State private var pendingDictionaryEntry: String
     
@@ -96,6 +98,7 @@ struct SettingsView: View {
         self._autoGainWeakThresholdDbfs = State(initialValue: settings.autoGainWeakThresholdDbfs)
         self._autoGainTargetPeakDbfs = State(initialValue: settings.autoGainTargetPeakDbfs)
         self._autoGainMaxDb = State(initialValue: settings.autoGainMaxDb)
+        self._recordingCompletionTimeout = State(initialValue: settings.recordingCompletionTimeout)
         self._dictionaryWords = State(initialValue: userDictionaryWords)
         self.hotkeyConfig = settings.hotkeyConfig
         self.language = settings.language
@@ -116,6 +119,7 @@ struct SettingsView: View {
         self.autoGainWeakThresholdDbfs = settings.autoGainWeakThresholdDbfs
         self.autoGainTargetPeakDbfs = settings.autoGainTargetPeakDbfs
         self.autoGainMaxDb = settings.autoGainMaxDb
+        self.recordingCompletionTimeout = settings.recordingCompletionTimeout
         self.dictionaryWords = userDictionaryWords
         
         self._pendingHotkeyConfig = State(initialValue: settings.hotkeyConfig)
@@ -137,6 +141,7 @@ struct SettingsView: View {
         self._pendingAutoGainWeakThresholdDbfs = State(initialValue: settings.autoGainWeakThresholdDbfs)
         self._pendingAutoGainTargetPeakDbfs = State(initialValue: settings.autoGainTargetPeakDbfs)
         self._pendingAutoGainMaxDb = State(initialValue: settings.autoGainMaxDb)
+        self._pendingRecordingCompletionTimeout = State(initialValue: settings.recordingCompletionTimeout)
         self._pendingDictionaryWords = State(initialValue: userDictionaryWords)
         self._pendingDictionaryEntry = State(initialValue: "")
     }
@@ -576,6 +581,21 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Post-recording finalize timeout: \(recordingCompletionTimeoutDescription(pendingRecordingCompletionTimeout))")
+                        .font(.subheadline)
+
+                    Slider(
+                        value: $pendingRecordingCompletionTimeout,
+                        in: AppSettings.minimumRecordingCompletionTimeout...AppSettings.maximumRecordingCompletionTimeout,
+                        step: 30.0
+                    )
+
+                    Text("The timer starts after you release the hotkey. It covers queue wait, transcription, and final text insertion for live dictation only. Recording time while holding the hotkey is not counted. Maximum: 10 minutes.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
                 HStack {
                     Spacer()
                     Button("Save") {
@@ -665,7 +685,8 @@ struct SettingsView: View {
             autoGainEnabled: autoGainEnabled,
             autoGainWeakThresholdDbfs: autoGainWeakThresholdDbfs,
             autoGainTargetPeakDbfs: autoGainTargetPeakDbfs,
-            autoGainMaxDb: autoGainMaxDb
+            autoGainMaxDb: autoGainMaxDb,
+            recordingCompletionTimeout: recordingCompletionTimeout
         )
         SettingsManager.shared.save(settings)
         UserDictionaryManager.shared.saveWords(dictionaryWords)
@@ -692,6 +713,7 @@ struct SettingsView: View {
         autoGainWeakThresholdDbfs = pendingAutoGainWeakThresholdDbfs
         autoGainTargetPeakDbfs = pendingAutoGainTargetPeakDbfs
         autoGainMaxDb = pendingAutoGainMaxDb
+        recordingCompletionTimeout = pendingRecordingCompletionTimeout
         dictionaryWords = pendingDictionaryWords
 
         if autoGainTargetPeakDbfs <= autoGainWeakThresholdDbfs {
@@ -729,6 +751,14 @@ struct SettingsView: View {
         let logPath = Logger.shared.logPath
         let logDir = (logPath as NSString).deletingLastPathComponent
         NSWorkspace.shared.open(URL(fileURLWithPath: logDir))
+    }
+
+    private func recordingCompletionTimeoutDescription(_ seconds: Double) -> String {
+        let minutes = seconds / 60.0
+        if abs(minutes.rounded() - minutes) < 0.001 {
+            return "\(Int(minutes.rounded())) min"
+        }
+        return String(format: "%.1f min", minutes)
     }
 }
 

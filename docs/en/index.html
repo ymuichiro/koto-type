@@ -276,6 +276,15 @@ ffmpeg -version</code></pre>
       </section>
 
       <section class="flow reveal">
+        <h2>Processing time limit</h2>
+        <ol>
+          <li>The live-dictation timer starts when you release the hotkey and recording stops.</li>
+          <li>The same timer covers queue wait, transcription, and final text insertion for that dictation.</li>
+          <li>Time while you are still holding the hotkey and recording is not counted. The default limit is 10 minutes, the value can be changed in Settings &gt; Batch, and values above 10 minutes are not available.</li>
+        </ol>
+      </section>
+
+      <section class="flow reveal">
         <h2>After setup: next 3 actions</h2>
         <ol>
           <li>Click the text field where you want KotoType to type.</li>
@@ -332,6 +341,10 @@ ffmpeg -version</code></pre>
         <details>
           <summary>Recording stops but text is not inserted. Why?</summary>
           <p>Make sure the target app has an active editable cursor and re-check Accessibility permission from the setup window.</p>
+        </details>
+        <details>
+          <summary>What exactly does the 10-minute limit cover?</summary>
+          <p>It starts after you release the hotkey and recording stops. It covers queue wait, transcription, and final text insertion for live dictation. Recording time while you are still holding the hotkey is not counted. The default is 10 minutes, you can change it in Settings &gt; Batch, and values above 10 minutes are not available.</p>
         </details>
         <details>
           <summary>How do I install FFmpeg?</summary>

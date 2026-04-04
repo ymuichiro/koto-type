@@ -21,6 +21,10 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoGainWeakThresholdDbfs, -18.0)
         XCTAssertEqual(settings.autoGainTargetPeakDbfs, -10.0)
         XCTAssertEqual(settings.autoGainMaxDb, 18.0)
+        XCTAssertEqual(
+            settings.recordingCompletionTimeout,
+            AppSettings.defaultRecordingCompletionTimeout
+        )
     }
 
     func testCustomInitialization() throws {
@@ -46,7 +50,8 @@ final class AppSettingsTests: XCTestCase {
             autoGainEnabled: false,
             autoGainWeakThresholdDbfs: -24.0,
             autoGainTargetPeakDbfs: -8.0,
-            autoGainMaxDb: 12.0
+            autoGainMaxDb: 12.0,
+            recordingCompletionTimeout: 420.0
         )
         
         XCTAssertEqual(settings.hotkeyConfig.keyCode, 36)
@@ -64,6 +69,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoGainWeakThresholdDbfs, -24.0)
         XCTAssertEqual(settings.autoGainTargetPeakDbfs, -8.0)
         XCTAssertEqual(settings.autoGainMaxDb, 12.0)
+        XCTAssertEqual(settings.recordingCompletionTimeout, 420.0)
     }
 
     func testCodingAndDecoding() throws {
@@ -89,7 +95,8 @@ final class AppSettingsTests: XCTestCase {
             autoGainEnabled: false,
             autoGainWeakThresholdDbfs: -23.0,
             autoGainTargetPeakDbfs: -7.0,
-            autoGainMaxDb: 11.0
+            autoGainMaxDb: 11.0,
+            recordingCompletionTimeout: 540.0
         )
         
         let encoder = JSONEncoder()
@@ -117,6 +124,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(decodedSettings.autoGainWeakThresholdDbfs, originalSettings.autoGainWeakThresholdDbfs)
         XCTAssertEqual(decodedSettings.autoGainTargetPeakDbfs, originalSettings.autoGainTargetPeakDbfs)
         XCTAssertEqual(decodedSettings.autoGainMaxDb, originalSettings.autoGainMaxDb)
+        XCTAssertEqual(decodedSettings.recordingCompletionTimeout, originalSettings.recordingCompletionTimeout)
     }
 
     func testModifyingSettings() throws {
@@ -148,6 +156,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.autoGainTargetPeakDbfs, -6.0)
         settings.autoGainMaxDb = 9.0
         XCTAssertEqual(settings.autoGainMaxDb, 9.0)
+        settings.recordingCompletionTimeout = 480.0
+        XCTAssertEqual(settings.recordingCompletionTimeout, 480.0)
     }
 
     func testLegacyDecodingDefaultsAutoGainFields() throws {
@@ -182,6 +192,24 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.autoGainWeakThresholdDbfs, -18.0)
         XCTAssertEqual(decoded.autoGainTargetPeakDbfs, -10.0)
         XCTAssertEqual(decoded.autoGainMaxDb, 18.0)
+        XCTAssertEqual(
+            decoded.recordingCompletionTimeout,
+            AppSettings.defaultRecordingCompletionTimeout
+        )
+    }
+
+    func testRecordingCompletionTimeoutClampsToSupportedRange() throws {
+        let tooLarge = AppSettings(recordingCompletionTimeout: 9_999.0)
+        XCTAssertEqual(
+            tooLarge.recordingCompletionTimeout,
+            AppSettings.maximumRecordingCompletionTimeout
+        )
+
+        let tooSmall = AppSettings(recordingCompletionTimeout: 1.0)
+        XCTAssertEqual(
+            tooSmall.recordingCompletionTimeout,
+            AppSettings.minimumRecordingCompletionTimeout
+        )
     }
 
     func testLanguageSettings() throws {

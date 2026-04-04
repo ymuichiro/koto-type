@@ -46,6 +46,10 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertEqual(settings.autoGainWeakThresholdDbfs, -18.0)
         XCTAssertEqual(settings.autoGainTargetPeakDbfs, -10.0)
         XCTAssertEqual(settings.autoGainMaxDb, 18.0)
+        XCTAssertEqual(
+            settings.recordingCompletionTimeout,
+            AppSettings.defaultRecordingCompletionTimeout
+        )
     }
 
     func testSaveAndLoad() throws {
@@ -69,6 +73,7 @@ final class SettingsManagerTests: XCTestCase {
         modifiedSettings.autoGainWeakThresholdDbfs = -25.0
         modifiedSettings.autoGainTargetPeakDbfs = -7.0
         modifiedSettings.autoGainMaxDb = 10.0
+        modifiedSettings.recordingCompletionTimeout = 480.0
         
         settingsManager.save(modifiedSettings)
         let loadedSettings = settingsManager.load()
@@ -88,6 +93,7 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertEqual(loadedSettings.autoGainWeakThresholdDbfs, -25.0)
         XCTAssertEqual(loadedSettings.autoGainTargetPeakDbfs, -7.0)
         XCTAssertEqual(loadedSettings.autoGainMaxDb, 10.0)
+        XCTAssertEqual(loadedSettings.recordingCompletionTimeout, 480.0)
         
         settingsManager.save(originalSettings)
     }

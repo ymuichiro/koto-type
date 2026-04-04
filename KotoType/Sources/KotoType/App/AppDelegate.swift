@@ -68,7 +68,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var segmentRouter = RecordingSegmentRouter()
     private var ignoredLateSegmentCompletions: [Int: Date] = [:]
     private let finalizationReadyDelay: TimeInterval = 0.35
-    private let completionTimeoutInterval: TimeInterval = 50.0
     private let ignoredLateSegmentTTL: TimeInterval = 120.0
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var temporaryBatchCleanupTimer: DispatchSourceTimer?
@@ -351,7 +350,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Recording stopped (session \(sessionID))", level: .info)
         Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
         recordingIndicatorWindow?.showProcessing()
-        enqueueSessionForFinalization(sessionID: sessionID)
+        enqueueSessionForFinalization(
+            sessionID: sessionID,
+            timeoutInterval: currentSettings.recordingCompletionTimeout
+        )
         tryFinalizePendingSessionsIfNeeded()
     }
 
@@ -458,7 +460,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tryFinalizePendingSessionsIfNeeded()
     }
 
-    private func enqueueSessionForFinalization(sessionID: Int) {
+    private func enqueueSessionForFinalization(sessionID: Int, timeoutInterval: TimeInterval) {
         guard let session = sessionByID[sessionID] else {
             return
         }
@@ -475,15 +477,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + finalizationReadyDelay, execute: readyWorkItem)
 
         session.cancelCompletionTimeout()
+        let normalizedTimeoutInterval = min(
+            max(timeoutInterval, AppSettings.minimumRecordingCompletionTimeout),
+            AppSettings.maximumRecordingCompletionTimeout
+        )
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, let session = self.sessionByID[sessionID] else { return }
             session.completionTimeoutWorkItem = nil
             self.finalizationQueue.markTimedOut(sessionID: sessionID)
-            Logger.shared.log("Transcription timeout reached for session \(sessionID). Finalizing with available text.", level: .warning)
+            Logger.shared.log(
+                "Transcription timeout reached for session \(sessionID) after \(Int(normalizedTimeoutInterval)) seconds. Finalizing with available text.",
+                level: .warning
+            )
             self.tryFinalizePendingSessionsIfNeeded()
         }
         session.completionTimeoutWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + completionTimeoutInterval, execute: workItem)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + normalizedTimeoutInterval,
+            execute: workItem
+        )
     }
 
     private func tryFinalizePendingSessionsIfNeeded() {
