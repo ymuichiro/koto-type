@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import KotoType
 
@@ -26,7 +27,11 @@ final class RealtimeRecorderTests: XCTestCase {
 
     func testStartRecording() {
         let result = recorder.startRecording()
-        XCTAssertTrue(result, "Recording should start successfully")
+        if result {
+            XCTAssertNil(recorder.lastStartFailureReason)
+        } else {
+            XCTAssertEqual(recorder.lastStartFailureReason, .noInputDevice)
+        }
     }
 
     func testStopRecording() {

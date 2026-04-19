@@ -545,7 +545,7 @@ def transcribe_with_vad_fallback(
     transcribe_kwargs,
     vad_parameters,
     log,
-    fallback_on_empty_vad=True,
+    fallback_on_empty_vad=None,
 ):
     def build_text(segments):
         return " ".join(getattr(segment, "text", "") for segment in segments).strip()
@@ -580,33 +580,13 @@ def transcribe_with_vad_fallback(
 
         return [], DummyInfo()
 
+    _ = fallback_on_empty_vad
+
     raw_text = build_text(segments)
-    if raw_text or not fallback_on_empty_vad:
+    if raw_text:
         return segments, info
 
-    log(
-        "VAD-enabled transcription returned empty text, "
-        "retrying once with vad_filter=False"
-    )
-    try:
-        fallback_segments_iter, fallback_info = transcribe_once(
-            model=model,
-            transcribe_kwargs=transcribe_kwargs,
-            vad_filter=False,
-        )
-        fallback_segments = list(fallback_segments_iter)
-        fallback_text = build_text(fallback_segments)
-        if fallback_text:
-            log(
-                "Recovered non-empty transcription with vad_filter=False "
-                f"(segments={len(fallback_segments)})"
-            )
-            return fallback_segments, fallback_info
-        log("Fallback transcription with vad_filter=False also returned empty")
-    except Exception as fallback_error:
-        log(f"Fallback transcription error: {str(fallback_error)}")
-        log(f"Fallback transcription traceback: {traceback.format_exc()}")
-
+    log("VAD-enabled transcription returned empty text; keeping empty result")
     return segments, info
 
 
@@ -963,10 +943,6 @@ def main():
                 transcribe_kwargs=transcribe_kwargs,
                 vad_parameters=vad_parameters,
                 log=log,
-                fallback_on_empty_vad=parse_bool(
-                    os.environ.get("KOTOTYPE_RETRY_WITHOUT_VAD_ON_EMPTY", "1"),
-                    default=True,
-                ),
             )
             transcribe_kwargs["initial_prompt"] = None
             initial_prompt = None
