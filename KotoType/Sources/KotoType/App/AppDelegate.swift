@@ -77,6 +77,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let temporaryBatchDirectoryName = "koto-type-batch-recordings"
     private let staleBatchFileMaxAge: TimeInterval = 6 * 60 * 60
     private let temporaryBatchCleanupInterval: TimeInterval = 10 * 60
+    private let permissionResetService: PermissionResetService
+
+    init(permissionResetService: PermissionResetService = PermissionResetService()) {
+        self.permissionResetService = permissionResetService
+        super.init()
+    }
 
     nonisolated static func resolvedWorkerCount(
         requested: Int,
@@ -103,7 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // trampoline that captures queue-local state before hopping back to the main actor.
     nonisolated static func makeMainActorDispatchHandler(
         _ operation: @escaping @MainActor () -> Void
-    ) -> () -> Void {
+    ) -> @Sendable () -> Void {
         makeMainActorDispatchHandler(capture: { () }) { _ in
             operation()
         }
@@ -112,7 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated static func makeMainActorDispatchHandler<State: Sendable>(
         capture value: @escaping @Sendable () -> State,
         _ operation: @escaping @MainActor (State) -> Void
-    ) -> () -> Void {
+    ) -> @Sendable () -> Void {
         {
             let capturedValue = value()
             Task { @MainActor in
@@ -127,6 +133,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let diagnosticsService = InitialSetupDiagnosticsService()
         let report = diagnosticsService.evaluate()
         let setupState = InitialSetupStateManager.shared
+
+        if report.canStartApplication {
+            PermissionResetStateManager.shared.clearResetAttempt()
+        } else if permissionResetService.resetPermissionsIfNeeded(for: report) {
+            Logger.shared.log(
+                "Application did finish launching: automatically reset required permissions and will relaunch",
+                level: .info
+            )
+            if AppRelauncher.relaunchCurrentApp() {
+                NSApp.terminate(nil)
+                return
+            }
+            Logger.shared.log(
+                "Application did finish launching: relaunch after automatic permission reset failed",
+                level: .warning
+            )
+        }
 
         if setupState.hasCompletedInitialSetup && report.canStartApplication {
             continueSetup()
@@ -151,6 +174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func continueSetup() {
+        PermissionResetStateManager.shared.clearResetAttempt()
         NSApp.setActivationPolicy(.accessory)
         menuBarController = MenuBarController()
         Logger.shared.log("MenuBarController created", level: .debug)

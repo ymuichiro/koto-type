@@ -31,6 +31,7 @@ final class InitialSetupWindowController: NSWindowController {
 
     convenience init(
         diagnosticsService: InitialSetupDiagnosticsService = InitialSetupDiagnosticsService(),
+        automaticPermissionResetCommand: String? = PermissionResetStateManager.shared.lastResetCommand,
         onComplete: @escaping () -> Void
     ) {
         let window = NSWindow(
@@ -46,6 +47,7 @@ final class InitialSetupWindowController: NSWindowController {
         )
         let content = InitialSetupView(
             diagnosticsService: diagnosticsService,
+            automaticPermissionResetCommand: automaticPermissionResetCommand,
             onComplete: onComplete,
             onPreferredContentHeightChange: { [weak window] preferredHeight in
                 guard let window else { return }
@@ -63,9 +65,9 @@ final class InitialSetupWindowController: NSWindowController {
 }
 
 struct InitialSetupView: View {
-    private static let accessibilityResetCommand = "tccutil reset Accessibility com.ymuichiro.kototype"
     private static let ffmpegInstallCommand = "brew install ffmpeg && ffmpeg -version"
     private let diagnosticsService: InitialSetupDiagnosticsService
+    private let automaticPermissionResetCommand: String?
     private let onComplete: () -> Void
     private let onPreferredContentHeightChange: (CGFloat) -> Void
     private let bannerImage: NSImage?
@@ -75,17 +77,18 @@ struct InitialSetupView: View {
     @State private var isRequestingScreenRecording = false
     @State private var isWaitingForAccessibilityUpdate = false
     @State private var shouldShowAccessibilityRestartHint = false
-    @State private var hasCopiedAccessibilityResetCommand = false
     @State private var hasCopiedFfmpegInstallCommand = false
     @State private var accessibilityRefreshTask: Task<Void, Never>?
     @State private var lastReportedContentHeight: CGFloat = 0
 
     init(
         diagnosticsService: InitialSetupDiagnosticsService,
+        automaticPermissionResetCommand: String?,
         onComplete: @escaping () -> Void,
         onPreferredContentHeightChange: @escaping (CGFloat) -> Void = { _ in }
     ) {
         self.diagnosticsService = diagnosticsService
+        self.automaticPermissionResetCommand = automaticPermissionResetCommand
         self.onComplete = onComplete
         self.onPreferredContentHeightChange = onPreferredContentHeightChange
         self.bannerImage = Self.loadBannerImage()
@@ -234,33 +237,20 @@ struct InitialSetupView: View {
                         .foregroundColor(.orange)
                 }
 
-                if !isAccessibilityGranted {
+                if let automaticPermissionResetCommand, !automaticPermissionResetCommand.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Accessibility Permission Troubleshooting")
+                        Text("Permissions Reset Automatically")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                        Text("If permission changes do not apply, reset KotoType accessibility permission with the command below, then restart the app.")
+                        Text("KotoType detected missing required permissions at launch, cleared all saved privacy decisions for this app, and relaunched. Grant Accessibility, Microphone, and Screen Recording again in System Settings.")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(Self.accessibilityResetCommand)
+                        Text(automaticPermissionResetCommand)
                             .font(.system(.caption, design: .monospaced))
                             .padding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color(nsColor: .textBackgroundColor))
                             .cornerRadius(6)
-
-                        HStack(spacing: 10) {
-                            Button("Copy command") {
-                                copyAccessibilityResetCommand()
-                            }
-                            .buttonStyle(.bordered)
-
-                            if hasCopiedAccessibilityResetCommand {
-                                Text("Copied. Run it in Terminal.")
-                                    .font(.caption)
-                                    .foregroundColor(.green)
-                            }
-                        }
                     }
                     .padding(12)
                     .background(Color(nsColor: .controlBackgroundColor))
@@ -395,13 +385,6 @@ struct InitialSetupView: View {
     private func restartApp() {
         guard AppRelauncher.relaunchCurrentApp() else { return }
         NSApp.terminate(nil)
-    }
-
-    private func copyAccessibilityResetCommand() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(Self.accessibilityResetCommand, forType: .string)
-        hasCopiedAccessibilityResetCommand = true
     }
 
     private func copyFfmpegInstallCommand() {

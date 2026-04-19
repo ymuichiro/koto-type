@@ -16,8 +16,22 @@ struct InitialSetupCheckItem: Equatable {
 struct InitialSetupReport: Equatable {
     let items: [InitialSetupCheckItem]
 
+    private static let requiredPermissionItemIDs: Set<String> = [
+        "accessibility",
+        "microphone",
+        "screenRecording",
+    ]
+
     var canStartApplication: Bool {
         items.filter(\.required).allSatisfy { $0.status == .passed }
+    }
+
+    var hasFailingRequiredPermissions: Bool {
+        items.contains { item in
+            item.required &&
+                Self.requiredPermissionItemIDs.contains(item.id) &&
+                item.status == .failed
+        }
     }
 }
 
