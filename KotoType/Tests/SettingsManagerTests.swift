@@ -4,29 +4,38 @@ import Foundation
 
 final class SettingsManagerTests: XCTestCase {
     var settingsManager: SettingsManager!
-    var testSettingsURL: URL!
+    var settingsURL: URL!
+    var originalSettingsData: Data?
     
     override func setUpWithError() throws {
         try super.setUpWithError()
-        
+
         let fileManager = FileManager.default
-        let tempDir = fileManager.temporaryDirectory
-        let testDir = tempDir.appendingPathComponent("koto-type-test-\(UUID().uuidString)")
-        try fileManager.createDirectory(at: testDir, withIntermediateDirectories: true)
-        testSettingsURL = testDir.appendingPathComponent("settings.json")
-        
+        let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let settingsDir = appSupportURL.appendingPathComponent("koto-type")
+        try fileManager.createDirectory(at: settingsDir, withIntermediateDirectories: true)
+        settingsURL = settingsDir.appendingPathComponent("settings.json")
+        if fileManager.fileExists(atPath: settingsURL.path) {
+            originalSettingsData = try Data(contentsOf: settingsURL)
+            try fileManager.removeItem(at: settingsURL)
+        } else {
+            originalSettingsData = nil
+        }
+
         settingsManager = SettingsManager.shared
     }
 
     override func tearDownWithError() throws {
-        try super.tearDownWithError()
-        
-        if let testSettingsURL = testSettingsURL {
-            let fileManager = FileManager.default
-            if fileManager.fileExists(atPath: testSettingsURL.path) {
-                try fileManager.removeItem(at: testSettingsURL)
+        let fileManager = FileManager.default
+        if let settingsURL {
+            if fileManager.fileExists(atPath: settingsURL.path) {
+                try fileManager.removeItem(at: settingsURL)
+            }
+            if let originalSettingsData {
+                try originalSettingsData.write(to: settingsURL)
             }
         }
+        try super.tearDownWithError()
     }
 
     func testDefaultSettings() throws {

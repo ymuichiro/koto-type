@@ -219,7 +219,7 @@ class AudioPreprocessTests(unittest.TestCase):
 
 
 class TranscriptionFallbackTests(unittest.TestCase):
-    def test_retry_without_vad_when_vad_result_is_empty(self):
+    def test_keep_empty_result_when_vad_result_is_empty(self):
         model = FakeTranscribeModel(
             responses=[
                 ([], SimpleNamespace(language="ja")),
@@ -247,17 +247,16 @@ class TranscriptionFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual(info.language, "ja")
-        self.assertEqual(len(segments), 1)
-        self.assertEqual(segments[0].text, "こんにちは")
-        self.assertEqual(model.vad_filter_history, [True, False])
+        self.assertEqual(len(segments), 0)
+        self.assertEqual(model.vad_filter_history, [True])
         self.assertTrue(
             any(
-                "vad-enabled transcription returned empty" in message.lower()
+                "keeping empty result" in message.lower()
                 for message in logs
             )
         )
 
-    def test_retry_without_vad_when_vad_segments_have_empty_text(self):
+    def test_keep_empty_result_when_vad_segments_have_empty_text(self):
         model = FakeTranscribeModel(
             responses=[
                 ([SimpleNamespace(text="  ")], SimpleNamespace(language="ja")),
@@ -284,8 +283,8 @@ class TranscriptionFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual(len(segments), 1)
-        self.assertEqual(segments[0].text, "テスト成功")
-        self.assertEqual(model.vad_filter_history, [True, False])
+        self.assertEqual(segments[0].text, "  ")
+        self.assertEqual(model.vad_filter_history, [True])
 
     def test_retry_without_vad_when_vad_asset_missing(self):
         missing_vad_error = Exception(

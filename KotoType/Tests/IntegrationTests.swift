@@ -75,7 +75,10 @@ final class IntegrationTests: XCTestCase {
         realtimeRecorder.silenceDuration = 0.5
 
         let result = realtimeRecorder.startRecording()
-        XCTAssertTrue(result, "Recording should start successfully")
+        if !result {
+            XCTAssertEqual(realtimeRecorder.lastStartFailureReason, .noInputDevice)
+            return
+        }
 
         usleep(100000)  // Wait 100ms
 
