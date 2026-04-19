@@ -1,6 +1,7 @@
 import XCTest
 @testable import KotoType
 
+@MainActor
 final class RecordingIndicatorViewTests: XCTestCase {
     func testRecordingPreferredWidthExpandedForVisibility() {
         let size = RecordingIndicatorView.preferredContentSize(for: .recording, attentionMessage: nil)
