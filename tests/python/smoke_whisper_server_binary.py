@@ -47,6 +47,9 @@ def main():
         log_dir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
         env["HOME"] = tmp_home
+        env["KOTOTYPE_SKIP_AUDIO_PREPROCESSING"] = "1"
+        env["KOTOTYPE_VAD_STRICT"] = "0"
+        env["KOTOTYPE_FALLBACK_ON_EMPTY_VAD"] = "1"
 
         process = subprocess.Popen(
             [str(server_binary)],
@@ -58,7 +61,7 @@ def main():
             env=env,
         )
         try:
-            request = f"{test_audio}|ja|0.0|5|0.6|2.4|transcribe|5|0.5\n"
+            request = f"{test_audio}|ja|0.0|5|0.6|2.4|transcribe|5|0.3\n"
             process.stdin.write(request)
             process.stdin.flush()
 

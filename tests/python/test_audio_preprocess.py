@@ -81,6 +81,39 @@ class AudioPreprocessTests(unittest.TestCase):
                 "Expected fallback log when denoise filter fails",
             )
 
+    def test_audio_preprocess_can_be_skipped_via_environment(self):
+        fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=False)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "input.wav"
+            input_path.write_bytes(b"dummy")
+
+            logs = []
+
+            original_skip_env = os.environ.get("KOTOTYPE_SKIP_AUDIO_PREPROCESSING")
+            os.environ["KOTOTYPE_SKIP_AUDIO_PREPROCESSING"] = "1"
+            try:
+                output_path = whisper_server.audio_preprocess(
+                    str(input_path),
+                    logs.append,
+                    ffmpeg_module=fake_ffmpeg,
+                )
+            finally:
+                if original_skip_env is None:
+                    os.environ.pop("KOTOTYPE_SKIP_AUDIO_PREPROCESSING", None)
+                else:
+                    os.environ["KOTOTYPE_SKIP_AUDIO_PREPROCESSING"] = original_skip_env
+
+            self.assertEqual(output_path, str(input_path))
+            self.assertEqual(fake_ffmpeg.run_call_count, 0)
+            self.assertTrue(
+                any(
+                    "Audio preprocessing skipped via KOTOTYPE_SKIP_AUDIO_PREPROCESSING"
+                    in line
+                    for line in logs
+                )
+            )
+
     def test_auto_gain_applies_boost_for_weak_input(self):
         fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=False)
 
@@ -219,11 +252,10 @@ class AudioPreprocessTests(unittest.TestCase):
 
 
 class TranscriptionFallbackTests(unittest.TestCase):
-    def test_keep_empty_result_when_vad_result_is_empty(self):
+    def test_keep_empty_result_when_vad_result_is_empty_without_fallback(self):
         model = FakeTranscribeModel(
             responses=[
                 ([], SimpleNamespace(language="ja")),
-                ([SimpleNamespace(text="こんにちは")], SimpleNamespace(language="ja")),
             ]
         )
         logs = []
@@ -243,7 +275,7 @@ class TranscriptionFallbackTests(unittest.TestCase):
             },
             vad_parameters={"threshold": 0.57},
             log=logs.append,
-            fallback_on_empty_vad=True,
+            fallback_on_empty_vad=False,
         )
 
         self.assertEqual(info.language, "ja")
@@ -256,7 +288,41 @@ class TranscriptionFallbackTests(unittest.TestCase):
             )
         )
 
-    def test_keep_empty_result_when_vad_segments_have_empty_text(self):
+    def test_retry_without_vad_when_vad_result_is_empty(self):
+        model = FakeTranscribeModel(
+            responses=[
+                ([], SimpleNamespace(language="ja")),
+                ([SimpleNamespace(text="こんにちは")], SimpleNamespace(language="ja")),
+            ]
+        )
+        logs = []
+        segments, _ = whisper_server.transcribe_with_vad_fallback(
+            model=model,
+            transcribe_kwargs={
+                "audio": "dummy.wav",
+                "language": "ja",
+                "task": "transcribe",
+                "temperature": 0.0,
+                "beam_size": 5,
+                "best_of": 5,
+                "word_timestamps": False,
+                "initial_prompt": None,
+                "no_speech_threshold": 0.6,
+                "compression_ratio_threshold": 2.4,
+            },
+            vad_parameters={"threshold": 0.57},
+            log=logs.append,
+            fallback_on_empty_vad=True,
+        )
+
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].text, "こんにちは")
+        self.assertEqual(model.vad_filter_history, [True, False])
+        self.assertTrue(
+            any("retrying without vad" in message.lower() for message in logs)
+        )
+
+    def test_retry_without_vad_when_vad_segments_have_empty_text(self):
         model = FakeTranscribeModel(
             responses=[
                 ([SimpleNamespace(text="  ")], SimpleNamespace(language="ja")),
@@ -283,8 +349,8 @@ class TranscriptionFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual(len(segments), 1)
-        self.assertEqual(segments[0].text, "  ")
-        self.assertEqual(model.vad_filter_history, [True])
+        self.assertEqual(segments[0].text, "テスト成功")
+        self.assertEqual(model.vad_filter_history, [True, False])
 
     def test_retry_without_vad_when_vad_asset_missing(self):
         missing_vad_error = Exception(
