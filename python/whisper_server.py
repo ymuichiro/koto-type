@@ -359,6 +359,13 @@ def audio_preprocess(
     auto_gain_target_peak_dbfs=None,
     auto_gain_max_db=None,
 ):
+    if parse_bool(
+        os.environ.get("KOTOTYPE_SKIP_AUDIO_PREPROCESSING", "0"),
+        default=False,
+    ):
+        log("Audio preprocessing skipped via KOTOTYPE_SKIP_AUDIO_PREPROCESSING")
+        return input_path
+
     if ffmpeg_module is None:
         try:
             import ffmpeg as imported_ffmpeg
@@ -553,6 +560,12 @@ def transcribe_with_vad_fallback(
     class DummyInfo:
         language = transcribe_kwargs["language"] or "ja"
 
+    if fallback_on_empty_vad is None:
+        fallback_on_empty_vad = parse_bool(
+            os.environ.get("KOTOTYPE_FALLBACK_ON_EMPTY_VAD", "0"),
+            default=False,
+        )
+
     try:
         segments_iter, info = transcribe_once(
             model=model,
@@ -580,11 +593,31 @@ def transcribe_with_vad_fallback(
 
         return [], DummyInfo()
 
-    _ = fallback_on_empty_vad
-
     raw_text = build_text(segments)
     if raw_text:
         return segments, info
+
+    if fallback_on_empty_vad:
+        log("VAD-enabled transcription returned empty text; retrying without VAD")
+        try:
+            fallback_segments_iter, fallback_info = transcribe_once(
+                model=model,
+                transcribe_kwargs=transcribe_kwargs,
+                vad_filter=False,
+            )
+            fallback_segments = list(fallback_segments_iter)
+        except Exception as fallback_error:
+            log(f"Fallback transcription error: {str(fallback_error)}")
+            log(f"Fallback transcription traceback: {traceback.format_exc()}")
+            log("Non-VAD retry failed; keeping empty result")
+            return segments, info
+
+        fallback_text = build_text(fallback_segments)
+        if fallback_text:
+            return fallback_segments, fallback_info
+
+        log("Non-VAD transcription also returned empty text; keeping empty result")
+        return fallback_segments, fallback_info
 
     log("VAD-enabled transcription returned empty text; keeping empty result")
     return segments, info
