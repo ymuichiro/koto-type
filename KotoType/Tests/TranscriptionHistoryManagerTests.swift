@@ -60,4 +60,13 @@ final class TranscriptionHistoryManagerTests: XCTestCase {
         manager.clear()
         XCTAssertTrue(manager.loadEntries().isEmpty)
     }
+
+    func testSavedHistoryUsesOwnerOnlyPermissions() throws {
+        manager.addEntry(text: "sensitive", source: .liveRecording)
+
+        let permissions = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: historyURL.path)[.posixPermissions]) as? NSNumber
+        )
+        XCTAssertEqual(permissions.intValue & 0o777, LocalFileProtection.filePermissions)
+    }
 }

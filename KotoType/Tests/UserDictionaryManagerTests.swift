@@ -58,4 +58,13 @@ final class UserDictionaryManagerTests: XCTestCase {
         manager.saveWords(words)
         XCTAssertEqual(manager.loadWords().count, UserDictionaryManager.maxWordCount)
     }
+
+    func testSaveUsesOwnerOnlyPermissions() throws {
+        manager.saveWords(["secret"])
+
+        let permissions = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: dictionaryURL.path)[.posixPermissions]) as? NSNumber
+        )
+        XCTAssertEqual(permissions.intValue & 0o777, LocalFileProtection.filePermissions)
+    }
 }

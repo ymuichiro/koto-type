@@ -50,14 +50,22 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
         if let historyURL {
             self.historyURL = historyURL
             let directoryURL = historyURL.deletingLastPathComponent()
-            try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            try? LocalFileProtection.ensurePrivateDirectory(at: directoryURL, fileManager: fileManager)
+            try? LocalFileProtection.tightenFilePermissionsIfPresent(
+                at: historyURL,
+                fileManager: fileManager
+            )
             return
         }
 
         let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let settingsDir = appSupportURL.appendingPathComponent("koto-type")
-        try? fileManager.createDirectory(at: settingsDir, withIntermediateDirectories: true)
+        try? LocalFileProtection.ensurePrivateDirectory(at: settingsDir, fileManager: fileManager)
         self.historyURL = settingsDir.appendingPathComponent("transcription_history.json")
+        try? LocalFileProtection.tightenFilePermissionsIfPresent(
+            at: self.historyURL,
+            fileManager: fileManager
+        )
     }
 
     func loadEntries() -> [TranscriptionHistoryEntry] {
@@ -115,7 +123,7 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
     private func writeEntriesLocked(_ entries: [TranscriptionHistoryEntry]) {
         do {
             let data = try JSONEncoder().encode(entries)
-            try data.write(to: historyURL)
+            try LocalFileProtection.writeProtectedData(data, to: historyURL)
         } catch {
             Logger.shared.log("TranscriptionHistoryManager: failed to write history: \(error)", level: .error)
         }

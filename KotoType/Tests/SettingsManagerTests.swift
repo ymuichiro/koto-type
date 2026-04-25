@@ -1,17 +1,20 @@
 @testable import KotoType
-import XCTest
 import Foundation
+import XCTest
 
 final class SettingsManagerTests: XCTestCase {
     var settingsManager: SettingsManager!
     var settingsURL: URL!
     var originalSettingsData: Data?
-    
+
     override func setUpWithError() throws {
         try super.setUpWithError()
 
         let fileManager = FileManager.default
-        let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupportURL = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
         let settingsDir = appSupportURL.appendingPathComponent("koto-type")
         try fileManager.createDirectory(at: settingsDir, withIntermediateDirectories: true)
         settingsURL = settingsDir.appendingPathComponent("settings.json")
@@ -38,157 +41,117 @@ final class SettingsManagerTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testDefaultSettings() throws {
+    func testDefaultSettings() {
         let settings = settingsManager.load()
-        
+
         XCTAssertEqual(settings.language, "auto")
-        XCTAssertEqual(settings.autoPunctuation, true)
-        XCTAssertEqual(settings.temperature, 0.0)
-        XCTAssertEqual(settings.beamSize, 5)
-        XCTAssertEqual(settings.noSpeechThreshold, 0.6)
-        XCTAssertEqual(settings.compressionRatioThreshold, 2.4)
-        XCTAssertEqual(settings.task, "transcribe")
-        XCTAssertEqual(settings.bestOf, 5)
-        XCTAssertEqual(settings.vadThreshold, 0.5)
-        XCTAssertEqual(settings.launchAtLogin, false)
-        XCTAssertEqual(settings.autoGainEnabled, true)
-        XCTAssertEqual(settings.autoGainWeakThresholdDbfs, -18.0)
-        XCTAssertEqual(settings.autoGainTargetPeakDbfs, -10.0)
-        XCTAssertEqual(settings.autoGainMaxDb, 18.0)
+        XCTAssertTrue(settings.autoPunctuation)
+        XCTAssertEqual(settings.transcriptionQualityPreset, .medium)
+        XCTAssertTrue(settings.gpuAccelerationEnabled)
+        XCTAssertFalse(settings.launchAtLogin)
         XCTAssertEqual(
             settings.recordingCompletionTimeout,
             AppSettings.defaultRecordingCompletionTimeout
         )
     }
 
-    func testSaveAndLoad() throws {
-        let originalSettings = settingsManager.load()
-        
-        var modifiedSettings = AppSettings()
-        modifiedSettings.hotkeyConfig.keyCode = 36
-        modifiedSettings.hotkeyConfig.useCommand = false
-        modifiedSettings.hotkeyConfig.useOption = true
-        modifiedSettings.language = "en"
-        modifiedSettings.autoPunctuation = false
-        modifiedSettings.temperature = 0.5
-        modifiedSettings.beamSize = 10
-        modifiedSettings.noSpeechThreshold = 0.8
-        modifiedSettings.compressionRatioThreshold = 3.0
-        modifiedSettings.task = "translate"
-        modifiedSettings.bestOf = 3
-        modifiedSettings.vadThreshold = 0.3
-        modifiedSettings.launchAtLogin = true
-        modifiedSettings.autoGainEnabled = false
-        modifiedSettings.autoGainWeakThresholdDbfs = -25.0
-        modifiedSettings.autoGainTargetPeakDbfs = -7.0
-        modifiedSettings.autoGainMaxDb = 10.0
-        modifiedSettings.recordingCompletionTimeout = 480.0
-        
+    func testSaveAndLoadUserFacingSettings() {
+        let modifiedSettings = AppSettings(
+            hotkeyConfig: HotkeyConfiguration(
+                useCommand: false,
+                useOption: true,
+                useControl: true,
+                useShift: false,
+                keyCode: 0x31
+            ),
+            language: "en",
+            autoPunctuation: false,
+            transcriptionQualityPreset: .high,
+            gpuAccelerationEnabled: false,
+            launchAtLogin: true,
+            recordingCompletionTimeout: 480.0
+        )
+
         settingsManager.save(modifiedSettings)
         let loadedSettings = settingsManager.load()
-        
-        XCTAssertEqual(loadedSettings.hotkeyConfig.keyCode, 36)
+
+        XCTAssertEqual(loadedSettings.hotkeyConfig, modifiedSettings.hotkeyConfig)
         XCTAssertEqual(loadedSettings.language, "en")
-        XCTAssertEqual(loadedSettings.autoPunctuation, false)
-        XCTAssertEqual(loadedSettings.temperature, 0.5)
-        XCTAssertEqual(loadedSettings.beamSize, 10)
-        XCTAssertEqual(loadedSettings.noSpeechThreshold, 0.8)
-        XCTAssertEqual(loadedSettings.compressionRatioThreshold, 3.0)
-        XCTAssertEqual(loadedSettings.task, "translate")
-        XCTAssertEqual(loadedSettings.bestOf, 3)
-        XCTAssertEqual(loadedSettings.vadThreshold, 0.3)
-        XCTAssertEqual(loadedSettings.launchAtLogin, true)
-        XCTAssertEqual(loadedSettings.autoGainEnabled, false)
-        XCTAssertEqual(loadedSettings.autoGainWeakThresholdDbfs, -25.0)
-        XCTAssertEqual(loadedSettings.autoGainTargetPeakDbfs, -7.0)
-        XCTAssertEqual(loadedSettings.autoGainMaxDb, 10.0)
+        XCTAssertFalse(loadedSettings.autoPunctuation)
+        XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .high)
+        XCTAssertFalse(loadedSettings.gpuAccelerationEnabled)
+        XCTAssertTrue(loadedSettings.launchAtLogin)
         XCTAssertEqual(loadedSettings.recordingCompletionTimeout, 480.0)
-        
-        settingsManager.save(originalSettings)
     }
 
-    func testMultipleSettingsChanges() throws {
-        var settings = AppSettings()
-        
-        settings.language = "ja"
-        settings.temperature = 0.2
-        settingsManager.save(settings)
-        
-        var loaded1 = settingsManager.load()
-        XCTAssertEqual(loaded1.language, "ja")
-        XCTAssertEqual(loaded1.temperature, 0.2)
-        
-        loaded1.language = "en"
-        loaded1.temperature = 0.8
-        settingsManager.save(loaded1)
-        
-        let loaded2 = settingsManager.load()
-        XCTAssertEqual(loaded2.language, "en")
-        XCTAssertEqual(loaded2.temperature, 0.8)
-        
-        let defaultSettings = AppSettings()
-        settingsManager.save(defaultSettings)
+    func testSaveUsesOwnerOnlyPermissions() throws {
+        settingsManager.save(AppSettings(language: "ja"))
+
+        let permissions = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: settingsURL.path)[.posixPermissions]) as? NSNumber
+        )
+        XCTAssertEqual(permissions.intValue & 0o777, LocalFileProtection.filePermissions)
     }
 
-    func testHotkeyConfigurationIntegration() throws {
-        var settings = settingsManager.load()
-        
-        settings.hotkeyConfig.keyCode = 51
-        settings.hotkeyConfig.useCommand = true
-        settings.hotkeyConfig.useOption = false
-        settings.hotkeyConfig.useControl = true
-        settings.hotkeyConfig.useShift = false
-        
-        settingsManager.save(settings)
+    func testLegacySettingsFileMigratesRemovedRawFieldsToNewDefaults() throws {
+        let legacyJSON = """
+        {
+          "hotkeyConfig": {
+            "useCommand": true,
+            "useOption": false,
+            "useControl": true,
+            "useShift": false,
+            "keyCode": 36
+          },
+          "language": "ja",
+          "autoPunctuation": false,
+          "temperature": 0.7,
+          "beamSize": 12,
+          "noSpeechThreshold": 0.1,
+          "compressionRatioThreshold": 5.0,
+          "task": "translate",
+          "bestOf": 8,
+          "vadThreshold": 0.9,
+          "parallelism": 4,
+          "autoGainEnabled": false,
+          "launchAtLogin": true,
+          "recordingCompletionTimeout": 450.0
+        }
+        """.data(using: .utf8)!
+        try legacyJSON.write(to: settingsURL)
+
         let loadedSettings = settingsManager.load()
-        
-        XCTAssertEqual(loadedSettings.hotkeyConfig.keyCode, 51)
-        XCTAssertEqual(loadedSettings.hotkeyConfig.useCommand, true)
-        XCTAssertEqual(loadedSettings.hotkeyConfig.useOption, false)
-        XCTAssertEqual(loadedSettings.hotkeyConfig.useControl, true)
-        XCTAssertEqual(loadedSettings.hotkeyConfig.useShift, false)
-        
-        let defaultSettings = AppSettings()
-        settingsManager.save(defaultSettings)
-    }
 
-    func testEdgeCaseValues() throws {
-        var settings = AppSettings()
-        
-        settings.temperature = 1.0
-        settings.beamSize = 1
-        settings.noSpeechThreshold = 0.0
-        settings.compressionRatioThreshold = 10.0
-        settings.bestOf = 1
-        settings.vadThreshold = 0.0
-        
-        settingsManager.save(settings)
-        let loadedSettings = settingsManager.load()
-        
-        XCTAssertEqual(loadedSettings.temperature, 1.0)
-        XCTAssertEqual(loadedSettings.beamSize, 1)
-        XCTAssertEqual(loadedSettings.noSpeechThreshold, 0.0)
-        XCTAssertEqual(loadedSettings.compressionRatioThreshold, 10.0)
-        XCTAssertEqual(loadedSettings.bestOf, 1)
-        XCTAssertEqual(loadedSettings.vadThreshold, 0.0)
-        
-        let defaultSettings = AppSettings()
-        settingsManager.save(defaultSettings)
-    }
-
-    func testStringEncoding() throws {
-        var settings = AppSettings()
-        
-        settings.language = "ja"
-        settings.task = "transcribe"
-        
-        settingsManager.save(settings)
-        let loadedSettings = settingsManager.load()
-        
+        XCTAssertEqual(
+            loadedSettings.hotkeyConfig,
+            HotkeyConfiguration(
+                useCommand: true,
+                useOption: false,
+                useControl: true,
+                useShift: false,
+                keyCode: 36
+            )
+        )
         XCTAssertEqual(loadedSettings.language, "ja")
-        XCTAssertEqual(loadedSettings.task, "transcribe")
-        
-        let defaultSettings = AppSettings()
-        settingsManager.save(defaultSettings)
+        XCTAssertFalse(loadedSettings.autoPunctuation)
+        XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .medium)
+        XCTAssertTrue(loadedSettings.gpuAccelerationEnabled)
+        XCTAssertTrue(loadedSettings.launchAtLogin)
+        XCTAssertEqual(loadedSettings.recordingCompletionTimeout, 450.0)
+    }
+
+    func testLoadClampsInvalidRecordingCompletionTimeout() throws {
+        let invalidJSON = """
+        {
+          "recordingCompletionTimeout": 5
+        }
+        """.data(using: .utf8)!
+        try invalidJSON.write(to: settingsURL)
+
+        let loadedSettings = settingsManager.load()
+        XCTAssertEqual(
+            loadedSettings.recordingCompletionTimeout,
+            AppSettings.minimumRecordingCompletionTimeout
+        )
     }
 }
