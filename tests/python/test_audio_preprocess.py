@@ -4,6 +4,7 @@
 import os
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -264,6 +265,47 @@ class AudioPreprocessTests(unittest.TestCase):
         unrelated = Exception("some other transcription error")
         self.assertFalse(whisper_server.should_retry_without_vad(unrelated))
 
+    def test_analyze_wav_activity_marks_sparse_noise_as_low_activity(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            wav_path = Path(temp_dir) / "sparse.wav"
+            write_mono_pcm16_wav(
+                wav_path,
+                [
+                    (0.95, 0),
+                    (0.06, 14000),
+                    (0.35, 0),
+                ],
+            )
+
+            stats = whisper_server.analyze_wav_activity(str(wav_path))
+
+            self.assertGreater(stats.duration_seconds, 1.2)
+            self.assertLess(stats.active_duration_seconds, 0.18)
+            self.assertLess(stats.active_ratio, 0.12)
+            self.assertTrue(
+                whisper_server.should_skip_transcription_for_low_activity(stats)
+            )
+
+    def test_analyze_wav_activity_preserves_dense_short_speech(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            wav_path = Path(temp_dir) / "speech.wav"
+            write_mono_pcm16_wav(
+                wav_path,
+                [
+                    (0.18, 0),
+                    (0.42, 9000),
+                ],
+            )
+
+            stats = whisper_server.analyze_wav_activity(str(wav_path))
+
+            self.assertAlmostEqual(stats.duration_seconds, 0.6, places=1)
+            self.assertGreater(stats.active_duration_seconds, 0.3)
+            self.assertGreater(stats.active_ratio, 0.5)
+            self.assertFalse(
+                whisper_server.should_skip_transcription_for_low_activity(stats)
+            )
+
 
 class TranscriptionFallbackTests(unittest.TestCase):
     def test_keep_empty_result_when_vad_result_is_empty_without_fallback(self):
@@ -457,6 +499,22 @@ class FakeTranscribeModel:
             raise response
 
         return response
+
+
+def write_mono_pcm16_wav(path, segments, sample_rate=16000):
+    frames = bytearray()
+
+    for duration_seconds, amplitude in segments:
+        sample_count = int(sample_rate * duration_seconds)
+        clamped = max(-32767, min(32767, int(amplitude)))
+        for _ in range(sample_count):
+            frames.extend(int(clamped).to_bytes(2, byteorder="little", signed=True))
+
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(bytes(frames))
 
 
 if __name__ == "__main__":

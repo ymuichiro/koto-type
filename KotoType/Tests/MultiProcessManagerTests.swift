@@ -301,6 +301,51 @@ final class MultiProcessManagerTests: XCTestCase {
 
         wait(for: [completion], timeout: 2.0)
     }
+
+    func testBackendProbeTemporarilyMarksProcessBusyUntilStatusArrives() {
+        let probeHandled = expectation(description: "probe handled")
+        let segmentCompleted = expectation(description: "segment completed after probe")
+        let sendOrder = LockedStringArray()
+        let queuedURL = URL(fileURLWithPath: "/tmp/probe.wav")
+        let queuedSettings = AppSettings()
+
+        var manager: MultiProcessManager!
+        manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            mock.onSendBackendProbe = { instance, _, _ in
+                sendOrder.append("probe")
+                XCTAssertEqual(manager.getIdleProcessCount(), 0)
+                manager.processFile(
+                    url: queuedURL,
+                    index: 41,
+                    settings: queuedSettings
+                )
+                instance.outputReceived?(
+                    PythonProcessManager.controlMessagePrefix
+                        + "{\"effectiveBackend\":\"mlx\",\"gpuRequested\":true,\"gpuAvailable\":true}"
+                )
+                probeHandled.fulfill()
+            }
+            mock.onSend = { instance, _ in
+                sendOrder.append("segment")
+                instance.outputReceived?("ready")
+            }
+            return mock
+        }
+
+        manager.segmentComplete = { index, text in
+            if index == 41 {
+                XCTAssertEqual(text, "ready")
+                segmentCompleted.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        XCTAssertTrue(manager.requestBackendProbe(gpuAccelerationEnabled: true, preloadModel: true))
+
+        wait(for: [probeHandled, segmentCompleted], timeout: 2.0)
+        XCTAssertEqual(sendOrder.value, ["probe", "segment"])
+    }
 }
 
 private final class MockMultiProcessPythonManager: PythonProcessManaging {
@@ -314,6 +359,7 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
     var onStart: ((MockMultiProcessPythonManager) -> Void)?
     var onSend: ((MockMultiProcessPythonManager, String) -> Void)?
     var onSendDetailed: ((MockMultiProcessPythonManager, String, String?) -> Void)?
+    var onSendBackendProbe: ((MockMultiProcessPythonManager, Bool, Bool) -> Void)?
 
     init(sendSucceeds: Bool) {
         self.sendSucceeds = sendSucceeds
@@ -342,6 +388,11 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
         running
     }
 
+    func sendBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool {
+        onSendBackendProbe?(self, gpuAccelerationEnabled, preloadModel)
+        return sendSucceeds
+    }
+
     func stop() {
         stopCallCount += 1
         running = false
@@ -350,6 +401,23 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
     func simulateTermination(status: Int32) {
         running = false
         processTerminated?(status)
+    }
+}
+
+private final class LockedStringArray {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    var value: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: String) {
+        lock.lock()
+        storage.append(value)
+        lock.unlock()
     }
 }
 

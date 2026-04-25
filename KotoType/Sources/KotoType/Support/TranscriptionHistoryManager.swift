@@ -58,14 +58,17 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
             return
         }
 
-        let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let settingsDir = appSupportURL.appendingPathComponent("koto-type")
+        let settingsDir = KotoTypeStoragePaths.applicationSupportDirectory(fileManager: fileManager)
         try? LocalFileProtection.ensurePrivateDirectory(at: settingsDir, fileManager: fileManager)
-        self.historyURL = settingsDir.appendingPathComponent("transcription_history.json")
+        self.historyURL = KotoTypeStoragePaths.transcriptionHistoryFile(fileManager: fileManager)
         try? LocalFileProtection.tightenFilePermissionsIfPresent(
             at: self.historyURL,
             fileManager: fileManager
         )
+    }
+
+    var storageURL: URL {
+        historyURL
     }
 
     func loadEntries() -> [TranscriptionHistoryEntry] {

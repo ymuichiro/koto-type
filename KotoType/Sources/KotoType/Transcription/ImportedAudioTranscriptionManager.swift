@@ -21,6 +21,7 @@ protocol PythonProcessManaging: AnyObject {
         gpuAccelerationEnabled: Bool,
         screenshotContext: String?
     ) -> Bool
+    func sendBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool
     func isRunning() -> Bool
     func stop()
 }

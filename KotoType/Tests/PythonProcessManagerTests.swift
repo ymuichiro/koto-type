@@ -146,6 +146,31 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertNil(PythonProcessManager.parseBackendStatus(from: "hello world"))
     }
 
+    func testParseManagedModelsResponseDecodesControlMessage() {
+        let output =
+            PythonProcessManager.controlMessagePrefix
+            + "{\"type\":\"managed_models\",\"models\":[{\"kind\":\"cpu\",\"displayName\":\"CPU model\",\"modelID\":\"large-v3-turbo\",\"directoryPath\":\"/tmp/cpu\",\"isDownloaded\":true,\"fileCount\":3,\"byteCount\":100}]}"
+
+        let response = PythonProcessManager.parseManagedModelsResponse(from: output)
+
+        XCTAssertEqual(response?.type, "managed_models")
+        XCTAssertEqual(response?.models.first?.kind, .cpu)
+        XCTAssertEqual(response?.models.first?.directoryPath, "/tmp/cpu")
+        XCTAssertEqual(response?.models.first?.isDownloaded, true)
+    }
+
+    func testParseManagedModelResponseDecodesControlMessage() {
+        let output =
+            PythonProcessManager.controlMessagePrefix
+            + "{\"type\":\"managed_model\",\"model\":{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":false,\"fileCount\":0,\"byteCount\":0}}"
+
+        let response = PythonProcessManager.parseManagedModelResponse(from: output)
+
+        XCTAssertEqual(response?.type, "managed_model")
+        XCTAssertEqual(response?.model.kind, .mlx)
+        XCTAssertEqual(response?.model.isDownloaded, false)
+    }
+
     func testRuntimeEnvironmentForAppBundleForcesBackendSafetyCaps() {
         let environment = PythonProcessManager.runtimeEnvironment(
             base: [
@@ -158,6 +183,11 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(environment["KOTOTYPE_MAX_ACTIVE_SERVERS"], "1")
         XCTAssertEqual(environment["KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"], "1")
         XCTAssertEqual(environment["KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"], "120")
+        XCTAssertEqual(environment["KOTOTYPE_CPU_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .cpu).path)
+        XCTAssertEqual(environment["KOTOTYPE_MLX_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .mlx).path)
+        XCTAssertEqual(environment["KOTOTYPE_MODEL_CACHE_DIR"], KotoTypeStoragePaths.managedModelCacheRoot().path)
+        XCTAssertEqual(environment["HF_HOME"], KotoTypeStoragePaths.huggingFaceHome().path)
+        XCTAssertEqual(environment["HUGGINGFACE_HUB_CACHE"], KotoTypeStoragePaths.huggingFaceHubCache().path)
     }
 
     func testRuntimeEnvironmentForDevelopmentKeepsExistingValues() {
@@ -172,6 +202,8 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(environment["KOTOTYPE_MAX_ACTIVE_SERVERS"], "8")
         XCTAssertEqual(environment["KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"], "4")
         XCTAssertNil(environment["KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"])
+        XCTAssertEqual(environment["KOTOTYPE_CPU_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .cpu).path)
+        XCTAssertEqual(environment["KOTOTYPE_MLX_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .mlx).path)
     }
 
     func testRuntimeEnvironmentForAppBundlePrependsPackageManagerPaths() {
