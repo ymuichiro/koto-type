@@ -1,0 +1,68 @@
+[
+  {
+    "id": "openai-whisper",
+    "name": "OpenAI Whisper",
+    "licenseName": "MIT",
+    "projectURL": "https://github.com/openai/whisper",
+    "noticeFile": "MIT.txt",
+    "summary": "Speech recognition model family used by KotoType.",
+    "bundledComponent": "Model family / upstream code reference",
+    "upstreamBaseModel": null,
+    "revision": null
+  },
+  {
+    "id": "faster-whisper",
+    "name": "faster-whisper",
+    "licenseName": "MIT",
+    "projectURL": "https://github.com/SYSTRAN/faster-whisper",
+    "noticeFile": "MIT.txt",
+    "summary": "CPU transcription backend used by KotoType.",
+    "bundledComponent": "Bundled Python runtime dependency",
+    "upstreamBaseModel": null,
+    "revision": null
+  },
+  {
+    "id": "ctranslate2",
+    "name": "CTranslate2",
+    "licenseName": "MIT",
+    "projectURL": "https://github.com/OpenNMT/CTranslate2",
+    "noticeFile": "MIT.txt",
+    "summary": "Inference engine used by faster-whisper.",
+    "bundledComponent": "Bundled Python runtime dependency",
+    "upstreamBaseModel": null,
+    "revision": null
+  },
+  {
+    "id": "mlx",
+    "name": "MLX",
+    "licenseName": "MIT",
+    "projectURL": "https://github.com/ml-explore/mlx",
+    "noticeFile": "MIT.txt",
+    "summary": "Apple Silicon machine learning framework used for GPU-accelerated transcription.",
+    "bundledComponent": "Bundled Python runtime dependency",
+    "upstreamBaseModel": null,
+    "revision": null
+  },
+  {
+    "id": "mlx-whisper",
+    "name": "mlx-whisper / MLX Examples whisper",
+    "licenseName": "MIT",
+    "projectURL": "https://github.com/ml-explore/mlx-examples/tree/main/whisper",
+    "noticeFile": "MIT.txt",
+    "summary": "Whisper inference implementation for MLX.",
+    "bundledComponent": "Bundled Python runtime dependency",
+    "upstreamBaseModel": null,
+    "revision": null
+  },
+  {
+    "id": "mlx-community-whisper-large-v3-turbo",
+    "name": "mlx-community/whisper-large-v3-turbo",
+    "licenseName": "MIT (upstream OpenAI Whisper notice)",
+    "projectURL": "https://huggingface.co/mlx-community/whisper-large-v3-turbo",
+    "noticeFile": "MIT.txt",
+    "summary": "MLX-converted Whisper checkpoint. The Hugging Face model metadata does not currently publish a stable license field, so KotoType carries the upstream OpenAI Whisper MIT notice together with the pinned model revision.",
+    "bundledComponent": "Runtime-downloaded MLX checkpoint",
+    "upstreamBaseModel": "openai/whisper-large-v3-turbo",
+    "revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+  }
+]
