@@ -115,6 +115,20 @@ jobs:
           export KOTOTYPE_BUILD_CONFIG=release
           ./scripts/create_app.sh
 
+      - name: Verify bundled whisper_server binary
+        run: |
+          source .venv/bin/activate
+          WHISPER_SERVER_PATH="KotoType/KotoType.app/Contents/Resources/whisper_server"
+          if [ ! -f "${WHISPER_SERVER_PATH}" ]; then
+            echo "Missing bundled whisper_server binary at ${WHISPER_SERVER_PATH}"
+            exit 1
+          fi
+          if [ ! -x "${WHISPER_SERVER_PATH}" ]; then
+            echo "Bundled whisper_server binary is not executable"
+            exit 1
+          fi
+          .venv/bin/python tests/python/smoke_whisper_server_binary.py "${WHISPER_SERVER_PATH}"
+
       - name: Verify app bundle Sparkle public key
         env:
           SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}

@@ -125,6 +125,19 @@ jobs:
             exit 1
           fi
 
+      - name: Verify bundled whisper_server binary in release ZIP
+        run: |
+          cd verify_release
+          WHISPER_SERVER_PATH="$(find unpacked -path "*/KotoType.app/Contents/Resources/whisper_server" -print -quit)"
+          if [ -z "${WHISPER_SERVER_PATH}" ]; then
+            echo "Could not find bundled whisper_server in release ZIP."
+            exit 1
+          fi
+          if [ ! -x "${WHISPER_SERVER_PATH}" ]; then
+            echo "Bundled whisper_server in release ZIP is not executable."
+            exit 1
+          fi
+
       - name: Report verification result
         run: |
           echo "Verified release ${{ steps.target.outputs.tag }} with configured Sparkle keys."

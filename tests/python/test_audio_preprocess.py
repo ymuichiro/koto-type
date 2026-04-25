@@ -183,6 +183,24 @@ class AudioPreprocessTests(unittest.TestCase):
             self.assertEqual(fake_ffmpeg.run_call_count, 2)
             self.assertIn("volume=9.00dB", fake_ffmpeg.filter_history[1])
 
+    def test_audio_preprocess_cleans_partial_files_after_failure(self):
+        fake_ffmpeg = FakeFFmpegModule(fail_after_write=True)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "input.wav"
+            input_path.write_bytes(b"dummy")
+
+            output_path = whisper_server.audio_preprocess(
+                str(input_path),
+                lambda _: None,
+                ffmpeg_module=fake_ffmpeg,
+                peak_analyzer=lambda _: -12.0,
+            )
+
+            self.assertEqual(output_path, str(input_path))
+            self.assertFalse((Path(temp_dir) / "input_processed.wav").exists())
+            self.assertFalse((Path(temp_dir) / "input_processed_gain.wav").exists())
+
     def test_determine_gain_for_weak_audio(self):
         gain = whisper_server.determine_gain_for_weak_audio(
             peak_dbfs=-30.0,
@@ -392,8 +410,9 @@ class TranscriptionFallbackTests(unittest.TestCase):
 
 
 class FakeFFmpegModule:
-    def __init__(self, fail_on_denoise=False):
+    def __init__(self, fail_on_denoise=False, fail_after_write=False):
         self.fail_on_denoise = fail_on_denoise
+        self.fail_after_write = fail_after_write
         self.filter_history = []
         self.run_call_count = 0
 
@@ -422,6 +441,8 @@ class FakeFFmpegPipeline:
             raise RuntimeError("No such filter: 'afftdn'")
         if self.output_path is not None:
             Path(self.output_path).write_bytes(b"processed")
+        if self.module.fail_after_write:
+            raise RuntimeError("failure after writing output")
         return None
 
 

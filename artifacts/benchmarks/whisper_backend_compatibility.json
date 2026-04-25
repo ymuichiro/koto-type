@@ -1,0 +1,338 @@
+{
+  "audio_path": "/Users/you/github/ymuichiro/koto-type/assets/audio/test_speech_ja.wav",
+  "faster_whisper_model": {
+    "backend": "faster-whisper",
+    "label": "faster-whisper-large-v3-turbo-cpu-int8",
+    "model_id": "large-v3-turbo",
+    "device": "cpu",
+    "compute_type": "int8"
+  },
+  "mlx_whisper_model": {
+    "backend": "mlx-whisper",
+    "label": "mlx-whisper-large-v3-turbo",
+    "model_id": "mlx-community/whisper-large-v3-turbo"
+  },
+  "cases": [
+    {
+      "id": "current_server_defaults",
+      "description": "Current server-style defaults, including beam search and VAD.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "beam_size": 5,
+        "best_of": 5,
+        "word_timestamps": false,
+        "initial_prompt": "これは会話の文字起こしです。正確な日本語で出力してください。",
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4,
+        "vad_filter": true,
+        "vad_parameters": {
+          "threshold": 0.57,
+          "min_speech_duration_ms": 320,
+          "min_silence_duration_ms": 700,
+          "speech_pad_ms": 80
+        }
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "error",
+        "transcript_preview": null,
+        "detected_language": null,
+        "error_type": "TypeError",
+        "error_message": "DecodingOptions.__init__() got an unexpected keyword argument 'vad_filter'"
+      },
+      "mlx_whisper_traceback": "Traceback (most recent call last):\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 250, in execute_case\n    result = runner(audio_path, case[\"kwargs\"])\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 226, in run_mlx_whisper\n    result = mlx_whisper.transcribe(\n        str(audio_path),\n        path_or_hf_repo=MLX_MODEL_CONFIG[\"model_id\"],\n        **mlx_kwargs,\n    )\nTypeError: DecodingOptions.__init__() got an unexpected keyword argument 'vad_filter'\n"
+    },
+    {
+      "id": "common_core_defaults",
+      "description": "Cross-backend core settings without beam search or VAD.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "word_timestamps": false,
+        "initial_prompt": "これは会話の文字起こしです。正確な日本語で出力してください。",
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました。",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました。",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      }
+    },
+    {
+      "id": "language_auto",
+      "description": "Auto language detection by passing language=None.",
+      "kwargs": {
+        "language": null,
+        "task": "transcribe",
+        "temperature": 0.0,
+        "word_timestamps": false,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": ".",
+        "detected_language": "en",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "ok",
+        "transcript_preview": ".",
+        "detected_language": "en",
+        "error_type": null,
+        "error_message": null
+      }
+    },
+    {
+      "id": "task_translate",
+      "description": "Translate task with explicit Japanese input.",
+      "kwargs": {
+        "language": "ja",
+        "task": "translate",
+        "temperature": 0.0,
+        "word_timestamps": false,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "ok",
+        "transcript_preview": "",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      }
+    },
+    {
+      "id": "word_timestamps_enabled",
+      "description": "Word timestamp extraction enabled.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "word_timestamps": true,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      }
+    },
+    {
+      "id": "beam_size_1",
+      "description": "Explicit beam_size=1.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "beam_size": 1,
+        "word_timestamps": false,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "error",
+        "transcript_preview": null,
+        "detected_language": null,
+        "error_type": "NotImplementedError",
+        "error_message": "Beam search decoder is not yet implemented"
+      },
+      "mlx_whisper_traceback": "Traceback (most recent call last):\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 250, in execute_case\n    result = runner(audio_path, case[\"kwargs\"])\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 226, in run_mlx_whisper\n    result = mlx_whisper.transcribe(\n        str(audio_path),\n        path_or_hf_repo=MLX_MODEL_CONFIG[\"model_id\"],\n        **mlx_kwargs,\n    )\nNotImplementedError: Beam search decoder is not yet implemented\n"
+    },
+    {
+      "id": "beam_size_5",
+      "description": "Explicit beam_size=5.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "beam_size": 5,
+        "word_timestamps": false,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "error",
+        "transcript_preview": null,
+        "detected_language": null,
+        "error_type": "NotImplementedError",
+        "error_message": "Beam search decoder is not yet implemented"
+      },
+      "mlx_whisper_traceback": "Traceback (most recent call last):\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 250, in execute_case\n    result = runner(audio_path, case[\"kwargs\"])\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 226, in run_mlx_whisper\n    result = mlx_whisper.transcribe(\n        str(audio_path),\n        path_or_hf_repo=MLX_MODEL_CONFIG[\"model_id\"],\n        **mlx_kwargs,\n    )\nNotImplementedError: Beam search decoder is not yet implemented\n"
+    },
+    {
+      "id": "best_of_5_temperature_zero",
+      "description": "best_of=5 under deterministic decoding.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "best_of": 5,
+        "word_timestamps": false,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      }
+    },
+    {
+      "id": "best_of_5_temperature_sampling",
+      "description": "best_of=5 under sampling temperature.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.2,
+        "best_of": 5,
+        "word_timestamps": false,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      }
+    },
+    {
+      "id": "initial_prompt_enabled",
+      "description": "Initial prompt enabled with the current Japanese base prompt.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "word_timestamps": false,
+        "initial_prompt": "これは会話の文字起こしです。正確な日本語で出力してください。",
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました。",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "ok",
+        "transcript_preview": "ご視聴ありがとうございました。",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      }
+    },
+    {
+      "id": "vad_filter_enabled",
+      "description": "Built-in VAD enabled with the current server-style parameters.",
+      "kwargs": {
+        "language": "ja",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "word_timestamps": false,
+        "initial_prompt": null,
+        "no_speech_threshold": 0.6,
+        "compression_ratio_threshold": 2.4,
+        "vad_filter": true,
+        "vad_parameters": {
+          "threshold": 0.57,
+          "min_speech_duration_ms": 320,
+          "min_silence_duration_ms": 700,
+          "speech_pad_ms": 80
+        }
+      },
+      "faster_whisper_cpu": {
+        "status": "ok",
+        "transcript_preview": "",
+        "detected_language": "ja",
+        "error_type": null,
+        "error_message": null
+      },
+      "mlx_whisper": {
+        "status": "error",
+        "transcript_preview": null,
+        "detected_language": null,
+        "error_type": "TypeError",
+        "error_message": "DecodingOptions.__init__() got an unexpected keyword argument 'vad_filter'"
+      },
+      "mlx_whisper_traceback": "Traceback (most recent call last):\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 250, in execute_case\n    result = runner(audio_path, case[\"kwargs\"])\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/check_whisper_backend_compatibility.py\", line 226, in run_mlx_whisper\n    result = mlx_whisper.transcribe(\n        str(audio_path),\n        path_or_hf_repo=MLX_MODEL_CONFIG[\"model_id\"],\n        **mlx_kwargs,\n    )\nTypeError: DecodingOptions.__init__() got an unexpected keyword argument 'vad_filter'\n"
+    }
+  ]
+}
