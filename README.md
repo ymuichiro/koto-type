@@ -4,7 +4,7 @@
 
 ![KotoType Logo](assets/logo/koto-tyoe_banner_transparent.png)
 
-A Mac-native voice-to-text application with high-accuracy transcription powered by OpenAI Whisper.
+A Mac-native voice-to-text application with high-accuracy transcription powered by OpenAI Whisper, with optional Apple Silicon MLX acceleration.
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/ymuichiro/koto-type/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -28,7 +28,7 @@ A Mac-native voice-to-text application with high-accuracy transcription powered 
 - **Push-to-Talk Hotkey**: Hold your configured hotkey to record, release to transcribe (default: `⌘+⌥`)
 - **Recording Status Indicator**: The indicator clearly shows recording/processing/warning states
 - **Session-Safe Finalization**: If you start another recording before a previous one finishes, each recording finalizes independently in stop order (no mixed chunks)
-- **High-Accuracy Transcription**: Powered by OpenAI Whisper with optimized settings
+- **High-Accuracy Transcription**: Powered by OpenAI Whisper, with optional Apple Silicon MLX acceleration
 - **Automatic Text Input**: Automatically types transcribed text at the cursor position
 - **Audio Preprocessing**: Noise reduction with spectral subtraction and normalization
 - **History Management**: Access past transcriptions from the history menu
@@ -496,7 +496,7 @@ The Python server is packaged as a single executable using PyInstaller:
 Allow microphone access on first launch when prompted.
 
 ### Whisper Model Download
-The Whisper model (`large-v3-turbo`) is downloaded on first launch. Expect a several-GB initial download.
+The Whisper model (`large-v3-turbo`) is downloaded on first launch. On Apple Silicon, the MLX checkpoint may also be downloaded the first time the MLX backend is used.
 
 ### Hotkey Not Working
 Enable KotoType in System Settings > Privacy & Security > Accessibility, and confirm you are holding the configured hotkey (default: `⌘+⌥`).
@@ -559,6 +559,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed information on:
 
 - [OpenAI Whisper](https://github.com/openai/whisper) for the speech recognition model
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for the optimized Whisper implementation
+- [MLX](https://github.com/ml-explore/mlx) and [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) for Apple Silicon acceleration
 - The open-source community for various tools and libraries
 
 ---
