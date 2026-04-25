@@ -9,6 +9,9 @@ struct PythonLaunchCommand: Equatable {
 }
 
 final class PythonProcessManager: @unchecked Sendable {
+    static let controlMessagePrefix = "__KOTOTYPE_CONTROL__:"
+    private static let healthCheckRequestPrefix = "__KOTOTYPE_HEALTHCHECK__:"
+
     struct Runtime {
         var currentDirectoryPath: () -> String
         var bundlePath: () -> String
@@ -136,28 +139,38 @@ final class PythonProcessManager: @unchecked Sendable {
     func sendInput(
         _ text: String,
         language: String = "auto",
-        temperature: Double = 0.0,
-        beamSize: Int = 5,
-        noSpeechThreshold: Double = 0.6,
-        compressionRatioThreshold: Double = 2.4,
-        task: String = "transcribe",
-        bestOf: Int = 5,
-        vadThreshold: Double = 0.5,
         autoPunctuation: Bool = true,
-        autoGainEnabled: Bool = true,
-        autoGainWeakThresholdDbfs: Double = -18.0,
-        autoGainTargetPeakDbfs: Double = -10.0,
-        autoGainMaxDb: Double = 18.0,
+        qualityPreset: TranscriptionQualityPreset = .medium,
+        gpuAccelerationEnabled: Bool = true,
         screenshotContext: String? = nil
     ) -> Bool {
-        let punctuationFlag = autoPunctuation ? "1" : "0"
-        let autoGainFlag = autoGainEnabled ? "1" : "0"
-        let screenshotContextBase64 = screenshotContext?
-            .data(using: .utf8)?
-            .base64EncodedString() ?? ""
-        let input = "\(text)|\(language)|\(temperature)|\(beamSize)|\(noSpeechThreshold)|\(compressionRatioThreshold)|\(task)|\(bestOf)|\(vadThreshold)|\(punctuationFlag)|\(autoGainFlag)|\(autoGainWeakThresholdDbfs)|\(autoGainTargetPeakDbfs)|\(autoGainMaxDb)|\(screenshotContextBase64)"
+        let input: String
+        if text.hasPrefix(Self.healthCheckRequestPrefix) {
+            input = text
+        } else {
+            var payload: [String: Any] = [
+                "type": "transcription_request",
+                "audio_path": text,
+                "language": language,
+                "auto_punctuation": autoPunctuation,
+                "quality_preset": qualityPreset.rawValue,
+                "gpu_acceleration_enabled": gpuAccelerationEnabled,
+            ]
+            if let screenshotContext {
+                payload["screenshot_context"] = screenshotContext
+            }
+
+            guard JSONSerialization.isValidJSONObject(payload),
+                let data = try? JSONSerialization.data(withJSONObject: payload),
+                let jsonString = String(data: data, encoding: .utf8)
+            else {
+                Logger.shared.log("Failed to encode transcription request payload", level: .error)
+                return false
+            }
+            input = jsonString
+        }
         Logger.shared.log(
-            "Sending input to Python: audioPathLength=\(text.count), language=\(language), task=\(task), screenshotContextLength=\(screenshotContext?.count ?? 0)",
+            "Sending input to Python: audioPathLength=\(text.count), language=\(language), qualityPreset=\(qualityPreset.rawValue), gpuEnabled=\(gpuAccelerationEnabled), screenshotContextLength=\(screenshotContext?.count ?? 0)",
             level: .debug
         )
         guard let process = process, process.isRunning else {
@@ -271,6 +284,19 @@ final class PythonProcessManager: @unchecked Sendable {
         }
 
         return lines
+    }
+
+    static func parseBackendStatus(from output: String) -> TranscriptionBackendStatus? {
+        guard output.hasPrefix(controlMessagePrefix) else {
+            return nil
+        }
+
+        let payload = String(output.dropFirst(controlMessagePrefix.count))
+        guard let data = payload.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(TranscriptionBackendStatus.self, from: data)
     }
 
     static func descendantProcessIdentifiers(rootPID: Int32, psOutput: String) -> [Int32] {

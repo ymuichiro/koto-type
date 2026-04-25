@@ -180,10 +180,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         let tempBatchDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(Self.tempBatchDirectoryName, isDirectory: true)
         do {
-            try FileManager.default.createDirectory(
-                at: tempBatchDirectory,
-                withIntermediateDirectories: true
-            )
+            try LocalFileProtection.ensurePrivateDirectory(at: tempBatchDirectory)
         } catch {
             Logger.shared.log(
                 "RealtimeRecorder: failed to create temporary batch directory \(tempBatchDirectory.path): \(error)",
@@ -209,6 +206,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         do {
             let file = try AVAudioFile(forWriting: fileURL, settings: settings)
             try file.write(from: buffer)
+            try LocalFileProtection.tightenFilePermissionsIfPresent(at: fileURL)
             lastFileURL = fileURL
             let currentFileCount = fileCount
             fileCount += 1

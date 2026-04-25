@@ -30,11 +30,44 @@ final class ImportedAudioTranscriptionManagerTests: XCTestCase {
 
         XCTAssertEqual(mock.startCallCount, 1)
         XCTAssertEqual(mock.sendInputCallCount, 1)
+        XCTAssertEqual(mock.lastLanguage, "auto")
+        XCTAssertTrue(mock.lastAutoPunctuation ?? false)
+        XCTAssertEqual(mock.lastQualityPreset, .medium)
+        XCTAssertTrue(mock.lastGPUAccelerationEnabled ?? false)
 
         mock.emitOutput("こんにちは")
 
         wait(for: [completionExpectation], timeout: 1.0)
         XCTAssertEqual(mock.stopCallCount, 1)
+    }
+
+    func testBackendStatusControlMessageDoesNotCompleteUntilTranscriptArrives() {
+        let mock = MockPythonProcessManager()
+        let manager = ImportedAudioTranscriptionManager(processManager: mock)
+        manager.configure(scriptPath: "/tmp/whisper_server.py")
+
+        let noEarlyCompletion = expectation(description: "no early completion")
+        noEarlyCompletion.isInverted = true
+        let completionExpectation = expectation(description: "transcript completion")
+
+        manager.transcribe(fileURL: URL(fileURLWithPath: "/tmp/audio.wav"), settings: AppSettings()) { result in
+            switch result {
+            case let .success(text):
+                XCTAssertEqual(text, "done")
+                completionExpectation.fulfill()
+            case .failure:
+                noEarlyCompletion.fulfill()
+            }
+        }
+
+        mock.emitOutput(
+            PythonProcessManager.controlMessagePrefix
+                + "{\"effectiveBackend\":\"mlx\",\"gpuRequested\":true,\"gpuAvailable\":true}"
+        )
+
+        wait(for: [noEarlyCompletion], timeout: 0.1)
+        mock.emitOutput("done")
+        wait(for: [completionExpectation], timeout: 1.0)
     }
 
     func testTranscribeFailsWhenScriptPathNotConfigured() {
@@ -113,6 +146,12 @@ private final class MockPythonProcessManager: PythonProcessManaging {
     private(set) var startCallCount = 0
     private(set) var sendInputCallCount = 0
     private(set) var stopCallCount = 0
+    private(set) var lastInputText: String?
+    private(set) var lastLanguage: String?
+    private(set) var lastAutoPunctuation: Bool?
+    private(set) var lastQualityPreset: TranscriptionQualityPreset?
+    private(set) var lastGPUAccelerationEnabled: Bool?
+    private(set) var lastScreenshotContext: String?
 
     var running = false
 
@@ -124,21 +163,18 @@ private final class MockPythonProcessManager: PythonProcessManaging {
     func sendInput(
         _ text: String,
         language: String,
-        temperature: Double,
-        beamSize: Int,
-        noSpeechThreshold: Double,
-        compressionRatioThreshold: Double,
-        task: String,
-        bestOf: Int,
-        vadThreshold: Double,
         autoPunctuation: Bool,
-        autoGainEnabled: Bool,
-        autoGainWeakThresholdDbfs: Double,
-        autoGainTargetPeakDbfs: Double,
-        autoGainMaxDb: Double,
+        qualityPreset: TranscriptionQualityPreset,
+        gpuAccelerationEnabled: Bool,
         screenshotContext: String?
     ) -> Bool {
         sendInputCallCount += 1
+        lastInputText = text
+        lastLanguage = language
+        lastAutoPunctuation = autoPunctuation
+        lastQualityPreset = qualityPreset
+        lastGPUAccelerationEnabled = gpuAccelerationEnabled
+        lastScreenshotContext = screenshotContext
         return true
     }
 

@@ -1,23 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import atexit
+import json
 import os
-import base64
 import multiprocessing
+import platform
 import re
+import signal
+import time
 import sys
 import threading
 import traceback
-import atexit
-import signal
-import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from math import inf, log10
 import wave
 
 HEALTHCHECK_REQUEST_PREFIX = "__KOTOTYPE_HEALTHCHECK__:"
 HEALTHCHECK_RESPONSE_PREFIX = "__KOTOTYPE_HEALTHCHECK_OK__:"
+CONTROL_MESSAGE_PREFIX = "__KOTOTYPE_CONTROL__:"
+DEFAULT_CPU_MODEL_ID = "large-v3-turbo"
+DEFAULT_MLX_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
+DEFAULT_TASK = "transcribe"
+DEFAULT_NO_SPEECH_THRESHOLD = 0.6
+DEFAULT_COMPRESSION_RATIO_THRESHOLD = 2.4
+DEFAULT_AUTO_GAIN_ENABLED = True
+DEFAULT_AUTO_GAIN_WEAK_THRESHOLD_DBFS = -18.0
+DEFAULT_AUTO_GAIN_TARGET_PEAK_DBFS = -10.0
+DEFAULT_AUTO_GAIN_MAX_DB = 18.0
 
 
 def default_dictionary_path():
@@ -26,9 +38,14 @@ def default_dictionary_path():
 
 def setup_logging():
     log_dir = os.path.expanduser("~/Library/Application Support/koto-type")
-    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(log_dir, mode=0o700, exist_ok=True)
+    tighten_file_permissions(log_dir, mode=0o700)
 
     log_file = os.path.join(log_dir, "server.log")
+    if not os.path.exists(log_file):
+        with open(log_file, "a", encoding="utf-8"):
+            pass
+    tighten_file_permissions(log_file)
 
     def log(message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -349,6 +366,30 @@ def build_vad_parameters(vad_threshold):
     }
 
 
+def tighten_file_permissions(path, mode=0o600):
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        return
+
+
+def cleanup_temporary_audio_files(paths, log):
+    for path in paths:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            os.remove(path)
+            log(f"Removed temporary audio file: {path}")
+        except OSError as error:
+            log(f"Failed to remove temporary audio file {path}: {error}")
+
+
+def cleanup_transcription_audio_path(audio_path, original_audio_path, log):
+    if not audio_path or audio_path == original_audio_path:
+        return
+    cleanup_temporary_audio_files([audio_path], log)
+
+
 def audio_preprocess(
     input_path,
     log,
@@ -378,6 +419,8 @@ def audio_preprocess(
     if peak_analyzer is None:
         peak_analyzer = analyze_wav_peak_dbfs
 
+    output_path = None
+    boosted_output_path = None
     try:
         base, _ = os.path.splitext(input_path)
         output_path = f"{base}_processed.wav"
@@ -431,6 +474,7 @@ def audio_preprocess(
                     output_path=output_path,
                     filter_chain=filter_chain,
                 )
+                tighten_file_permissions(output_path)
 
                 if auto_gain_enabled:
                     peak_dbfs = peak_analyzer(output_path)
@@ -451,7 +495,9 @@ def audio_preprocess(
                             output_path=boosted_output_path,
                             gain_db=gain_db,
                         )
+                        tighten_file_permissions(boosted_output_path)
                         os.replace(boosted_output_path, output_path)
+                        tighten_file_permissions(output_path)
                         log(
                             f"Applied automatic gain for weak input: +{gain_db:.2f} dB"
                         )
@@ -465,12 +511,18 @@ def audio_preprocess(
                     "Noise reduction preprocessing failed, trying next filter chain: "
                     f"{format_ffmpeg_error(error)}"
                 )
+                cleanup_temporary_audio_files(
+                    [output_path, boosted_output_path],
+                    log,
+                )
 
         log("All preprocessing filter chains failed, using original audio")
+        cleanup_temporary_audio_files([output_path, boosted_output_path], log)
         return input_path
 
     except Exception as e:
         log(f"Audio preprocessing failed: {str(e)}")
+        cleanup_temporary_audio_files([output_path, boosted_output_path], log)
         return input_path
 
 
@@ -674,6 +726,357 @@ def post_process_text(text, language="ja", auto_punctuation=True):
     return text
 
 
+def normalize_quality_preset(value):
+    normalized = str(value or "").strip().lower()
+    if normalized in {"low", "medium", "high"}:
+        return normalized
+    return "medium"
+
+
+@dataclass(frozen=True)
+class TranscriptionRequest:
+    audio_path: str
+    language: str | None
+    auto_punctuation: bool
+    quality_preset: str
+    gpu_acceleration_enabled: bool
+    screenshot_context: str | None = None
+
+
+@dataclass(frozen=True)
+class DecodeProfile:
+    temperature: float | tuple[float, ...]
+    beam_size: int | None = None
+    best_of: int | None = None
+    vad_threshold: float | None = None
+
+
+@dataclass(frozen=True)
+class BackendStatus:
+    effective_backend: str
+    gpu_requested: bool
+    gpu_available: bool
+    fallback_reason: str | None = None
+
+
+def build_cpu_decode_profile(quality_preset):
+    preset = normalize_quality_preset(quality_preset)
+    profiles = {
+        "low": DecodeProfile(temperature=0.0, beam_size=1, best_of=1, vad_threshold=0.5),
+        "medium": DecodeProfile(temperature=0.0, beam_size=5, best_of=5, vad_threshold=0.5),
+        "high": DecodeProfile(temperature=0.0, beam_size=10, best_of=10, vad_threshold=0.5),
+    }
+    return profiles[preset]
+
+
+def build_mlx_decode_profile(quality_preset):
+    preset = normalize_quality_preset(quality_preset)
+    profiles = {
+        "low": DecodeProfile(temperature=0.0),
+        "medium": DecodeProfile(temperature=(0.0, 0.2, 0.4)),
+        "high": DecodeProfile(temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0)),
+    }
+    return profiles[preset]
+
+
+def emit_backend_status(status):
+    payload = json.dumps(
+        {
+            "effectiveBackend": status.effective_backend,
+            "gpuRequested": status.gpu_requested,
+            "gpuAvailable": status.gpu_available,
+            "fallbackReason": status.fallback_reason,
+        },
+        ensure_ascii=False,
+    )
+    print(f"{CONTROL_MESSAGE_PREFIX}{payload}", file=sys.stdout)
+    sys.stdout.flush()
+
+
+def parse_request_line(raw_line):
+    stripped = raw_line.strip()
+    if not stripped:
+        return None
+    if stripped.startswith(HEALTHCHECK_REQUEST_PREFIX):
+        return {"kind": "healthcheck", "token": stripped[len(HEALTHCHECK_REQUEST_PREFIX) :]}
+
+    payload = json.loads(stripped)
+    if payload.get("type") != "transcription_request":
+        raise ValueError(f"Unsupported request type: {payload.get('type')}")
+
+    language = str(payload.get("language", "auto")).strip() or "auto"
+    actual_language = None if language == "auto" else language
+    screenshot_context = payload.get("screenshot_context")
+    if screenshot_context is not None:
+        screenshot_context = str(screenshot_context)
+
+    return {
+        "kind": "transcription",
+        "request": TranscriptionRequest(
+            audio_path=str(payload.get("audio_path", "")),
+            language=actual_language,
+            auto_punctuation=parse_bool(payload.get("auto_punctuation"), default=True),
+            quality_preset=normalize_quality_preset(payload.get("quality_preset")),
+            gpu_acceleration_enabled=parse_bool(
+                payload.get("gpu_acceleration_enabled"), default=True
+            ),
+            screenshot_context=screenshot_context,
+        ),
+    }
+
+
+class BackendManager:
+    def __init__(
+        self,
+        state_path,
+        lock_path,
+        pid,
+        max_parallel_model_loads,
+        model_load_wait_timeout,
+        log,
+    ):
+        self.state_path = state_path
+        self.lock_path = lock_path
+        self.pid = pid
+        self.max_parallel_model_loads = max_parallel_model_loads
+        self.model_load_wait_timeout = model_load_wait_timeout
+        self.log = log
+        self.cpu_model = None
+        self.mlx_whisper = None
+        self.mlx_transcribe_module = None
+        self.mlx_core = None
+        self.mlx_runtime_checked = False
+        self.mlx_runtime_available = False
+        self.mlx_runtime_reason = None
+        self.mlx_disabled_for_session = False
+        self.mlx_model_loaded = False
+
+    def _is_apple_silicon(self):
+        return sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+
+    def _wait_for_model_load_slot(self):
+        wait_started = time.time()
+        while True:
+            acquired, loading_count = try_acquire_model_load_slot(
+                state_path=self.state_path,
+                lock_path=self.lock_path,
+                pid=self.pid,
+                max_parallel_model_loads=self.max_parallel_model_loads,
+            )
+            if acquired:
+                if loading_count > 1:
+                    self.log(
+                        "Model load slot acquired after waiting "
+                        f"(parallel_loads={loading_count}, max={self.max_parallel_model_loads})"
+                    )
+                return
+
+            elapsed = time.time() - wait_started
+            if elapsed >= self.model_load_wait_timeout:
+                raise TimeoutError(
+                    "Timed out waiting for model-load slot "
+                    f"(timeout={self.model_load_wait_timeout}s, max_parallel={self.max_parallel_model_loads})"
+                )
+            time.sleep(0.25)
+
+    def _run_with_model_load_slot(self, loader):
+        self._wait_for_model_load_slot()
+        try:
+            return loader()
+        finally:
+            release_model_load_slot(
+                state_path=self.state_path,
+                lock_path=self.lock_path,
+                pid=self.pid,
+            )
+
+    def _probe_mlx_runtime(self):
+        if self.mlx_disabled_for_session:
+            return False, "mlx_disabled_for_session"
+        if not self._is_apple_silicon():
+            return False, "gpu_not_supported_on_host"
+        if self.mlx_runtime_checked:
+            return self.mlx_runtime_available, self.mlx_runtime_reason
+
+        try:
+            import importlib
+
+            self.mlx_core = importlib.import_module("mlx.core")
+            self.mlx_whisper = importlib.import_module("mlx_whisper")
+            self.mlx_transcribe_module = importlib.import_module("mlx_whisper.transcribe")
+            self.mlx_runtime_available = True
+            self.mlx_runtime_reason = None
+        except Exception as error:
+            self.mlx_runtime_available = False
+            self.mlx_runtime_reason = "mlx_runtime_import_failed"
+            self.log(f"MLX runtime unavailable: {error}")
+            self.log(traceback.format_exc())
+        finally:
+            self.mlx_runtime_checked = True
+
+        return self.mlx_runtime_available, self.mlx_runtime_reason
+
+    def _disable_mlx_for_session(self, reason, error=None):
+        self.mlx_disabled_for_session = True
+        self.mlx_runtime_available = False
+        self.mlx_runtime_reason = "mlx_disabled_for_session"
+        self.log(f"MLX disabled for app session (reason={reason})")
+        if error is not None:
+            self.log(f"MLX error: {error}")
+            self.log(traceback.format_exc())
+
+    def _ensure_cpu_model(self):
+        if self.cpu_model is not None:
+            return self.cpu_model
+
+        def _load():
+            from faster_whisper import WhisperModel
+
+            self.log("Loading faster-whisper CPU model...")
+            model = WhisperModel(
+                DEFAULT_CPU_MODEL_ID,
+                device="cpu",
+                compute_type="int8",
+            )
+            self.log("CPU model loaded (backend=faster-whisper, device=cpu, compute_type=int8)")
+            return model
+
+        self.cpu_model = self._run_with_model_load_slot(_load)
+        return self.cpu_model
+
+    def _ensure_mlx_model(self):
+        available, reason = self._probe_mlx_runtime()
+        if not available:
+            raise RuntimeError(reason or "mlx runtime unavailable")
+        if self.mlx_model_loaded:
+            return
+
+        def _load():
+            self.log("Loading MLX Whisper model...")
+            self.mlx_transcribe_module.ModelHolder.get_model(
+                DEFAULT_MLX_MODEL_ID,
+                self.mlx_core.float16,
+            )
+            self.log(f"MLX model loaded (backend=mlx-whisper, model={DEFAULT_MLX_MODEL_ID})")
+
+        self._run_with_model_load_slot(_load)
+        self.mlx_model_loaded = True
+
+    def _transcribe_with_cpu(self, audio_path, language, quality_preset, initial_prompt):
+        model = self._ensure_cpu_model()
+        profile = build_cpu_decode_profile(quality_preset)
+        vad_parameters = build_vad_parameters(profile.vad_threshold or 0.5)
+        transcribe_kwargs = {
+            "audio": audio_path,
+            "language": language,
+            "task": DEFAULT_TASK,
+            "temperature": profile.temperature,
+            "beam_size": profile.beam_size,
+            "best_of": profile.best_of,
+            "word_timestamps": False,
+            "initial_prompt": initial_prompt,
+            "no_speech_threshold": DEFAULT_NO_SPEECH_THRESHOLD,
+            "compression_ratio_threshold": DEFAULT_COMPRESSION_RATIO_THRESHOLD,
+        }
+        self.log(
+            f"CPU transcription parameters: language={language}, preset={quality_preset}, beam_size={profile.beam_size}, best_of={profile.best_of}, vad_parameters={vad_parameters}, initial_prompt_present={initial_prompt is not None}"
+        )
+        segments, info = transcribe_with_vad_fallback(
+            model=model,
+            transcribe_kwargs=transcribe_kwargs,
+            vad_parameters=vad_parameters,
+            log=self.log,
+        )
+        text = " ".join(getattr(segment, "text", "") for segment in segments).strip()
+        detected_language = info.language if language is None else language
+        return text, detected_language
+
+    def _transcribe_with_mlx(self, audio_path, language, quality_preset, initial_prompt):
+        self._ensure_mlx_model()
+        profile = build_mlx_decode_profile(quality_preset)
+        kwargs = {
+            "language": language,
+            "task": DEFAULT_TASK,
+            "temperature": profile.temperature,
+            "word_timestamps": False,
+            "initial_prompt": initial_prompt,
+            "no_speech_threshold": DEFAULT_NO_SPEECH_THRESHOLD,
+            "compression_ratio_threshold": DEFAULT_COMPRESSION_RATIO_THRESHOLD,
+        }
+        self.log(
+            f"MLX transcription parameters: language={language}, preset={quality_preset}, temperature={profile.temperature}, initial_prompt_present={initial_prompt is not None}"
+        )
+        result = self.mlx_whisper.transcribe(
+            audio_path,
+            path_or_hf_repo=DEFAULT_MLX_MODEL_ID,
+            **kwargs,
+        )
+        text = str(result.get("text", "")).strip()
+        detected_language = result.get("language") if language is None else language
+        return text, detected_language
+
+    def transcribe(self, request, audio_path, initial_prompt):
+        gpu_available, reason = self._probe_mlx_runtime()
+        if not request.gpu_acceleration_enabled:
+            text, detected_language = self._transcribe_with_cpu(
+                audio_path,
+                request.language,
+                request.quality_preset,
+                initial_prompt,
+            )
+            return text, detected_language, BackendStatus(
+                effective_backend="cpu",
+                gpu_requested=False,
+                gpu_available=gpu_available,
+                fallback_reason="gpu_disabled_in_settings",
+            )
+
+        if not gpu_available:
+            text, detected_language = self._transcribe_with_cpu(
+                audio_path,
+                request.language,
+                request.quality_preset,
+                initial_prompt,
+            )
+            return text, detected_language, BackendStatus(
+                effective_backend="cpu",
+                gpu_requested=True,
+                gpu_available=False,
+                fallback_reason=reason,
+            )
+
+        try:
+            text, detected_language = self._transcribe_with_mlx(
+                audio_path,
+                request.language,
+                request.quality_preset,
+                initial_prompt,
+            )
+            return text, detected_language, BackendStatus(
+                effective_backend="mlx",
+                gpu_requested=True,
+                gpu_available=True,
+                fallback_reason=None,
+            )
+        except Exception as error:
+            fallback_reason = "mlx_model_load_failed"
+            if self.mlx_model_loaded:
+                fallback_reason = "mlx_transcription_failed"
+            self._disable_mlx_for_session(fallback_reason, error=error)
+            text, detected_language = self._transcribe_with_cpu(
+                audio_path,
+                request.language,
+                request.quality_preset,
+                initial_prompt,
+            )
+            return text, detected_language, BackendStatus(
+                effective_backend="cpu",
+                gpu_requested=True,
+                gpu_available=False,
+                fallback_reason=fallback_reason,
+            )
+
+
 def normalize_user_words(words):
     normalized = []
     seen = set()
@@ -804,48 +1207,14 @@ def main():
         log=log,
         cleanup=cleanup_server_state,
     )
-
-    wait_started = time.time()
-    while True:
-        acquired, loading_count = try_acquire_model_load_slot(
-            state_path=state_path,
-            lock_path=lock_path,
-            pid=current_pid,
-            max_parallel_model_loads=max_parallel_model_loads,
-        )
-        if acquired:
-            if loading_count > 1:
-                log(
-                    "Model load slot acquired after waiting "
-                    f"(parallel_loads={loading_count}, max={max_parallel_model_loads})"
-                )
-            break
-
-        elapsed = time.time() - wait_started
-        if elapsed >= model_load_wait_timeout:
-            log(
-                "Server startup aborted: timed out waiting for model-load slot "
-                f"(timeout={model_load_wait_timeout}s, max_parallel={max_parallel_model_loads})"
-            )
-            cleanup_server_state()
-            return
-
-        time.sleep(0.25)
-
-    log("Loading Whisper model...")
-
-    # faster-whisperのみを使用
-    from faster_whisper import WhisperModel
-
-    model = WhisperModel(
-        "large-v3-turbo",
-        device="cpu",
-        compute_type="int8",
+    backend_manager = BackendManager(
+        state_path=state_path,
+        lock_path=lock_path,
+        pid=current_pid,
+        max_parallel_model_loads=max_parallel_model_loads,
+        model_load_wait_timeout=model_load_wait_timeout,
+        log=log,
     )
-    release_model_load_slot(state_path=state_path, lock_path=lock_path, pid=current_pid)
-
-    log("Model loaded (device=cpu, compute_type=int8)")
-    log("Using faster-whisper backend")
 
     log("Waiting for input from stdin...")
     sys.stdout.flush()
@@ -857,80 +1226,49 @@ def main():
                 log("EOF reached, exiting")
                 break
 
-            parts = line.strip().split("|", 14)
-            audio_path = parts[0]
-            language = parts[1] if len(parts) > 1 else "auto"
-            temperature = float(parts[2]) if len(parts) > 2 else 0.0
-            beam_size = int(parts[3]) if len(parts) > 3 else 5
-            no_speech_threshold = float(parts[4]) if len(parts) > 4 else 0.6
-            compression_ratio_threshold = float(parts[5]) if len(parts) > 5 else 2.4
-            task = parts[6] if len(parts) > 6 else "transcribe"
-            best_of = int(parts[7]) if len(parts) > 7 else 5
-            vad_threshold = float(parts[8]) if len(parts) > 8 else 0.5
-            auto_punctuation = parse_bool(parts[9], default=True) if len(parts) > 9 else True
-            auto_gain_enabled = (
-                parse_optional_bool(parts[10]) if len(parts) > 10 else None
-            )
-            auto_gain_weak_threshold_dbfs = (
-                parse_optional_float(parts[11]) if len(parts) > 11 else None
-            )
-            auto_gain_target_peak_dbfs = (
-                parse_optional_float(parts[12]) if len(parts) > 12 else None
-            )
-            auto_gain_max_db = (
-                parse_optional_float(parts[13]) if len(parts) > 13 else None
-            )
-            screenshot_context_base64 = parts[14] if len(parts) > 14 else ""
-            screenshot_context = None
-            if screenshot_context_base64:
-                try:
-                    screenshot_context = base64.b64decode(screenshot_context_base64).decode("utf-8")
-                except Exception as decode_error:
-                    log(f"Failed to decode screenshot context: {decode_error}")
-            screenshot_context_base64 = ""
-
-            actual_language = None if language == "auto" else language
-            log(
-                f"Received: audio_path_len={len(audio_path)}, language={language}, actual_language={actual_language}, temp={temperature}, beam={beam_size}, "
-                f"no_speech_threshold={no_speech_threshold}, compression_ratio_threshold={compression_ratio_threshold}, "
-                f"task={task}, best_of={best_of}, vad_threshold={vad_threshold}, auto_punctuation={auto_punctuation}, "
-                f"auto_gain_enabled={auto_gain_enabled}, auto_gain_weak_threshold_dbfs={auto_gain_weak_threshold_dbfs}, "
-                f"auto_gain_target_peak_dbfs={auto_gain_target_peak_dbfs}, auto_gain_max_db={auto_gain_max_db}, "
-                f"screenshot_context_len={len(screenshot_context) if screenshot_context else 0}"
-            )
-
-            if not audio_path:
-                log("Empty audio path, skipping")
+            request_payload = parse_request_line(line)
+            if request_payload is None:
                 continue
-
-            if audio_path.startswith(HEALTHCHECK_REQUEST_PREFIX):
-                token = audio_path[len(HEALTHCHECK_REQUEST_PREFIX) :]
+            if request_payload["kind"] == "healthcheck":
+                token = request_payload["token"]
                 print(f"{HEALTHCHECK_RESPONSE_PREFIX}{token}", file=sys.stdout)
                 sys.stdout.flush()
                 log(f"Health check acknowledged (token={token})")
                 continue
 
-            if not os.path.exists(audio_path):
+            request = request_payload["request"]
+            log(
+                f"Received: audio_path_len={len(request.audio_path)}, language={request.language or 'auto'}, "
+                f"quality_preset={request.quality_preset}, gpu_acceleration_enabled={request.gpu_acceleration_enabled}, "
+                f"auto_punctuation={request.auto_punctuation}, screenshot_context_len={len(request.screenshot_context) if request.screenshot_context else 0}"
+            )
+
+            if not request.audio_path:
+                log("Empty audio path, skipping")
+                continue
+
+            if not os.path.exists(request.audio_path):
                 log("Error: input audio file not found")
                 print("", file=sys.stdout)
                 sys.stdout.flush()
                 continue
 
-            log(f"File exists, size: {os.path.getsize(audio_path)} bytes")
+            log(f"File exists, size: {os.path.getsize(request.audio_path)} bytes")
+            transcription_audio_path = request.audio_path
 
             processed_audio_path = audio_preprocess(
-                audio_path,
+                request.audio_path,
                 log,
-                auto_gain_enabled=auto_gain_enabled,
-                auto_gain_weak_threshold_dbfs=auto_gain_weak_threshold_dbfs,
-                auto_gain_target_peak_dbfs=auto_gain_target_peak_dbfs,
-                auto_gain_max_db=auto_gain_max_db,
+                auto_gain_enabled=DEFAULT_AUTO_GAIN_ENABLED,
+                auto_gain_weak_threshold_dbfs=DEFAULT_AUTO_GAIN_WEAK_THRESHOLD_DBFS,
+                auto_gain_target_peak_dbfs=DEFAULT_AUTO_GAIN_TARGET_PEAK_DBFS,
+                auto_gain_max_db=DEFAULT_AUTO_GAIN_MAX_DB,
             )
 
             try:
                 if (
                     os.path.exists(processed_audio_path)
-                    and processed_audio_path != audio_path
+                    and processed_audio_path != request.audio_path
                 ):
                     log(
                         f"Processed file size: {os.path.getsize(processed_audio_path)} bytes"
@@ -938,78 +1276,47 @@ def main():
                 transcription_audio_path = processed_audio_path
             except Exception as e:
                 log(f"Error checking processed file: {str(e)}, using original")
-                transcription_audio_path = audio_path
+                transcription_audio_path = request.audio_path
 
             user_words = load_user_dictionary(log=log)
             initial_prompt = generate_initial_prompt(
-                actual_language or language or "ja",
+                request.language or "auto",
                 use_context=True,
                 user_words=user_words,
-                screenshot_context=screenshot_context,
+                screenshot_context=request.screenshot_context,
             )
-            # OCR context is only used to build the prompt and should not linger in memory.
-            screenshot_context = None
 
             start_time = time.time()
-            vad_parameters = build_vad_parameters(vad_threshold)
-
             log("Starting transcription with Whisper...")
-            log(
-                f"Transcription parameters: audio_path_len={len(transcription_audio_path)}, language={actual_language}, task={task}, temperature={temperature}, beam_size={beam_size}, best_of={best_of}, vad_parameters={vad_parameters}, auto_punctuation={auto_punctuation}, initial_prompt_present={initial_prompt is not None}"
-            )
+            try:
+                transcription, detected_language, backend_status = backend_manager.transcribe(
+                    request=request,
+                    audio_path=transcription_audio_path,
+                    initial_prompt=initial_prompt,
+                )
+                elapsed_time = time.time() - start_time
+                log(
+                    f"Transcription completed in {elapsed_time:.2f} seconds (detected language: {detected_language}, backend={backend_status.effective_backend}, fallback_reason={backend_status.fallback_reason})"
+                )
+                log(f"Transcription length: {len(transcription)} characters")
 
-            transcribe_kwargs = {
-                "audio": transcription_audio_path,
-                "language": actual_language,
-                "task": task,
-                "temperature": temperature,
-                "beam_size": beam_size,
-                "best_of": best_of,
-                "word_timestamps": False,
-                "initial_prompt": initial_prompt,
-                "no_speech_threshold": no_speech_threshold,
-                "compression_ratio_threshold": compression_ratio_threshold,
-            }
+                transcription = post_process_text(
+                    transcription,
+                    detected_language,
+                    auto_punctuation=request.auto_punctuation,
+                )
+                log(f"Post-processed transcription length: {len(transcription)} characters")
 
-            segments, info = transcribe_with_vad_fallback(
-                model=model,
-                transcribe_kwargs=transcribe_kwargs,
-                vad_parameters=vad_parameters,
-                log=log,
-            )
-            transcribe_kwargs["initial_prompt"] = None
-            initial_prompt = None
-
-            detected_language = (
-                info.language if actual_language is None else actual_language
-            )
-            elapsed_time = time.time() - start_time
-            log(
-                f"Transcription completed in {elapsed_time:.2f} seconds (detected language: {detected_language})"
-            )
-
-            transcription = " ".join([segment.text for segment in segments]).strip()
-            log(f"Transcription length: {len(transcription)} characters")
-
-            transcription = post_process_text(
-                transcription,
-                detected_language,
-                auto_punctuation=auto_punctuation,
-            )
-            log(f"Post-processed transcription length: {len(transcription)} characters")
-
-            print(transcription, file=sys.stdout)
-            sys.stdout.flush()
-            log("Output flushed")
-
-            if transcription_audio_path != audio_path and os.path.exists(
-                transcription_audio_path
-            ):
-                try:
-                    os.remove(transcription_audio_path)
-                    log("Cleaned up temporary preprocessed file")
-                except Exception as e:
-                    log(f"Error removing temporary file: {str(e)}")
+                emit_backend_status(backend_status)
+                print(transcription, file=sys.stdout)
+                sys.stdout.flush()
+                log("Output flushed")
+            finally:
+                cleanup_transcription_audio_path(
+                    transcription_audio_path,
+                    request.audio_path,
+                    log,
+                )
 
         except Exception as e:
             log(f"Error: {str(e)}")

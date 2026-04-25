@@ -17,14 +17,22 @@ final class UserDictionaryManager: @unchecked Sendable {
         if let dictionaryURL {
             self.dictionaryURL = dictionaryURL
             let directoryURL = dictionaryURL.deletingLastPathComponent()
-            try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            try? LocalFileProtection.ensurePrivateDirectory(at: directoryURL, fileManager: fileManager)
+            try? LocalFileProtection.tightenFilePermissionsIfPresent(
+                at: dictionaryURL,
+                fileManager: fileManager
+            )
             return
         }
 
         let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let settingsDir = appSupportURL.appendingPathComponent("koto-type")
-        try? fileManager.createDirectory(at: settingsDir, withIntermediateDirectories: true)
+        try? LocalFileProtection.ensurePrivateDirectory(at: settingsDir, fileManager: fileManager)
         self.dictionaryURL = settingsDir.appendingPathComponent("user_dictionary.json")
+        try? LocalFileProtection.tightenFilePermissionsIfPresent(
+            at: self.dictionaryURL,
+            fileManager: fileManager
+        )
     }
 
     var path: String {
@@ -60,7 +68,7 @@ final class UserDictionaryManager: @unchecked Sendable {
 
         do {
             let data = try JSONEncoder().encode(payload)
-            try data.write(to: dictionaryURL)
+            try LocalFileProtection.writeProtectedData(data, to: dictionaryURL)
             Logger.shared.log("UserDictionaryManager.saveWords: saved \(normalized.count) words to \(dictionaryURL.path)")
         } catch {
             Logger.shared.log("UserDictionaryManager.saveWords: failed to save dictionary: \(error)", level: .error)

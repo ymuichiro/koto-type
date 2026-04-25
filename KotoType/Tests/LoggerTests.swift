@@ -80,4 +80,14 @@ final class LoggerTests: XCTestCase {
         
         XCTAssertTrue(true, "Emoji messages should be handled")
     }
+
+    func testLogFileUsesOwnerOnlyPermissions() throws {
+        let logger = Logger.shared
+        logger.log("permission check", level: .info)
+
+        let permissions = try XCTUnwrap(
+            (try FileManager.default.attributesOfItem(atPath: logger.logPath)[.posixPermissions]) as? NSNumber
+        )
+        XCTAssertEqual(permissions.intValue & 0o777, LocalFileProtection.filePermissions)
+    }
 }

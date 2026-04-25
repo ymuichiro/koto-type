@@ -118,34 +118,81 @@ final class KeystrokeSimulatorTests: XCTestCase {
 
     func testTypeTextPasteboardIntegration() throws {
         let expectation = XCTestExpectation(description: "Pasteboard integration should work")
-        
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString("Original clipboard value", forType: .string)
+
         let testText = "Pasteboard test content"
-        
+
         DispatchQueue.main.async {
             KeystrokeSimulator.typeText(testText)
-            
-            let pasteboard = NSPasteboard.general
-            let pasteboardContent = pasteboard.string(forType: .string)
-            
-            XCTAssertEqual(pasteboardContent, testText, "Pasteboard should contain the typed text")
-            
-            expectation.fulfill()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                let pasteboardContent = pasteboard.string(forType: .string)
+
+                XCTAssertEqual(
+                    pasteboardContent,
+                    "Original clipboard value",
+                    "Pasteboard should be restored after typing"
+                )
+
+                expectation.fulfill()
+            }
         }
-        
-        wait(for: [expectation], timeout: 1.0)
+
+        wait(for: [expectation], timeout: 2.0)
     }
 
     func testTypeTextConsecutiveCalls() throws {
-        let expectation = XCTestExpectation(description: "Consecutive typing calls should work")
-        
+        let expectation = XCTestExpectation(
+            description: "Consecutive typing calls should restore the original pasteboard"
+        )
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString("Original clipboard value", forType: .string)
+
         DispatchQueue.main.async {
             KeystrokeSimulator.typeText("First message")
             KeystrokeSimulator.typeText("Second message")
             KeystrokeSimulator.typeText("Third message")
-            
-            expectation.fulfill()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                XCTAssertEqual(
+                    pasteboard.string(forType: .string),
+                    "Original clipboard value",
+                    "Consecutive calls should preserve the original clipboard contents"
+                )
+                expectation.fulfill()
+            }
         }
-        
-        wait(for: [expectation], timeout: 1.0)
+
+        wait(for: [expectation], timeout: 2.0)
+    }
+
+    func testTypeTextDoesNotOverwriteExternalClipboardChangesDuringRestoreDelay() throws {
+        let expectation = XCTestExpectation(
+            description: "External clipboard changes should win over delayed restore"
+        )
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString("Original clipboard value", forType: .string)
+
+        DispatchQueue.main.async {
+            KeystrokeSimulator.typeText("Transient pasteboard value")
+            pasteboard.clearContents()
+            pasteboard.setString("External clipboard update", forType: .string)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                XCTAssertEqual(
+                    pasteboard.string(forType: .string),
+                    "External clipboard update",
+                    "Delayed restore should not clobber external clipboard changes"
+                )
+                expectation.fulfill()
+            }
+        }
+
+        wait(for: [expectation], timeout: 2.0)
     }
 }

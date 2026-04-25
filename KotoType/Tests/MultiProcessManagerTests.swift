@@ -269,6 +269,38 @@ final class MultiProcessManagerTests: XCTestCase {
         XCTAssertEqual(values[0], "sensitive screen context")
         XCTAssertTrue(values.dropFirst().allSatisfy { $0 == nil })
     }
+
+    func testBackendStatusControlMessageDoesNotCompleteSegment() {
+        let completion = expectation(description: "segment completes with transcript")
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            mock.onSend = { instance, _ in
+                instance.outputReceived?(
+                    PythonProcessManager.controlMessagePrefix
+                        + "{\"effectiveBackend\":\"cpu\",\"gpuRequested\":true,\"gpuAvailable\":false,\"fallbackReason\":\"mlx_runtime_import_failed\"}"
+                )
+                instance.outputReceived?("segment text")
+            }
+            return mock
+        }
+
+        manager.segmentComplete = { index, text in
+            if index == 31 {
+                XCTAssertEqual(text, "segment text")
+                completion.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/control.wav"),
+            index: 31,
+            settings: AppSettings()
+        )
+
+        wait(for: [completion], timeout: 2.0)
+    }
 }
 
 private final class MockMultiProcessPythonManager: PythonProcessManaging {
@@ -296,18 +328,9 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
     func sendInput(
         _ text: String,
         language: String,
-        temperature: Double,
-        beamSize: Int,
-        noSpeechThreshold: Double,
-        compressionRatioThreshold: Double,
-        task: String,
-        bestOf: Int,
-        vadThreshold: Double,
         autoPunctuation: Bool,
-        autoGainEnabled: Bool,
-        autoGainWeakThresholdDbfs: Double,
-        autoGainTargetPeakDbfs: Double,
-        autoGainMaxDb: Double,
+        qualityPreset: TranscriptionQualityPreset,
+        gpuAccelerationEnabled: Bool,
         screenshotContext: String?
     ) -> Bool {
         onSend?(self, text)

@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -17,6 +17,7 @@ help:
 	@echo ""
 	@echo "テスト:"
 	@echo "  make test-transcription - 音声前処理/文字起こし関連ユニットテスト"
+	@echo "  make test-backend-config - backend 選択/プリセット関連ユニットテスト"
 	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
 	@echo "  make test-benchmark - test-smoke-server の互換エイリアス"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
@@ -47,6 +48,10 @@ test-audio-preprocess:
 	@echo "音声前処理/文字起こし関連ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_audio_preprocess.py
 
+test-backend-config:
+	@echo "backend 選択/プリセット関連ユニットテストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_backend_configuration.py
+
 test-benchmark: test-smoke-server
 
 test-smoke-server:
@@ -57,17 +62,13 @@ test-user-dictionary:
 	@echo "辞書機能ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_user_dictionary.py
 
-test-all: test-audio-preprocess test-user-dictionary
+test-all: test-audio-preprocess test-backend-config test-user-dictionary
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 
 build-server:
 	@echo "Pythonサーバーバイナリをビルド中..."
-	uv run --extra dev pyinstaller --onefile --name whisper_server \
-	  --hidden-import=ctranslate2 \
-	  --hidden-import=faster_whisper \
-	  --collect-data=faster_whisper \
-	  $(SERVER_SCRIPT)
+	uv run --extra dev pyinstaller packaging/whisper_server-pyinstaller.spec --clean --noconfirm
 
 build-app:
 	@echo "Swiftアプリケーションをビルド中..."

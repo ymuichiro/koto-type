@@ -56,8 +56,9 @@ class SettingsWindowController: NSWindowController {
                     object: config
                 )
             },
-            onSettingsChanged: {
+            onSettingsChanged: { [weak self] in
                 Logger.shared.log("SettingsWindowController: onSettingsChanged called")
+                self?.onSettingsChanged?()
             },
             onImportAudioRequested: { [weak self] in
                 self?.onImportAudioRequested?()

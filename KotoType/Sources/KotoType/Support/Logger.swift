@@ -15,7 +15,11 @@ final class Logger {
         let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let logDir = appSupportURL.appendingPathComponent("koto-type")
         
-        try? fileManager.createDirectory(at: logDir, withIntermediateDirectories: true)
+        do {
+            try LocalFileProtection.ensurePrivateDirectory(at: logDir, fileManager: fileManager)
+        } catch {
+            print("Failed to prepare log directory: \(error)")
+        }
         
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
@@ -24,6 +28,14 @@ final class Logger {
         
         if !fileManager.fileExists(atPath: logFile.path) {
             fileManager.createFile(atPath: logFile.path, contents: nil)
+        }
+        do {
+            try LocalFileProtection.tightenFilePermissionsIfPresent(
+                at: logFile,
+                fileManager: fileManager
+            )
+        } catch {
+            print("Failed to tighten log file permissions: \(error)")
         }
         
         do {

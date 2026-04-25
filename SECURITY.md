@@ -59,7 +59,8 @@ Notes:
 
 - Transcription history is stored locally until the user clears it.
 - Logs are intended for troubleshooting and may contain operational metadata such as file paths, settings values, and stack traces.
-- Automatic text insertion currently uses pasteboard-based paste simulation. Transcribed text may briefly pass through the macOS pasteboard.
+- Persistent local files are written with owner-only POSIX permissions where supported.
+- Automatic text insertion uses pasteboard-based paste simulation and restores the previous clipboard contents immediately after pasting. Transcribed text may still pass briefly through the macOS pasteboard and may be observable by clipboard managers.
 
 ### Network Access
 

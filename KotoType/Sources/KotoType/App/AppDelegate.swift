@@ -78,6 +78,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let staleBatchFileMaxAge: TimeInterval = 6 * 60 * 60
     private let temporaryBatchCleanupInterval: TimeInterval = 10 * 60
     private let permissionResetService: PermissionResetService
+    private let defaultBatchInterval: Double = 10.0
+    private let defaultSilenceThreshold: Double = -40.0
+    private let defaultSilenceDuration: Double = 0.5
 
     init(permissionResetService: PermissionResetService = PermissionResetService()) {
         self.permissionResetService = permissionResetService
@@ -88,20 +91,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         requested: Int,
         bundlePath: String = Bundle.main.bundlePath
     ) -> Int {
-        let normalizedRequested = max(1, requested)
-        // Distribution app bundles are memory-sensitive during model boot.
-        // Keep one worker to avoid cascading restarts from concurrent model loads.
-        if bundlePath.hasSuffix(".app") {
-            return 1
-        }
-        return normalizedRequested
+        max(1, requested)
     }
 
     nonisolated static func backendServerLimits(
         requestedWorkers: Int,
         bundlePath: String = Bundle.main.bundlePath
     ) -> (maxActiveServers: Int, maxParallelModelLoads: Int) {
-        let workerCount = resolvedWorkerCount(requested: requestedWorkers, bundlePath: bundlePath)
+        let workerCount = resolvedWorkerCount(
+            requested: requestedWorkers,
+            bundlePath: bundlePath
+        )
         return (max(1, workerCount), 1)
     }
 
@@ -149,6 +149,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 "Application did finish launching: relaunch after automatic permission reset failed",
                 level: .warning
             )
+            PermissionResetStateManager.shared.clearResetAttempt()
         }
 
         if setupState.hasCompletedInitialSetup && report.canStartApplication {
@@ -212,6 +213,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.onShowHistoryRequested = { [weak self] in
             self?.historyWindowController?.showHistory()
         }
+        NotificationCenter.default.addObserver(
+            forName: .transcriptionBackendStatusChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, let status = notification.object as? TranscriptionBackendStatus else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.handleBackendStatusChanged(status)
+            }
+        }
         
         let scriptPath = BackendLocator.serverScriptPath()
         serverScriptPath = scriptPath
@@ -263,10 +276,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if let config = config {
                     Logger.shared.log("AppDelegate: Received hotkeyConfigurationChanged notification: \(config.description)")
                 }
-                let previousParallelism = self.currentSettings.parallelism
+                let previousGPUAccelerationEnabled = self.currentSettings.gpuAccelerationEnabled
                 self.currentSettings = SettingsManager.shared.load()
-                Logger.shared.log("AppDelegate: Reloaded settings - language=\(self.currentSettings.language), temp=\(self.currentSettings.temperature), beam=\(self.currentSettings.beamSize)")
-                if self.currentSettings.parallelism != previousParallelism {
+                Logger.shared.log(
+                    "AppDelegate: Reloaded settings - language=\(self.currentSettings.language), preset=\(self.currentSettings.transcriptionQualityPreset.rawValue), gpu=\(self.currentSettings.gpuAccelerationEnabled)"
+                )
+                if self.currentSettings.gpuAccelerationEnabled != previousGPUAccelerationEnabled {
                     self.pendingWorkerReconfigure = true
                     self.applyPendingWorkerReconfigureIfPossible()
                 }
@@ -292,9 +307,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Starting audio recording for session \(sessionID)...", level: .info)
 
         currentSettings = SettingsManager.shared.load()
-        realtimeRecorder?.batchInterval = currentSettings.batchInterval
-        realtimeRecorder?.silenceThreshold = Float(currentSettings.silenceThreshold)
-        realtimeRecorder?.silenceDuration = currentSettings.silenceDuration
+        realtimeRecorder?.batchInterval = defaultBatchInterval
+        realtimeRecorder?.silenceThreshold = Float(defaultSilenceThreshold)
+        realtimeRecorder?.silenceDuration = defaultSilenceDuration
         realtimeRecorder?.onInputLevelChanged = { [weak self] level in
             self?.recordingIndicatorWindow?.updateRecordingLevel(CGFloat(level))
         }
@@ -711,6 +726,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !serverScriptPath.isEmpty else { return }
 
         didSuspendRealtimeWorkersForImport = false
+        pendingWorkerReconfigure = false
         reinitializeRealtimeWorkers(force: true, reason: "resume after imported audio")
         applyPendingWorkerReconfigureIfPossible()
     }
@@ -728,7 +744,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !serverScriptPath.isEmpty else { return }
 
         currentSettings = SettingsManager.shared.load()
-        let requestedWorkerCount = currentSettings.parallelism
+        let requestedWorkerCount = preferredRealtimeWorkerCount()
         let bundleResolvedWorkerCount = Self.resolvedWorkerCount(requested: requestedWorkerCount)
         let effectiveWorkerCount = effectiveRealtimeWorkerCount(requested: requestedWorkerCount)
         let backendLimits = Self.backendServerLimits(requestedWorkers: effectiveWorkerCount)
@@ -737,12 +753,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if bundleResolvedWorkerCount != requestedWorkerCount {
-            Logger.shared.log(
-                "Worker count clamped from \(requestedWorkerCount) to \(bundleResolvedWorkerCount) for app-bundle execution",
-                level: .warning
-            )
-        }
         if let adaptiveWorkerCap, effectiveWorkerCount != bundleResolvedWorkerCount {
             Logger.shared.log(
                 "Worker count further limited by adaptive memory-pressure cap: \(bundleResolvedWorkerCount) -> \(effectiveWorkerCount) (cap=\(adaptiveWorkerCap))",
@@ -756,9 +766,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         multiProcessManager.initialize(count: effectiveWorkerCount, scriptPath: serverScriptPath)
         currentRealtimeWorkerCount = effectiveWorkerCount
         Logger.shared.log(
-            "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason)); backend limits activeServers=\(backendLimits.maxActiveServers), parallelModelLoads=\(backendLimits.maxParallelModelLoads)",
+            "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason)); backend=\(preferredRealtimeBackend().rawValue), backend limits activeServers=\(backendLimits.maxActiveServers), parallelModelLoads=\(backendLimits.maxParallelModelLoads)",
             level: .info
         )
+    }
+
+    private func preferredRealtimeBackend() -> EffectiveTranscriptionBackend {
+        TranscriptionRuntimeSupport.preferredBackend(
+            settings: currentSettings,
+            latestStatus: TranscriptionBackendStatusStore.shared.currentStatus
+        )
+    }
+
+    private func preferredRealtimeWorkerCount() -> Int {
+        preferredRealtimeBackend().defaultWorkerCount
+    }
+
+    private func handleBackendStatusChanged(_ status: TranscriptionBackendStatus) {
+        Logger.shared.log(
+            "AppDelegate: backend status changed - backend=\(status.effectiveBackend.rawValue), gpuRequested=\(status.gpuRequested), gpuAvailable=\(status.gpuAvailable), fallbackReason=\(status.fallbackReason ?? "none")",
+            level: .info
+        )
+
+        let preferredWorkerCount = status.effectiveBackend.defaultWorkerCount
+        if currentRealtimeWorkerCount != preferredWorkerCount {
+            pendingWorkerReconfigure = true
+            applyPendingWorkerReconfigureIfPossible()
+        }
     }
 
     private func setupMemoryPressureMonitoring() {
@@ -766,7 +800,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         memoryPressureSource = nil
 
         let source = DispatchSource.makeMemoryPressureSource(
-            eventMask: [.warning, .critical],
+            eventMask: [.normal, .warning, .critical],
             queue: DispatchQueue.global(qos: .utility)
         )
         source.setEventHandler(handler: Self.makeMainActorDispatchHandler(capture: { source.data.rawValue }) { [weak self] rawValue in
@@ -778,6 +812,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleMemoryPressureEvent(_ event: DispatchSource.MemoryPressureEvent) {
+        if event.contains(.normal) && !event.contains(.warning) && !event.contains(.critical) {
+            guard adaptiveWorkerCap != nil else {
+                return
+            }
+            adaptiveWorkerCap = nil
+            pendingWorkerReconfigure = true
+            Logger.shared.log(
+                "Memory pressure returned to normal; scheduling worker cap reset",
+                level: .info
+            )
+            applyPendingWorkerReconfigureIfPossible()
+            return
+        }
+
         guard event.contains(.warning) || event.contains(.critical) else {
             return
         }

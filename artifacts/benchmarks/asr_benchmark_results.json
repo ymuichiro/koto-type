@@ -1,0 +1,126 @@
+{
+  "host": {
+    "python": "3.13.7 (main, Sep  2 2025, 14:05:52) [Clang 20.1.4 ]",
+    "platform": "darwin",
+    "cwd": "/Users/you/github/ymuichiro/koto-type"
+  },
+  "common_transcribe_kwargs": {
+    "language": "ja",
+    "task": "transcribe",
+    "temperature": 0.0,
+    "word_timestamps": false
+  },
+  "faster_whisper_transcribe_kwargs": {
+    "language": "ja",
+    "task": "transcribe",
+    "temperature": 0.0,
+    "word_timestamps": false,
+    "beam_size": 1,
+    "best_of": 1
+  },
+  "warm_runs": 3,
+  "cases": [
+    {
+      "name": "short",
+      "rows": [
+        {
+          "label": "faster-whisper-large-v3-turbo-cpu-int8",
+          "backend": "faster-whisper",
+          "model_id": "large-v3-turbo",
+          "audio_path": "/Users/you/github/ymuichiro/koto-type/assets/audio/test_speech_ja.wav",
+          "audio_seconds": 3.0,
+          "load_seconds": 1.2806727080605924,
+          "cold_total_seconds": 5.401430666912347,
+          "warm_run_seconds": [
+            4.092309541068971,
+            4.097586625255644,
+            4.119105041958392
+          ],
+          "transcript_chars": 14,
+          "transcript_preview": "ご視聴ありがとうございました",
+          "warm_average_seconds": 4.103000402761002,
+          "warm_rtf": 1.367666800920334,
+          "cold_rtf": 1.8004768889707823
+        },
+        {
+          "label": "mlx-whisper-large-v3-turbo",
+          "backend": "mlx-whisper",
+          "model_id": "mlx-community/whisper-large-v3-turbo",
+          "audio_path": "/Users/you/github/ymuichiro/koto-type/assets/audio/test_speech_ja.wav",
+          "audio_seconds": 3.0,
+          "load_seconds": 0.9102951670065522,
+          "cold_total_seconds": 0.9102950422093272,
+          "warm_run_seconds": [
+            0.5196475000120699,
+            0.5173630411736667,
+            0.5171737079508603
+          ],
+          "transcript_chars": 14,
+          "transcript_preview": "ご視聴ありがとうございました",
+          "warm_average_seconds": 0.5180614163788656,
+          "warm_rtf": 0.1726871387929552,
+          "cold_rtf": 0.3034316807364424
+        },
+        {
+          "label": "mlx-whisper-large-v3-turbo-fp16",
+          "backend": "mlx-whisper",
+          "model_id": "mlx-community/whisper-large-v3-turbo-fp16",
+          "audio_path": "/Users/you/github/ymuichiro/koto-type/assets/audio/test_speech_ja.wav",
+          "audio_seconds": 3.0,
+          "error": "Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]\nFetching 5 files: 100%|██████████| 5/5 [00:00<00:00, 15768.06it/s]\nTraceback (most recent call last):\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 379, in <module>\n    main()\n    ~~~~^^\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 370, in main\n    run_prepare(model_config, args.audio_path)\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 217, in run_prepare\n    mlx_whisper_prepare(model_config, audio_path)\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 158, in mlx_whisper_prepare\n    mlx_whisper.transcribe(\n    ~~~~~~~~~~~~~~~~~~~~~~^\n        str(audio_path),\n        ^^^^^^^^^^^^^^^^\n        path_or_hf_repo=model_config[\"model_id\"],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        **COMMON_TRANSCRIBE_KWARGS,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/you/github/ymuichiro/koto-type/.venv/lib/python3.13/site-packages/mlx_whisper/transcribe.py\", line 147, in transcribe\n    model = ModelHolder.get_model(path_or_hf_repo, dtype)\n  File \"/Users/you/github/ymuichiro/koto-type/.venv/lib/python3.13/site-packages/mlx_whisper/transcribe.py\", line 57, in get_model\n    cls.model = load_model(model_path, dtype=dtype)\n                ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/you/github/ymuichiro/koto-type/.venv/lib/python3.13/site-packages/mlx_whisper/load_models.py\", line 32, in load_model\n    weights = mx.load(str(wf))\nValueError: [load_npz] Input must be a zip file or a file-like object that can be opened with zipfile.ZipFile"
+        }
+      ]
+    },
+    {
+      "name": "long",
+      "rows": [
+        {
+          "label": "faster-whisper-large-v3-turbo-cpu-int8",
+          "backend": "faster-whisper",
+          "model_id": "large-v3-turbo",
+          "audio_path": "/Users/you/github/ymuichiro/koto-type/assets/audio/test_speech_ja_300s.wav",
+          "audio_seconds": 300.0,
+          "load_seconds": 1.3345377906225622,
+          "cold_total_seconds": 46.674373290967196,
+          "warm_run_seconds": [
+            45.32679604226723,
+            45.64071954134852,
+            46.123481791932136
+          ],
+          "transcript_chars": 134,
+          "transcript_preview": "ご視聴ありがとうございました ご視聴ありがとうございました ご視聴ありがとうございました ご視聴ありがとうございました ご視聴ありがとうございました ご視聴ありがとうございました ご視聴ありがとうございました ご視聴ありがとうございました ",
+          "warm_average_seconds": 45.69699912518263,
+          "warm_rtf": 0.15232333041727542,
+          "cold_rtf": 0.15558124430322398
+        },
+        {
+          "label": "mlx-whisper-large-v3-turbo",
+          "backend": "mlx-whisper",
+          "model_id": "mlx-community/whisper-large-v3-turbo",
+          "audio_path": "/Users/you/github/ymuichiro/koto-type/assets/audio/test_speech_ja_300s.wav",
+          "audio_seconds": 300.0,
+          "load_seconds": 5.516808125190437,
+          "cold_total_seconds": 5.516807792242616,
+          "warm_run_seconds": [
+            5.213371250312775,
+            5.246377209201455,
+            5.244672583881766
+          ],
+          "transcript_chars": 126,
+          "transcript_preview": "ご視聴ありがとうございましたご視聴ありがとうございましたご視聴ありがとうございましたご視聴ありがとうございましたご視聴ありがとうございましたご視聴ありがとうございましたご視聴ありがとうございましたご視聴ありがとうございましたご視聴ありがとう",
+          "warm_average_seconds": 5.234807014465332,
+          "warm_rtf": 0.01744935671488444,
+          "cold_rtf": 0.018389359307475386
+        },
+        {
+          "label": "mlx-whisper-large-v3-turbo-fp16",
+          "backend": "mlx-whisper",
+          "model_id": "mlx-community/whisper-large-v3-turbo-fp16",
+          "audio_path": "/Users/you/github/ymuichiro/koto-type/assets/audio/test_speech_ja_300s.wav",
+          "audio_seconds": 300.0,
+          "error": "Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]\nFetching 5 files: 100%|██████████| 5/5 [00:00<00:00, 23696.63it/s]\nTraceback (most recent call last):\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 379, in <module>\n    main()\n    ~~~~^^\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 370, in main\n    run_prepare(model_config, args.audio_path)\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 217, in run_prepare\n    mlx_whisper_prepare(model_config, audio_path)\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/you/github/ymuichiro/koto-type/scripts/benchmark_asr_models.py\", line 158, in mlx_whisper_prepare\n    mlx_whisper.transcribe(\n    ~~~~~~~~~~~~~~~~~~~~~~^\n        str(audio_path),\n        ^^^^^^^^^^^^^^^^\n        path_or_hf_repo=model_config[\"model_id\"],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        **COMMON_TRANSCRIBE_KWARGS,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/you/github/ymuichiro/koto-type/.venv/lib/python3.13/site-packages/mlx_whisper/transcribe.py\", line 147, in transcribe\n    model = ModelHolder.get_model(path_or_hf_repo, dtype)\n  File \"/Users/you/github/ymuichiro/koto-type/.venv/lib/python3.13/site-packages/mlx_whisper/transcribe.py\", line 57, in get_model\n    cls.model = load_model(model_path, dtype=dtype)\n                ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/you/github/ymuichiro/koto-type/.venv/lib/python3.13/site-packages/mlx_whisper/load_models.py\", line 32, in load_model\n    weights = mx.load(str(wf))\nValueError: [load_npz] Input must be a zip file or a file-like object that can be opened with zipfile.ZipFile"
+        }
+      ]
+    }
+  ]
+}

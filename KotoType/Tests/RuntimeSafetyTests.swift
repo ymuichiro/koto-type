@@ -3,13 +3,13 @@ import XCTest
 @testable import KotoType
 
 final class RuntimeSafetyTests: XCTestCase {
-    func testResolvedWorkerCountClampsToOneForAppBundle() {
+    func testResolvedWorkerCountKeepsRequestedForAppBundle() {
         XCTAssertEqual(
             AppDelegate.resolvedWorkerCount(
                 requested: 4,
                 bundlePath: "/Applications/KotoType.app"
             ),
-            1
+            4
         )
     }
 
@@ -42,13 +42,67 @@ final class RuntimeSafetyTests: XCTestCase {
         XCTAssertEqual(limits.maxParallelModelLoads, 1)
     }
 
-    func testBackendServerLimitsClampToOneForAppBundle() {
+    func testBackendServerLimitsMatchRequestedWorkersForAppBundle() {
         let limits = AppDelegate.backendServerLimits(
             requestedWorkers: 4,
             bundlePath: "/Applications/KotoType.app"
         )
-        XCTAssertEqual(limits.maxActiveServers, 1)
+        XCTAssertEqual(limits.maxActiveServers, 4)
         XCTAssertEqual(limits.maxParallelModelLoads, 1)
+    }
+
+    func testEffectiveBackendDefaultWorkerCountsMatchPresetStrategy() {
+        XCTAssertEqual(EffectiveTranscriptionBackend.cpu.defaultWorkerCount, 2)
+        XCTAssertEqual(EffectiveTranscriptionBackend.mlx.defaultWorkerCount, 1)
+    }
+
+    func testSupportsGPUAccelerationRequiresAppleSiliconAndMetal() {
+        XCTAssertTrue(
+            TranscriptionRuntimeSupport.supportsGPUAcceleration(
+                isAppleSilicon: true,
+                hasMetalDevice: true
+            )
+        )
+        XCTAssertFalse(
+            TranscriptionRuntimeSupport.supportsGPUAcceleration(
+                isAppleSilicon: false,
+                hasMetalDevice: true
+            )
+        )
+        XCTAssertFalse(
+            TranscriptionRuntimeSupport.supportsGPUAcceleration(
+                isAppleSilicon: true,
+                hasMetalDevice: false
+            )
+        )
+    }
+
+    func testPreferredBackendUsesLatestStatusWhenToggleMatches() {
+        let settings = AppSettings(gpuAccelerationEnabled: true)
+        let latestStatus = TranscriptionBackendStatus(
+            effectiveBackend: .cpu,
+            gpuRequested: true,
+            gpuAvailable: false,
+            fallbackReason: "mlx_runtime_import_failed"
+        )
+
+        XCTAssertEqual(
+            TranscriptionRuntimeSupport.preferredBackend(
+                settings: settings,
+                latestStatus: latestStatus
+            ),
+            .cpu
+        )
+    }
+
+    func testPreferredBackendReturnsCPUWhenGPUIsDisabled() {
+        XCTAssertEqual(
+            TranscriptionRuntimeSupport.preferredBackend(
+                settings: AppSettings(gpuAccelerationEnabled: false),
+                latestStatus: nil
+            ),
+            .cpu
+        )
     }
 
     func testLaunchAtLoginManagementAllowsInstalledApplicationsBundle() {

@@ -35,6 +35,7 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!packaging/whisper_server-pyinstaller.spec
 
 # Installer logs
 pip-log.txt
@@ -193,6 +194,7 @@ test_integration.py
 features/*/tests/
 test_*.py
 !tests/python/test_audio_preprocess.py
+!tests/python/test_backend_configuration.py
 !tests/python/test_user_dictionary.py
 
 # End of https://www.toptal.com/developers/gitignore/api/python
@@ -212,3 +214,8 @@ test_*.py
 
 # Runtime artifact bundles
 artifacts/runtime/
+
+# Sparkle / release artifacts
+appcast.xml
+KotoType/appcast.xml
+*.key

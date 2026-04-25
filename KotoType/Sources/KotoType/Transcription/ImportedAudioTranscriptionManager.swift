@@ -16,18 +16,9 @@ protocol PythonProcessManaging: AnyObject {
     func sendInput(
         _ text: String,
         language: String,
-        temperature: Double,
-        beamSize: Int,
-        noSpeechThreshold: Double,
-        compressionRatioThreshold: Double,
-        task: String,
-        bestOf: Int,
-        vadThreshold: Double,
         autoPunctuation: Bool,
-        autoGainEnabled: Bool,
-        autoGainWeakThresholdDbfs: Double,
-        autoGainTargetPeakDbfs: Double,
-        autoGainMaxDb: Double,
+        qualityPreset: TranscriptionQualityPreset,
+        gpuAccelerationEnabled: Bool,
         screenshotContext: String?
     ) -> Bool
     func isRunning() -> Bool
@@ -100,18 +91,9 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
         let succeeded = processManager.sendInput(
             fileURL.path,
             language: settings.language,
-            temperature: settings.temperature,
-            beamSize: settings.beamSize,
-            noSpeechThreshold: settings.noSpeechThreshold,
-            compressionRatioThreshold: settings.compressionRatioThreshold,
-            task: settings.task,
-            bestOf: settings.bestOf,
-            vadThreshold: settings.vadThreshold,
             autoPunctuation: settings.autoPunctuation,
-            autoGainEnabled: settings.autoGainEnabled,
-            autoGainWeakThresholdDbfs: settings.autoGainWeakThresholdDbfs,
-            autoGainTargetPeakDbfs: settings.autoGainTargetPeakDbfs,
-            autoGainMaxDb: settings.autoGainMaxDb,
+            qualityPreset: settings.transcriptionQualityPreset,
+            gpuAccelerationEnabled: settings.gpuAccelerationEnabled,
             screenshotContext: nil
         )
 
@@ -121,6 +103,10 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
     }
 
     private func handleOutput(_ output: String) {
+        if let status = PythonProcessManager.parseBackendStatus(from: output) {
+            TranscriptionBackendStatusStore.publishFromAnyThread(status)
+            return
+        }
         finish(with: .success(output))
     }
 
