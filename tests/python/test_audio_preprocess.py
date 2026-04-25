@@ -2,16 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT / "python"))
-
-import whisper_server  # noqa: E402
+from python import whisper_server
 
 
 class AudioPreprocessTests(unittest.TestCase):
