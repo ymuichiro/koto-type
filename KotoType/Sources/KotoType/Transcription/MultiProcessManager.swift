@@ -195,18 +195,9 @@ final class MultiProcessManager: @unchecked Sendable {
         let sendSucceeded = manager.sendInput(
             assignedContext.url.path,
             language: assignedContext.settings.language,
-            temperature: assignedContext.settings.temperature,
-            beamSize: assignedContext.settings.beamSize,
-            noSpeechThreshold: assignedContext.settings.noSpeechThreshold,
-            compressionRatioThreshold: assignedContext.settings.compressionRatioThreshold,
-            task: assignedContext.settings.task,
-            bestOf: assignedContext.settings.bestOf,
-            vadThreshold: assignedContext.settings.vadThreshold,
             autoPunctuation: assignedContext.settings.autoPunctuation,
-            autoGainEnabled: assignedContext.settings.autoGainEnabled,
-            autoGainWeakThresholdDbfs: assignedContext.settings.autoGainWeakThresholdDbfs,
-            autoGainTargetPeakDbfs: assignedContext.settings.autoGainTargetPeakDbfs,
-            autoGainMaxDb: assignedContext.settings.autoGainMaxDb,
+            qualityPreset: assignedContext.settings.transcriptionQualityPreset,
+            gpuAccelerationEnabled: assignedContext.settings.gpuAccelerationEnabled,
             screenshotContext: screenshotContext
         )
 
@@ -240,6 +231,17 @@ final class MultiProcessManager: @unchecked Sendable {
                 level: .warning
             )
             recoverProcess(processIndex: processIndex)
+            return
+        }
+
+        if let status = PythonProcessManager.parseBackendStatus(from: output) {
+            lastHealthCheckAtByProcess[processIndex] = now
+            processLock.unlock()
+            TranscriptionBackendStatusStore.publishFromAnyThread(status)
+            Logger.shared.log(
+                "MultiProcessManager: backend status received from process \(processIndex): backend=\(status.effectiveBackend.rawValue), gpuRequested=\(status.gpuRequested), gpuAvailable=\(status.gpuAvailable), fallbackReason=\(status.fallbackReason ?? "none")",
+                level: .debug
+            )
             return
         }
 
@@ -703,7 +705,9 @@ final class MultiProcessManager: @unchecked Sendable {
                 continue
             }
 
-            let startedAt = processStartedAtByIndex[processIndex] ?? now
+            guard let startedAt = processStartedAtByIndex[processIndex] else {
+                continue
+            }
             guard now.timeIntervalSince(startedAt) >= healthCheckStartupGraceSeconds else {
                 continue
             }
@@ -780,18 +784,9 @@ final class MultiProcessManager: @unchecked Sendable {
         return manager.sendInput(
             request,
             language: "auto",
-            temperature: 0.0,
-            beamSize: 1,
-            noSpeechThreshold: 0.6,
-            compressionRatioThreshold: 2.4,
-            task: "transcribe",
-            bestOf: 1,
-            vadThreshold: 0.5,
             autoPunctuation: false,
-            autoGainEnabled: false,
-            autoGainWeakThresholdDbfs: -18.0,
-            autoGainTargetPeakDbfs: -10.0,
-            autoGainMaxDb: 18.0,
+            qualityPreset: .medium,
+            gpuAccelerationEnabled: false,
             screenshotContext: nil
         )
     }

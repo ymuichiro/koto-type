@@ -129,6 +129,23 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(buffer, "")
     }
 
+    func testParseBackendStatusDecodesControlMessage() {
+        let output =
+            PythonProcessManager.controlMessagePrefix
+            + "{\"effectiveBackend\":\"mlx\",\"gpuRequested\":true,\"gpuAvailable\":true}"
+
+        let status = PythonProcessManager.parseBackendStatus(from: output)
+
+        XCTAssertEqual(status?.effectiveBackend, .mlx)
+        XCTAssertEqual(status?.gpuRequested, true)
+        XCTAssertEqual(status?.gpuAvailable, true)
+        XCTAssertNil(status?.fallbackReason)
+    }
+
+    func testParseBackendStatusReturnsNilForTranscriptOutput() {
+        XCTAssertNil(PythonProcessManager.parseBackendStatus(from: "hello world"))
+    }
+
     func testRuntimeEnvironmentForAppBundleForcesBackendSafetyCaps() {
         let environment = PythonProcessManager.runtimeEnvironment(
             base: [
