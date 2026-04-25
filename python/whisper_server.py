@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from math import inf, log10
+from typing import Protocol, cast
 import wave
 
 HEALTHCHECK_REQUEST_PREFIX = "__KOTOTYPE_HEALTHCHECK__:"
@@ -30,6 +31,38 @@ DEFAULT_AUTO_GAIN_ENABLED = True
 DEFAULT_AUTO_GAIN_WEAK_THRESHOLD_DBFS = -18.0
 DEFAULT_AUTO_GAIN_TARGET_PEAK_DBFS = -10.0
 DEFAULT_AUTO_GAIN_MAX_DB = 18.0
+
+
+class MlxCoreModule(Protocol):
+    float16: object
+
+
+class MlxModelHolderProtocol(Protocol):
+    def get_model(self, path_or_hf_repo: str, dtype: object) -> object: ...
+
+
+class MlxTranscribeModule(Protocol):
+    ModelHolder: MlxModelHolderProtocol
+
+
+class MlxWhisperModule(Protocol):
+    def transcribe(
+        self,
+        audio: str,
+        *,
+        path_or_hf_repo: str,
+        verbose: bool | None = None,
+        temperature: float | tuple[float, ...] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+        compression_ratio_threshold: float | None = 2.4,
+        logprob_threshold: float | None = -1.0,
+        no_speech_threshold: float | None = 0.6,
+        condition_on_previous_text: bool = True,
+        initial_prompt: str | None = None,
+        word_timestamps: bool = False,
+        language: str | None = None,
+        task: str = "transcribe",
+        **decode_options,
+    ) -> dict[str, object]: ...
 
 
 def default_dictionary_path():
@@ -842,9 +875,9 @@ class BackendManager:
         self.model_load_wait_timeout = model_load_wait_timeout
         self.log = log
         self.cpu_model = None
-        self.mlx_whisper = None
-        self.mlx_transcribe_module = None
-        self.mlx_core = None
+        self.mlx_whisper: MlxWhisperModule | None = None
+        self.mlx_transcribe_module: MlxTranscribeModule | None = None
+        self.mlx_core: MlxCoreModule | None = None
         self.mlx_runtime_checked = False
         self.mlx_runtime_available = False
         self.mlx_runtime_reason = None
@@ -901,9 +934,11 @@ class BackendManager:
         try:
             import importlib
 
-            self.mlx_core = importlib.import_module("mlx.core")
-            self.mlx_whisper = importlib.import_module("mlx_whisper")
-            self.mlx_transcribe_module = importlib.import_module("mlx_whisper.transcribe")
+            self.mlx_core = cast(MlxCoreModule, importlib.import_module("mlx.core"))
+            self.mlx_whisper = cast(MlxWhisperModule, importlib.import_module("mlx_whisper"))
+            self.mlx_transcribe_module = cast(
+                MlxTranscribeModule, importlib.import_module("mlx_whisper.transcribe")
+            )
             self.mlx_runtime_available = True
             self.mlx_runtime_reason = None
         except Exception as error:
@@ -951,11 +986,16 @@ class BackendManager:
         if self.mlx_model_loaded:
             return
 
+        mlx_transcribe_module = self.mlx_transcribe_module
+        mlx_core = self.mlx_core
+        if mlx_transcribe_module is None or mlx_core is None:
+            raise RuntimeError("mlx runtime unavailable")
+
         def _load():
             self.log("Loading MLX Whisper model...")
-            self.mlx_transcribe_module.ModelHolder.get_model(
+            mlx_transcribe_module.ModelHolder.get_model(
                 DEFAULT_MLX_MODEL_ID,
-                self.mlx_core.float16,
+                mlx_core.float16,
             )
             self.log(f"MLX model loaded (backend=mlx-whisper, model={DEFAULT_MLX_MODEL_ID})")
 
@@ -994,22 +1034,22 @@ class BackendManager:
     def _transcribe_with_mlx(self, audio_path, language, quality_preset, initial_prompt):
         self._ensure_mlx_model()
         profile = build_mlx_decode_profile(quality_preset)
-        kwargs = {
-            "language": language,
-            "task": DEFAULT_TASK,
-            "temperature": profile.temperature,
-            "word_timestamps": False,
-            "initial_prompt": initial_prompt,
-            "no_speech_threshold": DEFAULT_NO_SPEECH_THRESHOLD,
-            "compression_ratio_threshold": DEFAULT_COMPRESSION_RATIO_THRESHOLD,
-        }
+        mlx_whisper = self.mlx_whisper
+        if mlx_whisper is None:
+            raise RuntimeError("mlx runtime unavailable")
         self.log(
             f"MLX transcription parameters: language={language}, preset={quality_preset}, temperature={profile.temperature}, initial_prompt_present={initial_prompt is not None}"
         )
-        result = self.mlx_whisper.transcribe(
+        result = mlx_whisper.transcribe(
             audio_path,
             path_or_hf_repo=DEFAULT_MLX_MODEL_ID,
-            **kwargs,
+            language=language,
+            task=DEFAULT_TASK,
+            temperature=profile.temperature,
+            word_timestamps=False,
+            initial_prompt=initial_prompt,
+            no_speech_threshold=DEFAULT_NO_SPEECH_THRESHOLD,
+            compression_ratio_threshold=DEFAULT_COMPRESSION_RATIO_THRESHOLD,
         )
         text = str(result.get("text", "")).strip()
         detected_language = result.get("language") if language is None else language
