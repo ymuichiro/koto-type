@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
+import tempfile
 from python import whisper_server
 
 
@@ -62,6 +63,26 @@ class ParseRequestLineTests(unittest.TestCase):
 
         self.assertIsNone(payload["request"].language)
 
+    def test_parse_request_line_decodes_backend_probe_request(self):
+        payload = whisper_server.parse_request_line(
+            '{"type":"backend_probe","gpu_acceleration_enabled":true,"preload_model":true}'
+        )
+
+        self.assertEqual(payload["kind"], "backend_probe")
+        request = payload["request"]
+        self.assertTrue(request.gpu_acceleration_enabled)
+        self.assertTrue(request.preload_model)
+
+    def test_parse_request_line_decodes_model_management_request(self):
+        payload = whisper_server.parse_request_line(
+            '{"type":"model_management","action":"download","model_kind":"mlx"}'
+        )
+
+        self.assertEqual(payload["kind"], "model_management")
+        request = payload["request"]
+        self.assertEqual(request.action, "download")
+        self.assertEqual(request.model_kind, "mlx")
+
 
 class FakeBackendManager(whisper_server.BackendManager):
     def __init__(
@@ -72,12 +93,16 @@ class FakeBackendManager(whisper_server.BackendManager):
         mlx_result=("mlx text", "ja"),
         mlx_error=None,
     ):
+        temp_root = tempfile.mkdtemp(prefix="kototype-backend-models-")
         super().__init__(
             state_path="/tmp/server_state.json",
             lock_path="/tmp/server_state.lock",
             pid=1234,
             max_parallel_model_loads=1,
             model_load_wait_timeout=1,
+            cpu_model_dir=f"{temp_root}/cpu",
+            mlx_model_dir=f"{temp_root}/mlx",
+            model_cache_dir=f"{temp_root}/cache",
             log=lambda _: None,
         )
         self.probe_result = probe_result
@@ -86,6 +111,8 @@ class FakeBackendManager(whisper_server.BackendManager):
         self.mlx_error = mlx_error
         self.cpu_calls = 0
         self.mlx_calls = 0
+        self.cpu_warmups = 0
+        self.mlx_warmups = 0
 
     def _probe_mlx_runtime(self):
         if self.mlx_disabled_for_session:
@@ -101,6 +128,27 @@ class FakeBackendManager(whisper_server.BackendManager):
         if self.mlx_error is not None:
             raise self.mlx_error
         return self.mlx_result
+
+    def _ensure_cpu_model(self):
+        self.cpu_warmups += 1
+        return object()
+
+    def _ensure_mlx_model(self):
+        self.mlx_warmups += 1
+        if self.mlx_error is not None:
+            raise self.mlx_error
+
+    def _download_cpu_model(self):
+        whisper_server.ensure_private_directory(self.cpu_model_dir)
+        for file_name in ("config.json", "model.bin", "tokenizer.json"):
+            with open(f"{self.cpu_model_dir}/{file_name}", "w", encoding="utf-8") as handle:
+                handle.write("ok")
+
+    def _download_mlx_model(self):
+        whisper_server.ensure_private_directory(self.mlx_model_dir)
+        for file_name in ("config.json", "weights.safetensors"):
+            with open(f"{self.mlx_model_dir}/{file_name}", "w", encoding="utf-8") as handle:
+                handle.write("ok")
 
 
 class BackendSelectionTests(unittest.TestCase):
@@ -198,6 +246,78 @@ class BackendSelectionTests(unittest.TestCase):
         self.assertEqual(second_status.fallback_reason, "mlx_disabled_for_session")
         self.assertEqual(manager.cpu_calls, 2)
         self.assertEqual(manager.mlx_calls, 1)
+
+    def test_probe_backend_status_reports_mlx_without_preload(self):
+        manager = FakeBackendManager(probe_result=(True, None))
+
+        status = manager.probe_backend_status(
+            gpu_acceleration_enabled=True,
+            preload_model=False,
+        )
+
+        self.assertEqual(status.effective_backend, "mlx")
+        self.assertEqual(manager.mlx_warmups, 0)
+        self.assertEqual(manager.cpu_warmups, 0)
+
+    def test_probe_backend_status_preloads_cpu_when_gpu_is_unavailable(self):
+        manager = FakeBackendManager(probe_result=(False, "mlx_runtime_import_failed"))
+
+        status = manager.probe_backend_status(
+            gpu_acceleration_enabled=True,
+            preload_model=True,
+        )
+
+        self.assertEqual(status.effective_backend, "cpu")
+        self.assertEqual(status.fallback_reason, "mlx_runtime_import_failed")
+        self.assertEqual(manager.cpu_warmups, 1)
+        self.assertEqual(manager.mlx_warmups, 0)
+
+    def test_probe_backend_status_falls_back_to_cpu_when_mlx_preload_fails(self):
+        manager = FakeBackendManager(
+            probe_result=(True, None),
+            mlx_error=RuntimeError("mlx preload failed"),
+        )
+
+        status = manager.probe_backend_status(
+            gpu_acceleration_enabled=True,
+            preload_model=True,
+        )
+
+        self.assertEqual(status.effective_backend, "cpu")
+        self.assertEqual(status.fallback_reason, "mlx_model_load_failed")
+        self.assertTrue(manager.mlx_disabled_for_session)
+        self.assertEqual(manager.mlx_warmups, 1)
+        self.assertEqual(manager.cpu_warmups, 1)
+
+    def test_managed_model_statuses_start_as_not_downloaded(self):
+        manager = FakeBackendManager()
+
+        statuses = manager.managed_model_statuses()
+
+        self.assertEqual([status.kind for status in statuses], ["cpu", "mlx"])
+        self.assertFalse(statuses[0].is_downloaded)
+        self.assertFalse(statuses[1].is_downloaded)
+
+    def test_download_managed_model_marks_cpu_model_as_downloaded(self):
+        manager = FakeBackendManager()
+
+        status = manager.download_managed_model("cpu")
+
+        self.assertEqual(status.kind, "cpu")
+        self.assertTrue(status.is_downloaded)
+        self.assertGreaterEqual(status.file_count, 3)
+        self.assertGreater(status.byte_count, 0)
+
+    def test_delete_managed_model_removes_downloaded_assets(self):
+        manager = FakeBackendManager()
+        manager.download_managed_model("mlx")
+
+        status = manager.delete_managed_model("mlx")
+
+        self.assertEqual(status.kind, "mlx")
+        self.assertFalse(status.is_downloaded)
+        self.assertEqual(status.file_count, 0)
+        self.assertEqual(status.byte_count, 0)
 
 
 if __name__ == "__main__":

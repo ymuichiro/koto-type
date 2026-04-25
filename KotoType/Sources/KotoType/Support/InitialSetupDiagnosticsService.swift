@@ -112,11 +112,20 @@ final class InitialSetupDiagnosticsService: @unchecked Sendable {
         )
 
         let ffmpegPath = runtime.findExecutable("ffmpeg")
+        let brewPath = runtime.findExecutable("brew")
+        let ffmpegDetail: String
+        if let ffmpegPath {
+            ffmpegDetail = "Detected: \(ffmpegPath)"
+        } else if let brewPath {
+            ffmpegDetail = "ffmpeg command not found. Homebrew detected at \(brewPath)."
+        } else {
+            ffmpegDetail = "ffmpeg command not found. KotoType can install Homebrew and FFmpeg automatically."
+        }
         items.append(
             InitialSetupCheckItem(
                 id: "ffmpeg",
                 title: "FFmpeg",
-                detail: ffmpegPath.map { "Detected: \($0)" } ?? "ffmpeg command not found",
+                detail: ffmpegDetail,
                 status: ffmpegPath == nil ? .failed : .passed,
                 required: true
             )

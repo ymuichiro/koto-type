@@ -3,11 +3,12 @@
 
 import atexit
 import json
-import os
 import multiprocessing
+import os
 import platform
 import re
 import signal
+import shutil
 import time
 import sys
 import threading
@@ -15,7 +16,7 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from math import inf, log10
+from math import inf, log10, sqrt
 from typing import Protocol, cast
 import wave
 
@@ -31,6 +32,11 @@ DEFAULT_AUTO_GAIN_ENABLED = True
 DEFAULT_AUTO_GAIN_WEAK_THRESHOLD_DBFS = -18.0
 DEFAULT_AUTO_GAIN_TARGET_PEAK_DBFS = -10.0
 DEFAULT_AUTO_GAIN_MAX_DB = 18.0
+DEFAULT_ACTIVITY_WINDOW_MS = 30
+DEFAULT_ACTIVITY_THRESHOLD_DBFS = -38.0
+DEFAULT_MIN_ACTIVE_AUDIO_SECONDS = 0.18
+DEFAULT_MIN_ACTIVE_AUDIO_RATIO = 0.12
+DEFAULT_MIN_AUDIO_DURATION_FOR_SKIP_SECONDS = 0.8
 
 
 class MlxCoreModule(Protocol):
@@ -69,8 +75,12 @@ def default_dictionary_path():
     return os.path.expanduser("~/Library/Application Support/koto-type/user_dictionary.json")
 
 
+def default_application_support_directory():
+    return os.path.expanduser("~/Library/Application Support/koto-type")
+
+
 def setup_logging():
-    log_dir = os.path.expanduser("~/Library/Application Support/koto-type")
+    log_dir = default_application_support_directory()
     os.makedirs(log_dir, mode=0o700, exist_ok=True)
     tighten_file_permissions(log_dir, mode=0o700)
 
@@ -90,11 +100,27 @@ def setup_logging():
 
 
 def default_server_state_path():
-    return os.path.expanduser("~/Library/Application Support/koto-type/server_state.json")
+    return os.path.join(default_application_support_directory(), "server_state.json")
 
 
 def default_server_state_lock_path():
-    return os.path.expanduser("~/Library/Application Support/koto-type/server_state.lock")
+    return os.path.join(default_application_support_directory(), "server_state.lock")
+
+
+def default_managed_models_root():
+    return os.path.join(default_application_support_directory(), "managed-models")
+
+
+def default_managed_cpu_model_path():
+    return os.path.join(default_managed_models_root(), "cpu-large-v3-turbo")
+
+
+def default_managed_mlx_model_path():
+    return os.path.join(default_managed_models_root(), "mlx-whisper-large-v3-turbo")
+
+
+def default_managed_model_cache_path():
+    return os.path.join(default_application_support_directory(), "model-cache")
 
 
 def parse_int(value, default):
@@ -361,6 +387,107 @@ def analyze_wav_peak_dbfs(wav_path):
     return 20.0 * log10(max_peak / 32767.0)
 
 
+def analyze_wav_activity(
+    wav_path,
+    window_ms=DEFAULT_ACTIVITY_WINDOW_MS,
+    activity_threshold_dbfs=DEFAULT_ACTIVITY_THRESHOLD_DBFS,
+):
+    max_peak = 0
+    active_windows = 0
+    total_windows = 0
+    total_samples = 0
+
+    with wave.open(wav_path, "rb") as wav_file:
+        sample_width = wav_file.getsampwidth()
+        channel_count = wav_file.getnchannels()
+        sample_rate = wav_file.getframerate()
+
+        if sample_width != 2:
+            raise ValueError(
+                f"Unsupported sample width for activity analysis: {sample_width * 8}-bit"
+            )
+
+        window_sample_count = max(1, int(sample_rate * max(window_ms, 5) / 1000))
+
+        while True:
+            frames = wav_file.readframes(window_sample_count)
+            if not frames:
+                break
+
+            frame_count = len(frames) // (sample_width * channel_count)
+            if frame_count <= 0:
+                continue
+
+            total_windows += 1
+            total_samples += frame_count
+            squared_sum = 0.0
+            window_peak = 0
+
+            for frame_index in range(frame_count):
+                offset = frame_index * sample_width * channel_count
+                sample_bytes = frames[offset : offset + sample_width]
+                sample_value = int.from_bytes(
+                    sample_bytes,
+                    byteorder="little",
+                    signed=True,
+                )
+                abs_sample = abs(sample_value)
+                if abs_sample > window_peak:
+                    window_peak = abs_sample
+                squared_sum += float(sample_value * sample_value)
+
+            if window_peak > max_peak:
+                max_peak = window_peak
+
+            rms = sqrt(squared_sum / frame_count) if frame_count > 0 else 0.0
+            if rms > 0:
+                rms_dbfs = 20.0 * log10(rms / 32767.0)
+                if rms_dbfs >= activity_threshold_dbfs:
+                    active_windows += 1
+
+    if total_samples <= 0:
+        return AudioActivityStats(
+            duration_seconds=0.0,
+            peak_dbfs=-inf,
+            active_duration_seconds=0.0,
+            active_ratio=0.0,
+            window_count=0,
+        )
+
+    duration_seconds = total_samples / sample_rate
+    peak_dbfs = -inf if max_peak <= 0 else 20.0 * log10(max_peak / 32767.0)
+    active_ratio = active_windows / total_windows if total_windows > 0 else 0.0
+    active_duration_seconds = active_windows * (window_sample_count / sample_rate)
+
+    return AudioActivityStats(
+        duration_seconds=duration_seconds,
+        peak_dbfs=peak_dbfs,
+        active_duration_seconds=active_duration_seconds,
+        active_ratio=active_ratio,
+        window_count=total_windows,
+    )
+
+
+def should_skip_transcription_for_low_activity(
+    activity_stats,
+    *,
+    min_audio_duration_for_skip_seconds=DEFAULT_MIN_AUDIO_DURATION_FOR_SKIP_SECONDS,
+    min_active_audio_seconds=DEFAULT_MIN_ACTIVE_AUDIO_SECONDS,
+    min_active_audio_ratio=DEFAULT_MIN_ACTIVE_AUDIO_RATIO,
+):
+    if activity_stats.duration_seconds <= 0:
+        return True
+    if activity_stats.peak_dbfs == -inf:
+        return True
+    if activity_stats.duration_seconds < min_audio_duration_for_skip_seconds:
+        return False
+    if activity_stats.active_duration_seconds >= min_active_audio_seconds:
+        return False
+    if activity_stats.active_ratio >= min_active_audio_ratio:
+        return False
+    return True
+
+
 def determine_gain_for_weak_audio(
     peak_dbfs,
     weak_threshold_dbfs=-18.0,
@@ -404,6 +531,48 @@ def tighten_file_permissions(path, mode=0o600):
         os.chmod(path, mode)
     except OSError:
         return
+
+
+def ensure_private_directory(path):
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    tighten_file_permissions(path, mode=0o700)
+
+
+def tighten_directory_tree_permissions(root_path):
+    if not root_path or not os.path.exists(root_path):
+        return
+
+    for current_root, directory_names, file_names in os.walk(root_path):
+        tighten_file_permissions(current_root, mode=0o700)
+        for directory_name in directory_names:
+            tighten_file_permissions(os.path.join(current_root, directory_name), mode=0o700)
+        for file_name in file_names:
+            tighten_file_permissions(os.path.join(current_root, file_name), mode=0o600)
+
+
+def directory_file_stats(path):
+    if not path or not os.path.exists(path):
+        return 0, 0
+
+    file_count = 0
+    byte_count = 0
+    for current_root, _, file_names in os.walk(path):
+        for file_name in file_names:
+            file_path = os.path.join(current_root, file_name)
+            if not os.path.isfile(file_path):
+                continue
+            file_count += 1
+            try:
+                byte_count += os.path.getsize(file_path)
+            except OSError:
+                continue
+    return file_count, byte_count
+
+
+def remove_directory_tree(path):
+    if not path or not os.path.exists(path):
+        return
+    shutil.rmtree(path)
 
 
 def cleanup_temporary_audio_files(paths, log):
@@ -777,6 +946,18 @@ class TranscriptionRequest:
 
 
 @dataclass(frozen=True)
+class BackendProbeRequest:
+    gpu_acceleration_enabled: bool
+    preload_model: bool = False
+
+
+@dataclass(frozen=True)
+class ModelManagementRequest:
+    action: str
+    model_kind: str | None = None
+
+
+@dataclass(frozen=True)
 class DecodeProfile:
     temperature: float | tuple[float, ...]
     beam_size: int | None = None
@@ -785,11 +966,31 @@ class DecodeProfile:
 
 
 @dataclass(frozen=True)
+class AudioActivityStats:
+    duration_seconds: float
+    peak_dbfs: float
+    active_duration_seconds: float
+    active_ratio: float
+    window_count: int
+
+
+@dataclass(frozen=True)
 class BackendStatus:
     effective_backend: str
     gpu_requested: bool
     gpu_available: bool
     fallback_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ManagedModelStatus:
+    kind: str
+    display_name: str
+    model_id: str
+    directory_path: str
+    is_downloaded: bool
+    file_count: int
+    byte_count: int
 
 
 def build_cpu_decode_profile(quality_preset):
@@ -812,6 +1013,20 @@ def build_mlx_decode_profile(quality_preset):
     return profiles[preset]
 
 
+def normalize_model_kind(value):
+    normalized = str(value or "").strip().lower()
+    if normalized in {"cpu", "mlx"}:
+        return normalized
+    raise ValueError(f"Unsupported model kind: {value}")
+
+
+def normalize_model_management_action(value):
+    normalized = str(value or "").strip().lower()
+    if normalized in {"status_all", "download", "delete"}:
+        return normalized
+    raise ValueError(f"Unsupported model management action: {value}")
+
+
 def emit_backend_status(status):
     payload = json.dumps(
         {
@@ -819,6 +1034,42 @@ def emit_backend_status(status):
             "gpuRequested": status.gpu_requested,
             "gpuAvailable": status.gpu_available,
             "fallbackReason": status.fallback_reason,
+        },
+        ensure_ascii=False,
+    )
+    print(f"{CONTROL_MESSAGE_PREFIX}{payload}", file=sys.stdout)
+    sys.stdout.flush()
+
+
+def serialize_managed_model_status(status):
+    return {
+        "kind": status.kind,
+        "displayName": status.display_name,
+        "modelID": status.model_id,
+        "directoryPath": status.directory_path,
+        "isDownloaded": status.is_downloaded,
+        "fileCount": status.file_count,
+        "byteCount": status.byte_count,
+    }
+
+
+def emit_managed_models(models):
+    payload = json.dumps(
+        {
+            "type": "managed_models",
+            "models": [serialize_managed_model_status(model) for model in models],
+        },
+        ensure_ascii=False,
+    )
+    print(f"{CONTROL_MESSAGE_PREFIX}{payload}", file=sys.stdout)
+    sys.stdout.flush()
+
+
+def emit_managed_model(model):
+    payload = json.dumps(
+        {
+            "type": "managed_model",
+            "model": serialize_managed_model_status(model),
         },
         ensure_ascii=False,
     )
@@ -834,8 +1085,29 @@ def parse_request_line(raw_line):
         return {"kind": "healthcheck", "token": stripped[len(HEALTHCHECK_REQUEST_PREFIX) :]}
 
     payload = json.loads(stripped)
-    if payload.get("type") != "transcription_request":
-        raise ValueError(f"Unsupported request type: {payload.get('type')}")
+    request_type = payload.get("type")
+    if request_type == "backend_probe":
+        return {
+            "kind": "backend_probe",
+            "request": BackendProbeRequest(
+                gpu_acceleration_enabled=parse_bool(
+                    payload.get("gpu_acceleration_enabled"), default=True
+                ),
+                preload_model=parse_bool(payload.get("preload_model"), default=False),
+            ),
+        }
+    if request_type == "model_management":
+        action = normalize_model_management_action(payload.get("action"))
+        model_kind = payload.get("model_kind")
+        return {
+            "kind": "model_management",
+            "request": ModelManagementRequest(
+                action=action,
+                model_kind=None if action == "status_all" else normalize_model_kind(model_kind),
+            ),
+        }
+    if request_type != "transcription_request":
+        raise ValueError(f"Unsupported request type: {request_type}")
 
     language = str(payload.get("language", "auto")).strip() or "auto"
     actual_language = None if language == "auto" else language
@@ -866,6 +1138,9 @@ class BackendManager:
         pid,
         max_parallel_model_loads,
         model_load_wait_timeout,
+        cpu_model_dir,
+        mlx_model_dir,
+        model_cache_dir,
         log,
     ):
         self.state_path = state_path
@@ -873,6 +1148,9 @@ class BackendManager:
         self.pid = pid
         self.max_parallel_model_loads = max_parallel_model_loads
         self.model_load_wait_timeout = model_load_wait_timeout
+        self.cpu_model_dir = cpu_model_dir
+        self.mlx_model_dir = mlx_model_dir
+        self.model_cache_dir = model_cache_dir
         self.log = log
         self.cpu_model = None
         self.mlx_whisper: MlxWhisperModule | None = None
@@ -883,6 +1161,97 @@ class BackendManager:
         self.mlx_runtime_reason = None
         self.mlx_disabled_for_session = False
         self.mlx_model_loaded = False
+
+    def _managed_model_status(self, model_kind):
+        normalized_kind = normalize_model_kind(model_kind)
+        if normalized_kind == "cpu":
+            directory_path = self.cpu_model_dir
+            is_downloaded = self._cpu_model_assets_exist()
+            display_name = "CPU model"
+            model_id = DEFAULT_CPU_MODEL_ID
+        else:
+            directory_path = self.mlx_model_dir
+            is_downloaded = self._mlx_model_assets_exist()
+            display_name = "MLX model"
+            model_id = DEFAULT_MLX_MODEL_ID
+
+        file_count, byte_count = directory_file_stats(directory_path)
+        return ManagedModelStatus(
+            kind=normalized_kind,
+            display_name=display_name,
+            model_id=model_id,
+            directory_path=directory_path,
+            is_downloaded=is_downloaded,
+            file_count=file_count,
+            byte_count=byte_count,
+        )
+
+    def managed_model_statuses(self):
+        return [
+            self._managed_model_status("cpu"),
+            self._managed_model_status("mlx"),
+        ]
+
+    def download_managed_model(self, model_kind):
+        normalized_kind = normalize_model_kind(model_kind)
+        if normalized_kind == "cpu":
+            self._download_cpu_model()
+        else:
+            self._download_mlx_model()
+        return self._managed_model_status(normalized_kind)
+
+    def delete_managed_model(self, model_kind):
+        normalized_kind = normalize_model_kind(model_kind)
+        if normalized_kind == "cpu":
+            self.cpu_model = None
+            remove_directory_tree(self.cpu_model_dir)
+        else:
+            self.mlx_model_loaded = False
+            remove_directory_tree(self.mlx_model_dir)
+        return self._managed_model_status(normalized_kind)
+
+    def _cpu_model_assets_exist(self):
+        config_path = os.path.join(self.cpu_model_dir, "config.json")
+        model_bin_path = os.path.join(self.cpu_model_dir, "model.bin")
+        tokenizer_path = os.path.join(self.cpu_model_dir, "tokenizer.json")
+        return (
+            os.path.isfile(config_path)
+            and os.path.isfile(model_bin_path)
+            and os.path.isfile(tokenizer_path)
+        )
+
+    def _mlx_model_assets_exist(self):
+        config_path = os.path.join(self.mlx_model_dir, "config.json")
+        safetensors_path = os.path.join(self.mlx_model_dir, "weights.safetensors")
+        npz_path = os.path.join(self.mlx_model_dir, "weights.npz")
+        return (
+            os.path.isfile(config_path)
+            and (os.path.isfile(safetensors_path) or os.path.isfile(npz_path))
+        )
+
+    def _download_cpu_model(self):
+        from faster_whisper import utils as faster_whisper_utils
+
+        ensure_private_directory(os.path.dirname(self.cpu_model_dir))
+        ensure_private_directory(self.model_cache_dir)
+        self.log(f"Downloading managed CPU model to {self.cpu_model_dir}")
+        faster_whisper_utils.download_model(
+            DEFAULT_CPU_MODEL_ID,
+            output_dir=self.cpu_model_dir,
+            cache_dir=self.model_cache_dir,
+        )
+        tighten_directory_tree_permissions(self.cpu_model_dir)
+
+    def _download_mlx_model(self):
+        from huggingface_hub import snapshot_download
+
+        ensure_private_directory(os.path.dirname(self.mlx_model_dir))
+        self.log(f"Downloading managed MLX model to {self.mlx_model_dir}")
+        snapshot_download(
+            repo_id=DEFAULT_MLX_MODEL_ID,
+            local_dir=self.mlx_model_dir,
+        )
+        tighten_directory_tree_permissions(self.mlx_model_dir)
 
     def _is_apple_silicon(self):
         return sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}
@@ -960,18 +1329,70 @@ class BackendManager:
             self.log(f"MLX error: {error}")
             self.log(traceback.format_exc())
 
+    def _status_for_gpu_request(self, gpu_acceleration_enabled):
+        gpu_available, reason = self._probe_mlx_runtime()
+        if not gpu_acceleration_enabled:
+            return BackendStatus(
+                effective_backend="cpu",
+                gpu_requested=False,
+                gpu_available=gpu_available,
+                fallback_reason="gpu_disabled_in_settings",
+            )
+        if not gpu_available:
+            return BackendStatus(
+                effective_backend="cpu",
+                gpu_requested=True,
+                gpu_available=False,
+                fallback_reason=reason,
+            )
+        return BackendStatus(
+            effective_backend="mlx",
+            gpu_requested=True,
+            gpu_available=True,
+            fallback_reason=None,
+        )
+
+    def probe_backend_status(self, gpu_acceleration_enabled, preload_model=False):
+        status = self._status_for_gpu_request(gpu_acceleration_enabled)
+        if not preload_model:
+            return status
+
+        if status.effective_backend == "mlx":
+            try:
+                self._ensure_mlx_model()
+                return status
+            except Exception as error:
+                fallback_reason = "mlx_model_load_failed"
+                if self.mlx_model_loaded:
+                    fallback_reason = "mlx_transcription_failed"
+                self._disable_mlx_for_session(fallback_reason, error=error)
+                self._ensure_cpu_model()
+                return BackendStatus(
+                    effective_backend="cpu",
+                    gpu_requested=True,
+                    gpu_available=False,
+                    fallback_reason=fallback_reason,
+                )
+
+        self._ensure_cpu_model()
+        return status
+
     def _ensure_cpu_model(self):
         if self.cpu_model is not None:
             return self.cpu_model
+
+        if not self._cpu_model_assets_exist():
+            self._download_cpu_model()
 
         def _load():
             from faster_whisper import WhisperModel
 
             self.log("Loading faster-whisper CPU model...")
             model = WhisperModel(
-                DEFAULT_CPU_MODEL_ID,
+                self.cpu_model_dir,
                 device="cpu",
                 compute_type="int8",
+                local_files_only=True,
             )
             self.log("CPU model loaded (backend=faster-whisper, device=cpu, compute_type=int8)")
             return model
@@ -990,11 +1411,13 @@ class BackendManager:
         mlx_core = self.mlx_core
         if mlx_transcribe_module is None or mlx_core is None:
             raise RuntimeError("mlx runtime unavailable")
+        if not self._mlx_model_assets_exist():
+            self._download_mlx_model()
 
         def _load():
             self.log("Loading MLX Whisper model...")
             mlx_transcribe_module.ModelHolder.get_model(
-                DEFAULT_MLX_MODEL_ID,
+                self.mlx_model_dir,
                 mlx_core.float16,
             )
             self.log(f"MLX model loaded (backend=mlx-whisper, model={DEFAULT_MLX_MODEL_ID})")
@@ -1042,7 +1465,7 @@ class BackendManager:
         )
         result = mlx_whisper.transcribe(
             audio_path,
-            path_or_hf_repo=DEFAULT_MLX_MODEL_ID,
+            path_or_hf_repo=self.mlx_model_dir,
             language=language,
             task=DEFAULT_TASK,
             temperature=profile.temperature,
@@ -1056,34 +1479,24 @@ class BackendManager:
         return text, detected_language
 
     def transcribe(self, request, audio_path, initial_prompt):
-        gpu_available, reason = self._probe_mlx_runtime()
-        if not request.gpu_acceleration_enabled:
+        status = self._status_for_gpu_request(request.gpu_acceleration_enabled)
+        if status.effective_backend == "cpu" and status.fallback_reason == "gpu_disabled_in_settings":
             text, detected_language = self._transcribe_with_cpu(
                 audio_path,
                 request.language,
                 request.quality_preset,
                 initial_prompt,
             )
-            return text, detected_language, BackendStatus(
-                effective_backend="cpu",
-                gpu_requested=False,
-                gpu_available=gpu_available,
-                fallback_reason="gpu_disabled_in_settings",
-            )
+            return text, detected_language, status
 
-        if not gpu_available:
+        if status.effective_backend == "cpu":
             text, detected_language = self._transcribe_with_cpu(
                 audio_path,
                 request.language,
                 request.quality_preset,
                 initial_prompt,
             )
-            return text, detected_language, BackendStatus(
-                effective_backend="cpu",
-                gpu_requested=True,
-                gpu_available=False,
-                fallback_reason=reason,
-            )
+            return text, detected_language, status
 
         try:
             text, detected_language = self._transcribe_with_mlx(
@@ -1092,12 +1505,7 @@ class BackendManager:
                 request.quality_preset,
                 initial_prompt,
             )
-            return text, detected_language, BackendStatus(
-                effective_backend="mlx",
-                gpu_requested=True,
-                gpu_available=True,
-                fallback_reason=None,
-            )
+            return text, detected_language, status
         except Exception as error:
             fallback_reason = "mlx_model_load_failed"
             if self.mlx_model_loaded:
@@ -1207,6 +1615,9 @@ def main():
 
     state_path = default_server_state_path()
     lock_path = default_server_state_lock_path()
+    cpu_model_dir = os.environ.get("KOTOTYPE_CPU_MODEL_DIR", default_managed_cpu_model_path())
+    mlx_model_dir = os.environ.get("KOTOTYPE_MLX_MODEL_DIR", default_managed_mlx_model_path())
+    model_cache_dir = os.environ.get("KOTOTYPE_MODEL_CACHE_DIR", default_managed_model_cache_path())
     current_pid = os.getpid()
     parent_pid = parse_int(os.environ.get("KOTOTYPE_PARENT_PID"), 0)
     max_active_servers = max(1, parse_int(os.environ.get("KOTOTYPE_MAX_ACTIVE_SERVERS"), 1))
@@ -1253,6 +1664,9 @@ def main():
         pid=current_pid,
         max_parallel_model_loads=max_parallel_model_loads,
         model_load_wait_timeout=model_load_wait_timeout,
+        cpu_model_dir=cpu_model_dir,
+        mlx_model_dir=mlx_model_dir,
+        model_cache_dir=model_cache_dir,
         log=log,
     )
 
@@ -1274,6 +1688,36 @@ def main():
                 print(f"{HEALTHCHECK_RESPONSE_PREFIX}{token}", file=sys.stdout)
                 sys.stdout.flush()
                 log(f"Health check acknowledged (token={token})")
+                continue
+            if request_payload["kind"] == "backend_probe":
+                request = request_payload["request"]
+                log(
+                    "Received backend probe: "
+                    f"gpu_acceleration_enabled={request.gpu_acceleration_enabled}, "
+                    f"preload_model={request.preload_model}"
+                )
+                status = backend_manager.probe_backend_status(
+                    gpu_acceleration_enabled=request.gpu_acceleration_enabled,
+                    preload_model=request.preload_model,
+                )
+                emit_backend_status(status)
+                continue
+            if request_payload["kind"] == "model_management":
+                request = request_payload["request"]
+                log(
+                    "Received model management request: "
+                    f"action={request.action}, model_kind={request.model_kind or 'all'}"
+                )
+                if request.action == "status_all":
+                    emit_managed_models(backend_manager.managed_model_statuses())
+                elif request.action == "download":
+                    emit_managed_model(
+                        backend_manager.download_managed_model(request.model_kind)
+                    )
+                elif request.action == "delete":
+                    emit_managed_model(
+                        backend_manager.delete_managed_model(request.model_kind)
+                    )
                 continue
 
             request = request_payload["request"]
@@ -1317,6 +1761,31 @@ def main():
             except Exception as e:
                 log(f"Error checking processed file: {str(e)}, using original")
                 transcription_audio_path = request.audio_path
+
+            try:
+                activity_stats = analyze_wav_activity(transcription_audio_path)
+                log(
+                    "Audio activity analysis: "
+                    f"duration={activity_stats.duration_seconds:.2f}s, "
+                    f"peak={activity_stats.peak_dbfs:.2f} dBFS, "
+                    f"active_duration={activity_stats.active_duration_seconds:.2f}s, "
+                    f"active_ratio={activity_stats.active_ratio:.2f}, "
+                    f"windows={activity_stats.window_count}"
+                )
+                if should_skip_transcription_for_low_activity(activity_stats):
+                    backend_status = backend_manager._status_for_gpu_request(
+                        request.gpu_acceleration_enabled
+                    )
+                    log(
+                        "Skipping transcription because audio activity is too low "
+                        "for a reliable result"
+                    )
+                    emit_backend_status(backend_status)
+                    print("", file=sys.stdout)
+                    sys.stdout.flush()
+                    continue
+            except Exception as activity_error:
+                log(f"Audio activity analysis failed: {activity_error}")
 
             user_words = load_user_dictionary(log=log)
             initial_prompt = generate_initial_prompt(

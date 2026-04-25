@@ -144,52 +144,69 @@ final class PythonProcessManager: @unchecked Sendable {
         gpuAccelerationEnabled: Bool = true,
         screenshotContext: String? = nil
     ) -> Bool {
-        let input: String
         if text.hasPrefix(Self.healthCheckRequestPrefix) {
-            input = text
-        } else {
-            var payload: [String: Any] = [
-                "type": "transcription_request",
-                "audio_path": text,
-                "language": language,
-                "auto_punctuation": autoPunctuation,
-                "quality_preset": qualityPreset.rawValue,
-                "gpu_acceleration_enabled": gpuAccelerationEnabled,
-            ]
-            if let screenshotContext {
-                payload["screenshot_context"] = screenshotContext
-            }
+            return sendLine(text)
+        }
 
-            guard JSONSerialization.isValidJSONObject(payload),
-                let data = try? JSONSerialization.data(withJSONObject: payload),
-                let jsonString = String(data: data, encoding: .utf8)
-            else {
-                Logger.shared.log("Failed to encode transcription request payload", level: .error)
-                return false
-            }
-            input = jsonString
+        var payload: [String: Any] = [
+            "type": "transcription_request",
+            "audio_path": text,
+            "language": language,
+            "auto_punctuation": autoPunctuation,
+            "quality_preset": qualityPreset.rawValue,
+            "gpu_acceleration_enabled": gpuAccelerationEnabled,
+        ]
+        if let screenshotContext {
+            payload["screenshot_context"] = screenshotContext
+        }
+        guard let input = Self.encodeJSONPayload(payload) else {
+            Logger.shared.log("Failed to encode transcription request payload", level: .error)
+            return false
         }
         Logger.shared.log(
             "Sending input to Python: audioPathLength=\(text.count), language=\(language), qualityPreset=\(qualityPreset.rawValue), gpuEnabled=\(gpuAccelerationEnabled), screenshotContextLength=\(screenshotContext?.count ?? 0)",
             level: .debug
         )
-        guard let process = process, process.isRunning else {
-            Logger.shared.log("Cannot send input: Python process is not running", level: .error)
-            return false
-        }
-        guard let data = (input + "\n").data(using: .utf8) else {
-            Logger.shared.log("Failed to encode input text", level: .error)
-            return false
-        }
+        return sendLine(input)
+    }
 
-        do {
-            try inputPipe?.fileHandleForWriting.write(contentsOf: data)
-            Logger.shared.log("Input sent to Python successfully", level: .debug)
-            return true
-        } catch {
-            Logger.shared.log("Failed to send input to Python: \(error)", level: .error)
+    func sendBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool {
+        let payload: [String: Any] = [
+            "type": "backend_probe",
+            "gpu_acceleration_enabled": gpuAccelerationEnabled,
+            "preload_model": preloadModel,
+        ]
+        guard let input = Self.encodeJSONPayload(payload) else {
+            Logger.shared.log("Failed to encode backend probe payload", level: .error)
             return false
         }
+        Logger.shared.log(
+            "Sending backend probe: gpuEnabled=\(gpuAccelerationEnabled), preloadModel=\(preloadModel)",
+            level: .debug
+        )
+        return sendLine(input)
+    }
+
+    func sendModelManagement(
+        action: ManagedTranscriptionModelAction,
+        modelKind: ManagedTranscriptionModelKind? = nil
+    ) -> Bool {
+        var payload: [String: Any] = [
+            "type": "model_management",
+            "action": action.rawValue,
+        ]
+        if let modelKind {
+            payload["model_kind"] = modelKind.rawValue
+        }
+        guard let input = Self.encodeJSONPayload(payload) else {
+            Logger.shared.log("Failed to encode model management payload", level: .error)
+            return false
+        }
+        Logger.shared.log(
+            "Sending model management request: action=\(action.rawValue), modelKind=\(modelKind?.rawValue ?? "all")",
+            level: .debug
+        )
+        return sendLine(input)
     }
     
     func isRunning() -> Bool {
@@ -299,6 +316,61 @@ final class PythonProcessManager: @unchecked Sendable {
         return try? JSONDecoder().decode(TranscriptionBackendStatus.self, from: data)
     }
 
+    static func parseManagedModelsResponse(from output: String) -> ManagedTranscriptionModelsResponse? {
+        guard output.hasPrefix(controlMessagePrefix) else {
+            return nil
+        }
+
+        let payload = String(output.dropFirst(controlMessagePrefix.count))
+        guard let data = payload.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(ManagedTranscriptionModelsResponse.self, from: data)
+    }
+
+    static func parseManagedModelResponse(from output: String) -> ManagedTranscriptionModelResponse? {
+        guard output.hasPrefix(controlMessagePrefix) else {
+            return nil
+        }
+
+        let payload = String(output.dropFirst(controlMessagePrefix.count))
+        guard let data = payload.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(ManagedTranscriptionModelResponse.self, from: data)
+    }
+
+    private func sendLine(_ input: String) -> Bool {
+        guard let process = process, process.isRunning else {
+            Logger.shared.log("Cannot send input: Python process is not running", level: .error)
+            return false
+        }
+        guard let data = (input + "\n").data(using: .utf8) else {
+            Logger.shared.log("Failed to encode input text", level: .error)
+            return false
+        }
+
+        do {
+            try inputPipe?.fileHandleForWriting.write(contentsOf: data)
+            Logger.shared.log("Input sent to Python successfully", level: .debug)
+            return true
+        } catch {
+            Logger.shared.log("Failed to send input to Python: \(error)", level: .error)
+            return false
+        }
+    }
+
+    private static func encodeJSONPayload(_ payload: [String: Any]) -> String? {
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return jsonString
+    }
+
     static func descendantProcessIdentifiers(rootPID: Int32, psOutput: String) -> [Int32] {
         var childrenByParent: [Int32: [Int32]] = [:]
 
@@ -379,6 +451,7 @@ extension PythonProcessManager.Runtime {
 extension PythonProcessManager {
     static func runtimeEnvironment(base: [String: String], bundlePath: String) -> [String: String] {
         var environment = base
+        environment.merge(KotoTypeStoragePaths.managedModelEnvironment()) { _, new in new }
         if bundlePath.hasSuffix(".app") {
             // Distribution runtime safety: never allow multi-server / multi-load overrides.
             environment["KOTOTYPE_MAX_ACTIVE_SERVERS"] = "1"

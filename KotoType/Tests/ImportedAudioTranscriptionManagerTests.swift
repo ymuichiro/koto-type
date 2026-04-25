@@ -146,12 +146,15 @@ private final class MockPythonProcessManager: PythonProcessManaging {
     private(set) var startCallCount = 0
     private(set) var sendInputCallCount = 0
     private(set) var stopCallCount = 0
+    private(set) var sendBackendProbeCallCount = 0
     private(set) var lastInputText: String?
     private(set) var lastLanguage: String?
     private(set) var lastAutoPunctuation: Bool?
     private(set) var lastQualityPreset: TranscriptionQualityPreset?
     private(set) var lastGPUAccelerationEnabled: Bool?
     private(set) var lastScreenshotContext: String?
+    private(set) var lastProbeGPUAccelerationEnabled: Bool?
+    private(set) var lastProbePreloadModel: Bool?
 
     var running = false
 
@@ -180,6 +183,13 @@ private final class MockPythonProcessManager: PythonProcessManaging {
 
     func isRunning() -> Bool {
         running
+    }
+
+    func sendBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool {
+        sendBackendProbeCallCount += 1
+        lastProbeGPUAccelerationEnabled = gpuAccelerationEnabled
+        lastProbePreloadModel = preloadModel
+        return true
     }
 
     func stop() {

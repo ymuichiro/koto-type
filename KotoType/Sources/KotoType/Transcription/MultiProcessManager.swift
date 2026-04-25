@@ -5,6 +5,7 @@ final class MultiProcessManager: @unchecked Sendable {
     private var idleProcesses: Set<Int> = []
     private var segmentContextByProcess: [Int: SegmentContext] = [:]
     private var healthCheckContextByProcess: [Int: HealthCheckContext] = [:]
+    private var backendProbeContextByProcess: [Int: BackendProbeContext] = [:]
     private var lastHealthCheckAtByProcess: [Int: Date] = [:]
     private var processStartedAtByIndex: [Int: Date] = [:]
     private var recoveryInProgress: Set<Int> = []
@@ -81,6 +82,7 @@ final class MultiProcessManager: @unchecked Sendable {
         self.idleProcesses.removeAll()
         self.segmentContextByProcess.removeAll()
         self.healthCheckContextByProcess.removeAll()
+        self.backendProbeContextByProcess.removeAll()
         self.lastHealthCheckAtByProcess.removeAll()
         self.processStartedAtByIndex.removeAll()
         self.healthCheckSequence = 0
@@ -116,7 +118,7 @@ final class MultiProcessManager: @unchecked Sendable {
             Logger.shared.log("MultiProcessManager: ignoring processFile because manager is stopping", level: .warning)
             return
         }
-        let availableProcess = idleProcesses.first
+        let availableProcess = preferredIdleProcessIndex()
         let processCount = processes.count
         processLock.unlock()
         
@@ -172,6 +174,7 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.lock()
         idleProcesses.remove(processIndex)
         healthCheckContextByProcess.removeValue(forKey: processIndex)
+        backendProbeContextByProcess.removeValue(forKey: processIndex)
         segmentContextByProcess[processIndex] = assignedContext
         processLock.unlock()
         
@@ -234,6 +237,26 @@ final class MultiProcessManager: @unchecked Sendable {
             return
         }
 
+        if backendProbeContextByProcess.removeValue(forKey: processIndex) != nil {
+            idleProcesses.insert(processIndex)
+            lastHealthCheckAtByProcess[processIndex] = now
+            processLock.unlock()
+            guard let status = PythonProcessManager.parseBackendStatus(from: output) else {
+                Logger.shared.log(
+                    "MultiProcessManager: invalid backend probe response from process \(processIndex) (length=\(output.count))",
+                    level: .warning
+                )
+                recoverProcess(processIndex: processIndex)
+                return
+            }
+            TranscriptionBackendStatusStore.publishFromAnyThread(status)
+            Logger.shared.log(
+                "MultiProcessManager: backend probe completed for process \(processIndex): backend=\(status.effectiveBackend.rawValue), gpuRequested=\(status.gpuRequested), gpuAvailable=\(status.gpuAvailable), fallbackReason=\(status.fallbackReason ?? "none")",
+                level: .debug
+            )
+            return
+        }
+
         if let status = PythonProcessManager.parseBackendStatus(from: output) {
             lastHealthCheckAtByProcess[processIndex] = now
             processLock.unlock()
@@ -271,6 +294,7 @@ final class MultiProcessManager: @unchecked Sendable {
         let shouldHandle = !isStopping && processes[processIndex] != nil
         let context = segmentContextByProcess[processIndex]
         healthCheckContextByProcess.removeValue(forKey: processIndex)
+        backendProbeContextByProcess.removeValue(forKey: processIndex)
         processStartedAtByIndex.removeValue(forKey: processIndex)
         lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         if context == nil {
@@ -311,6 +335,7 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.lock()
         segmentContextByProcess.removeValue(forKey: processIndex)
         healthCheckContextByProcess.removeValue(forKey: processIndex)
+        backendProbeContextByProcess.removeValue(forKey: processIndex)
         processStartedAtByIndex.removeValue(forKey: processIndex)
         lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         processLock.unlock()
@@ -328,6 +353,7 @@ final class MultiProcessManager: @unchecked Sendable {
         idleProcesses.remove(processIndex)
         segmentContextByProcess.removeValue(forKey: processIndex)
         healthCheckContextByProcess.removeValue(forKey: processIndex)
+        backendProbeContextByProcess.removeValue(forKey: processIndex)
         processStartedAtByIndex.removeValue(forKey: processIndex)
         lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         recoverySuppressedUntil[processIndex] = now.addingTimeInterval(fatalIdleTerminationCooldownSeconds)
@@ -432,6 +458,7 @@ final class MultiProcessManager: @unchecked Sendable {
             idleProcesses.remove(processIndex)
             segmentContextByProcess.removeValue(forKey: processIndex)
             healthCheckContextByProcess.removeValue(forKey: processIndex)
+            backendProbeContextByProcess.removeValue(forKey: processIndex)
             processStartedAtByIndex.removeValue(forKey: processIndex)
             lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
             processLock.unlock()
@@ -463,6 +490,7 @@ final class MultiProcessManager: @unchecked Sendable {
         idleProcesses.remove(processIndex)
         segmentContextByProcess.removeValue(forKey: processIndex)
         healthCheckContextByProcess.removeValue(forKey: processIndex)
+        backendProbeContextByProcess.removeValue(forKey: processIndex)
         processStartedAtByIndex.removeValue(forKey: processIndex)
         lastHealthCheckAtByProcess.removeValue(forKey: processIndex)
         processLock.unlock()
@@ -663,6 +691,7 @@ final class MultiProcessManager: @unchecked Sendable {
         let now = Date()
         var timedOutSegments: [(Int, SegmentContext)] = []
         var timedOutHealthChecks: [(Int, String)] = []
+        var timedOutBackendProbes: [(Int, BackendProbeContext)] = []
         var stoppedProcessesWithoutContext: [Int] = []
         var healthChecksToSend: [(Int, String)] = []
 
@@ -690,8 +719,19 @@ final class MultiProcessManager: @unchecked Sendable {
             }
         }
 
+        for processIndex in Array(backendProbeContextByProcess.keys) {
+            guard let probeContext = backendProbeContextByProcess[processIndex] else { continue }
+            if now.timeIntervalSince(probeContext.sentAt) >= healthCheckTimeoutSeconds {
+                backendProbeContextByProcess.removeValue(forKey: processIndex)
+                idleProcesses.remove(processIndex)
+                timedOutBackendProbes.append((processIndex, probeContext))
+            }
+        }
+
         for (processIndex, manager) in processes {
-            if segmentContextByProcess[processIndex] != nil || healthCheckContextByProcess[processIndex] != nil {
+            if segmentContextByProcess[processIndex] != nil
+                || healthCheckContextByProcess[processIndex] != nil
+                || backendProbeContextByProcess[processIndex] != nil {
                 continue
             }
 
@@ -740,6 +780,14 @@ final class MultiProcessManager: @unchecked Sendable {
         for (processIndex, token) in timedOutHealthChecks {
             Logger.shared.log(
                 "MultiProcessManager: health check timeout on process \(processIndex), token=\(token)",
+                level: .warning
+            )
+            recoverProcess(processIndex: processIndex)
+        }
+
+        for (processIndex, probeContext) in timedOutBackendProbes {
+            Logger.shared.log(
+                "MultiProcessManager: backend probe timeout on process \(processIndex), preloadModel=\(probeContext.preloadModel)",
                 level: .warning
             )
             recoverProcess(processIndex: processIndex)
@@ -802,6 +850,7 @@ final class MultiProcessManager: @unchecked Sendable {
         idleProcesses.removeAll()
         segmentContextByProcess.removeAll()
         healthCheckContextByProcess.removeAll()
+        backendProbeContextByProcess.removeAll()
         lastHealthCheckAtByProcess.removeAll()
         processStartedAtByIndex.removeAll()
         recoveryInProgress.removeAll()
@@ -830,6 +879,56 @@ final class MultiProcessManager: @unchecked Sendable {
         defer { processLock.unlock() }
         return idleProcesses.count
     }
+
+    @discardableResult
+    func requestBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool {
+        processLock.lock()
+        guard !isStopping, let processIndex = preferredIdleProcessIndexLocked() else {
+            processLock.unlock()
+            return false
+        }
+        guard let manager = processes[processIndex] else {
+            processLock.unlock()
+            return false
+        }
+        idleProcesses.remove(processIndex)
+        backendProbeContextByProcess[processIndex] = BackendProbeContext(
+            preloadModel: preloadModel,
+            sentAt: Date()
+        )
+        processLock.unlock()
+
+        let succeeded = manager.sendBackendProbe(
+            gpuAccelerationEnabled: gpuAccelerationEnabled,
+            preloadModel: preloadModel
+        )
+        if succeeded {
+            Logger.shared.log(
+                "MultiProcessManager: sent backend probe to process \(processIndex) (gpuEnabled=\(gpuAccelerationEnabled), preloadModel=\(preloadModel))",
+                level: .debug
+            )
+            return true
+        }
+
+        processLock.lock()
+        backendProbeContextByProcess.removeValue(forKey: processIndex)
+        idleProcesses.insert(processIndex)
+        processLock.unlock()
+        Logger.shared.log(
+            "MultiProcessManager: failed to send backend probe to process \(processIndex)",
+            level: .warning
+        )
+        recoverProcess(processIndex: processIndex)
+        return false
+    }
+
+    private func preferredIdleProcessIndex() -> Int? {
+        preferredIdleProcessIndexLocked()
+    }
+
+    private func preferredIdleProcessIndexLocked() -> Int? {
+        idleProcesses.min()
+    }
 }
 
 private struct SegmentContext {
@@ -842,5 +941,10 @@ private struct SegmentContext {
 
 private struct HealthCheckContext {
     let token: String
+    let sentAt: Date
+}
+
+private struct BackendProbeContext {
+    let preloadModel: Bool
     let sentAt: Date
 }

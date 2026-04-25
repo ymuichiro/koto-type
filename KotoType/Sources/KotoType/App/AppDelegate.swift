@@ -74,9 +74,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var adaptiveWorkerCap: Int?
     private var currentRealtimeWorkerCount = 0
     private var pendingWorkerReconfigure = false
-    private let temporaryBatchDirectoryName = "koto-type-batch-recordings"
+    private var pendingWorkerReconfigurePreloadModel = false
     private let staleBatchFileMaxAge: TimeInterval = 6 * 60 * 60
     private let temporaryBatchCleanupInterval: TimeInterval = 10 * 60
+    private let backendPreparationRetryDelay: TimeInterval = 0.25
+    private let maxBackendPreparationRetries = 40
+    private let initialSetupBackendPreparationTimeout: TimeInterval = 180
     private let permissionResetService: PermissionResetService
     private let defaultBatchInterval: Double = 10.0
     private let defaultSilenceThreshold: Double = -40.0
@@ -162,16 +165,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showInitialSetupWindow(diagnosticsService: InitialSetupDiagnosticsService) {
         initialSetupWindowController = InitialSetupWindowController(
-            diagnosticsService: diagnosticsService
+            diagnosticsService: diagnosticsService,
+            prepareBackend: { [weak self] in
+                guard let self else { return false }
+                return await self.prepareBackendBeforeInitialSetup()
+            }
         ) { [weak self] in
             guard let self else { return }
-            InitialSetupStateManager.shared.markCompleted()
-            self.initialSetupWindowController?.close()
-            self.initialSetupWindowController = nil
-            self.continueSetup()
-            self.showFirstRecordingGuideAlert()
+            await self.completeInitialSetup()
         }
         initialSetupWindowController?.showWindow(nil)
+    }
+
+    private func prepareBackendBeforeInitialSetup() async -> Bool {
+        if TranscriptionBackendStatusStore.shared.currentStatus != nil {
+            return true
+        }
+
+        let preparationService = BackendPreparationService()
+        preparationService.configure(scriptPath: BackendLocator.serverScriptPath())
+        let settings = SettingsManager.shared.load()
+        Logger.shared.log(
+            "Initial setup: starting backend preparation before permission walkthrough",
+            level: .info
+        )
+        let status = await preparationService.prepare(
+            settings: settings,
+            preloadModel: true,
+            timeout: initialSetupBackendPreparationTimeout
+        )
+        return status != nil
+    }
+
+    private func completeInitialSetup() async {
+        InitialSetupStateManager.shared.markCompleted()
+        continueSetup()
+        let prepared = await waitForInitialBackendPreparation()
+        if prepared {
+            Logger.shared.log(
+                "Initial setup: backend preparation completed before setup finished",
+                level: .info
+            )
+        } else {
+            Logger.shared.log(
+                "Initial setup: backend preparation is still running after timeout; continuing in background",
+                level: .warning
+            )
+        }
+        initialSetupWindowController?.close()
+        initialSetupWindowController = nil
+        showFirstRecordingGuideAlert()
     }
     
     private func continueSetup() {
@@ -231,7 +274,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Starting Python process at: \(scriptPath)", level: .info)
 
         currentSettings = SettingsManager.shared.load()
-        reinitializeRealtimeWorkers(force: true, reason: "initial startup")
+        reinitializeRealtimeWorkers(force: true, reason: "initial startup", preloadModel: true)
         setupMemoryPressureMonitoring()
         cleanupStaleTemporaryBatchFiles()
         startTemporaryBatchCleanupTimer()
@@ -283,9 +326,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 if self.currentSettings.gpuAccelerationEnabled != previousGPUAccelerationEnabled {
                     self.pendingWorkerReconfigure = true
+                    self.pendingWorkerReconfigurePreloadModel = true
                     self.applyPendingWorkerReconfigureIfPossible()
                 }
             }
+        }
+    }
+
+    private func waitForInitialBackendPreparation() async -> Bool {
+        if TranscriptionBackendStatusStore.shared.currentStatus != nil {
+            return true
+        }
+
+        let timeoutNanoseconds = UInt64(initialSetupBackendPreparationTimeout * 1_000_000_000)
+        let notificationCenter = NotificationCenter.default
+
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await _ in notificationCenter.notifications(
+                    named: .transcriptionBackendStatusChanged
+                ) {
+                    return true
+                }
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                return false
+            }
+
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
         }
     }
     
@@ -727,7 +799,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         didSuspendRealtimeWorkersForImport = false
         pendingWorkerReconfigure = false
-        reinitializeRealtimeWorkers(force: true, reason: "resume after imported audio")
+        pendingWorkerReconfigurePreloadModel = false
+        reinitializeRealtimeWorkers(
+            force: true,
+            reason: "resume after imported audio",
+            preloadModel: true
+        )
         applyPendingWorkerReconfigureIfPossible()
     }
 
@@ -739,7 +816,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return max(1, workerCount)
     }
 
-    private func reinitializeRealtimeWorkers(force: Bool, reason: String) {
+    private func reinitializeRealtimeWorkers(force: Bool, reason: String, preloadModel: Bool = false) {
         guard let multiProcessManager else { return }
         guard !serverScriptPath.isEmpty else { return }
 
@@ -769,6 +846,57 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason)); backend=\(preferredRealtimeBackend().rawValue), backend limits activeServers=\(backendLimits.maxActiveServers), parallelModelLoads=\(backendLimits.maxParallelModelLoads)",
             level: .info
         )
+        scheduleBackendPreparation(reason: reason, preloadModel: preloadModel)
+    }
+
+    private func scheduleBackendPreparation(
+        reason: String,
+        preloadModel: Bool,
+        retryCount: Int = 0
+    ) {
+        guard let multiProcessManager else { return }
+        guard !serverScriptPath.isEmpty else { return }
+
+        if isRecording || isImportingAudio || didSuspendRealtimeWorkersForImport {
+            guard retryCount < maxBackendPreparationRetries else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + backendPreparationRetryDelay) { [weak self] in
+                self?.scheduleBackendPreparation(
+                    reason: reason,
+                    preloadModel: preloadModel,
+                    retryCount: retryCount + 1
+                )
+            }
+            return
+        }
+
+        currentSettings = SettingsManager.shared.load()
+        let sent = multiProcessManager.requestBackendProbe(
+            gpuAccelerationEnabled: currentSettings.gpuAccelerationEnabled,
+            preloadModel: preloadModel
+        )
+        if sent {
+            Logger.shared.log(
+                "Scheduled backend preparation succeeded (\(reason), preloadModel=\(preloadModel))",
+                level: .info
+            )
+            return
+        }
+
+        guard retryCount < maxBackendPreparationRetries else {
+            Logger.shared.log(
+                "Backend preparation could not acquire an idle worker after \(maxBackendPreparationRetries) retries (\(reason))",
+                level: .warning
+            )
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + backendPreparationRetryDelay) { [weak self] in
+            self?.scheduleBackendPreparation(
+                reason: reason,
+                preloadModel: preloadModel,
+                retryCount: retryCount + 1
+            )
+        }
     }
 
     private func preferredRealtimeBackend() -> EffectiveTranscriptionBackend {
@@ -791,6 +919,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let preferredWorkerCount = status.effectiveBackend.defaultWorkerCount
         if currentRealtimeWorkerCount != preferredWorkerCount {
             pendingWorkerReconfigure = true
+            pendingWorkerReconfigurePreloadModel = false
             applyPendingWorkerReconfigureIfPossible()
         }
     }
@@ -854,6 +983,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         adaptiveWorkerCap = targetCap
         pendingWorkerReconfigure = true
+        pendingWorkerReconfigurePreloadModel = false
         Logger.shared.log(
             "Memory pressure event (\(eventDescription)) detected; scheduling worker cap update to \(targetCap)",
             level: .warning
@@ -878,8 +1008,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        let preloadModel = pendingWorkerReconfigurePreloadModel
         pendingWorkerReconfigure = false
-        reinitializeRealtimeWorkers(force: true, reason: "adaptive reconfiguration")
+        pendingWorkerReconfigurePreloadModel = false
+        reinitializeRealtimeWorkers(
+            force: true,
+            reason: "adaptive reconfiguration",
+            preloadModel: preloadModel
+        )
     }
 
     private func startTemporaryBatchCleanupTimer() {
@@ -904,8 +1040,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func cleanupStaleTemporaryBatchFiles() {
         let fileManager = FileManager.default
-        let directoryURL = fileManager.temporaryDirectory
-            .appendingPathComponent(temporaryBatchDirectoryName, isDirectory: true)
+        let directoryURL = KotoTypeStoragePaths.temporaryBatchDirectory(fileManager: fileManager)
 
         guard fileManager.fileExists(atPath: directoryURL.path) else {
             return

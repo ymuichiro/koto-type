@@ -7,7 +7,6 @@ enum RecordingStartFailureReason: Equatable {
 }
 
 final class RealtimeRecorder: NSObject, @unchecked Sendable {
-    private static let tempBatchDirectoryName = "koto-type-batch-recordings"
     private var audioEngine: AVAudioEngine?
     private var audioBuffer: [Float] = []
     private var fileCount = 0
@@ -177,8 +176,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             }
         }
         
-        let tempBatchDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(Self.tempBatchDirectoryName, isDirectory: true)
+        let tempBatchDirectory = KotoTypeStoragePaths.temporaryBatchDirectory()
         do {
             try LocalFileProtection.ensurePrivateDirectory(at: tempBatchDirectory)
         } catch {
