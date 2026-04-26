@@ -11,6 +11,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .medium)
         XCTAssertTrue(settings.gpuAccelerationEnabled)
+        XCTAssertTrue(settings.keepBackendReadyInBackground)
         XCTAssertFalse(settings.launchAtLogin)
         XCTAssertEqual(
             settings.recordingCompletionTimeout,
@@ -31,6 +32,7 @@ final class AppSettingsTests: XCTestCase {
             autoPunctuation: false,
             transcriptionQualityPreset: .high,
             gpuAccelerationEnabled: false,
+            keepBackendReadyInBackground: false,
             launchAtLogin: true,
             recordingCompletionTimeout: 420.0
         )
@@ -40,6 +42,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .high)
         XCTAssertFalse(settings.gpuAccelerationEnabled)
+        XCTAssertFalse(settings.keepBackendReadyInBackground)
         XCTAssertTrue(settings.launchAtLogin)
         XCTAssertEqual(settings.recordingCompletionTimeout, 420.0)
     }
@@ -57,6 +60,7 @@ final class AppSettingsTests: XCTestCase {
             autoPunctuation: false,
             transcriptionQualityPreset: .low,
             gpuAccelerationEnabled: false,
+            keepBackendReadyInBackground: false,
             launchAtLogin: true,
             recordingCompletionTimeout: 540.0
         )
@@ -74,6 +78,10 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(
             decodedSettings.gpuAccelerationEnabled,
             originalSettings.gpuAccelerationEnabled
+        )
+        XCTAssertEqual(
+            decodedSettings.keepBackendReadyInBackground,
+            originalSettings.keepBackendReadyInBackground
         )
         XCTAssertEqual(decodedSettings.launchAtLogin, originalSettings.launchAtLogin)
         XCTAssertEqual(
@@ -130,6 +138,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(decoded.autoPunctuation)
         XCTAssertEqual(decoded.transcriptionQualityPreset, .medium)
         XCTAssertTrue(decoded.gpuAccelerationEnabled)
+        XCTAssertTrue(decoded.keepBackendReadyInBackground)
         XCTAssertTrue(decoded.launchAtLogin)
         XCTAssertEqual(decoded.recordingCompletionTimeout, 480.0)
     }

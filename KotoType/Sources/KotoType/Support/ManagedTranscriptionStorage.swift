@@ -41,6 +41,24 @@ enum ManagedTranscriptionModelKind: String, CaseIterable, Codable, Identifiable,
             return "Used when MLX GPU acceleration is available."
         }
     }
+
+    func assetsExist(at directoryURL: URL, fileManager: FileManager = .default) -> Bool {
+        switch self {
+        case .cpu:
+            let configPath = directoryURL.appendingPathComponent("config.json").path
+            let modelPath = directoryURL.appendingPathComponent("model.bin").path
+            let tokenizerPath = directoryURL.appendingPathComponent("tokenizer.json").path
+            return fileManager.fileExists(atPath: configPath)
+                && fileManager.fileExists(atPath: modelPath)
+                && fileManager.fileExists(atPath: tokenizerPath)
+        case .mlx:
+            let configPath = directoryURL.appendingPathComponent("config.json").path
+            let safeTensorsPath = directoryURL.appendingPathComponent("weights.safetensors").path
+            let npzPath = directoryURL.appendingPathComponent("weights.npz").path
+            return fileManager.fileExists(atPath: configPath)
+                && (fileManager.fileExists(atPath: safeTensorsPath) || fileManager.fileExists(atPath: npzPath))
+        }
+    }
 }
 
 enum ManagedTranscriptionModelAction: String, Sendable {

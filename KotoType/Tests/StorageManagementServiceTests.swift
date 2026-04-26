@@ -80,7 +80,8 @@ final class StorageManagementServiceTests: XCTestCase {
             fileManager: .default,
             scriptPathProvider: { "/tmp/whisper_server.py" },
             temporaryCacheURL: temporaryCacheURL,
-            managedDownloadCacheURL: downloadCacheURL
+            managedDownloadCacheURL: downloadCacheURL,
+            managedModelsRootURL: tempRoot.appendingPathComponent("models", isDirectory: true)
         )
 
         let snapshot = await service.snapshot()
@@ -90,6 +91,36 @@ final class StorageManagementServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.totalCacheFileCount, 2)
         XCTAssertEqual(snapshot.models.count, 2)
         XCTAssertEqual(snapshot.models.last?.kind, .mlx)
+    }
+
+    func testStorageManagementSnapshotFallsBackToFilesystemModelStatusWhenLiveStatusIsUnavailable() async throws {
+        let modelsRootURL = tempRoot.appendingPathComponent("models", isDirectory: true)
+        let mlxDirectory = modelsRootURL.appendingPathComponent("mlx-whisper-large-v3-turbo", isDirectory: true)
+        try FileManager.default.createDirectory(at: mlxDirectory, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: mlxDirectory.appendingPathComponent("config.json"))
+        try Data("weights".utf8).write(to: mlxDirectory.appendingPathComponent("weights.safetensors"))
+
+        let mock = MockPythonModelManager(
+            responseOutput: PythonProcessManager.controlMessagePrefix
+                + "{\"type\":\"managed_models\",\"models\":[]}"
+        )
+        let modelService = TranscriptionModelManagementService(processManager: mock)
+        let service = StorageManagementService(
+            historyManager: TranscriptionHistoryManager(historyURL: historyURL, maxEntryCount: 10),
+            modelService: modelService,
+            fileManager: .default,
+            scriptPathProvider: { "/tmp/whisper_server.py" },
+            temporaryCacheURL: tempRoot.appendingPathComponent("temporary-cache", isDirectory: true),
+            managedDownloadCacheURL: tempRoot.appendingPathComponent("download-cache", isDirectory: true),
+            managedModelsRootURL: modelsRootURL
+        )
+
+        let snapshot = await service.snapshot()
+
+        XCTAssertEqual(snapshot.models.count, ManagedTranscriptionModelKind.allCases.count)
+        XCTAssertEqual(snapshot.models.first(where: { $0.kind == .mlx })?.isDownloaded, true)
+        XCTAssertGreaterThan(snapshot.models.first(where: { $0.kind == .mlx })?.byteCount ?? 0, 0)
+        XCTAssertEqual(snapshot.models.first(where: { $0.kind == .cpu })?.isDownloaded, false)
     }
 
     func testStorageManagementServiceClearsHistoryAndCaches() throws {

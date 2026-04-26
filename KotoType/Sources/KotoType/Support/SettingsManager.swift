@@ -38,6 +38,7 @@ struct AppSettings: Codable {
     var autoPunctuation: Bool
     var transcriptionQualityPreset: TranscriptionQualityPreset
     var gpuAccelerationEnabled: Bool
+    var keepBackendReadyInBackground: Bool
     var launchAtLogin: Bool
     var recordingCompletionTimeout: Double
 
@@ -47,6 +48,7 @@ struct AppSettings: Codable {
         autoPunctuation: Bool = true,
         transcriptionQualityPreset: TranscriptionQualityPreset = .medium,
         gpuAccelerationEnabled: Bool = true,
+        keepBackendReadyInBackground: Bool = true,
         launchAtLogin: Bool = false,
         recordingCompletionTimeout: Double = AppSettings.defaultRecordingCompletionTimeout
     ) {
@@ -55,6 +57,7 @@ struct AppSettings: Codable {
         self.autoPunctuation = autoPunctuation
         self.transcriptionQualityPreset = transcriptionQualityPreset
         self.gpuAccelerationEnabled = gpuAccelerationEnabled
+        self.keepBackendReadyInBackground = keepBackendReadyInBackground
         self.launchAtLogin = launchAtLogin
         self.recordingCompletionTimeout = Self.normalizedRecordingCompletionTimeout(
             recordingCompletionTimeout
@@ -74,6 +77,8 @@ struct AppSettings: Codable {
             ?? .medium
         gpuAccelerationEnabled =
             try container.decodeIfPresent(Bool.self, forKey: .gpuAccelerationEnabled) ?? true
+        keepBackendReadyInBackground =
+            try container.decodeIfPresent(Bool.self, forKey: .keepBackendReadyInBackground) ?? true
         launchAtLogin =
             try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         recordingCompletionTimeout = Self.normalizedRecordingCompletionTimeout(
@@ -117,7 +122,7 @@ final class SettingsManager: @unchecked Sendable {
     func save(_ settings: AppSettings) {
         Logger.shared.log("SettingsManager.save: saving to \(settingsURL.path)")
         Logger.shared.log(
-            "SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), language=\(settings.language), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
+            "SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), language=\(settings.language), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
         )
         do {
             let data = try JSONEncoder().encode(settings)
@@ -137,7 +142,7 @@ final class SettingsManager: @unchecked Sendable {
             return AppSettings()
         }
         Logger.shared.log(
-            "SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), language=\(settings.language), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
+            "SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), language=\(settings.language), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
         )
         return settings
     }

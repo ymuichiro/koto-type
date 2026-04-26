@@ -33,7 +33,6 @@ final class InitialSetupWindowController: NSWindowController {
         diagnosticsService: InitialSetupDiagnosticsService = InitialSetupDiagnosticsService(),
         ffmpegInstaller: FFmpegInstallerService = FFmpegInstallerService(),
         prepareBackend: @escaping @MainActor () async -> Bool = { true },
-        automaticPermissionResetCommand: String? = PermissionResetStateManager.shared.lastResetCommand,
         onComplete: @escaping @MainActor () async -> Void
     ) {
         let window = NSWindow(
@@ -51,7 +50,6 @@ final class InitialSetupWindowController: NSWindowController {
             diagnosticsService: diagnosticsService,
             ffmpegInstaller: ffmpegInstaller,
             prepareBackend: prepareBackend,
-            automaticPermissionResetCommand: automaticPermissionResetCommand,
             onComplete: onComplete,
             onPreferredContentHeightChange: { [weak window] preferredHeight in
                 guard let window else { return }
@@ -69,13 +67,16 @@ final class InitialSetupWindowController: NSWindowController {
 }
 
 struct InitialSetupView: View {
+    static let restartActionTitle = "Restart App"
+    static let finishActionTitle = "Finish setup and start"
+
     private let diagnosticsService: InitialSetupDiagnosticsService
     private let ffmpegInstaller: FFmpegInstallerService
     private let prepareBackend: @MainActor () async -> Bool
-    private let automaticPermissionResetCommand: String?
     private let onComplete: @MainActor () async -> Void
     private let onPreferredContentHeightChange: (CGFloat) -> Void
     private let bannerImage: NSImage?
+    @ObservedObject private var backendPreparationProgressStore = BackendPreparationProgressStore.shared
 
     @State private var report = InitialSetupReport(items: [])
     @State private var isRequestingMicrophone = false
@@ -97,14 +98,12 @@ struct InitialSetupView: View {
         diagnosticsService: InitialSetupDiagnosticsService,
         ffmpegInstaller: FFmpegInstallerService = FFmpegInstallerService(),
         prepareBackend: @escaping @MainActor () async -> Bool = { true },
-        automaticPermissionResetCommand: String?,
         onComplete: @escaping @MainActor () async -> Void,
         onPreferredContentHeightChange: @escaping (CGFloat) -> Void = { _ in }
     ) {
         self.diagnosticsService = diagnosticsService
         self.ffmpegInstaller = ffmpegInstaller
         self.prepareBackend = prepareBackend
-        self.automaticPermissionResetCommand = automaticPermissionResetCommand
         self.onComplete = onComplete
         self.onPreferredContentHeightChange = onPreferredContentHeightChange
         self.bannerImage = Self.loadBannerImage()
@@ -179,12 +178,15 @@ struct InitialSetupView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Preparing transcription backend")
                 .font(.headline)
-            Text("KotoType is checking GPU support and warming the first transcription model before you reach the permission steps. This keeps the first real dictation and the first Settings open from absorbing that one-time setup cost.")
+            Text(backendPreparationProgressStore.currentProgress.displayTitle)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            Text(backendPreparationProgressStore.currentProgress.displayMessage)
                 .font(.caption)
                 .foregroundColor(.secondary)
             ProgressView()
                 .controlSize(.regular)
-            Text("This can take longer on the very first launch while runtime files and model caches are prepared.")
+            Text("KotoType finishes this now so the first real dictation and the first Settings open do not look stuck later.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -223,7 +225,7 @@ struct InitialSetupView: View {
                             runAction(for: nextRequiredItem.id)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(nextRequiredItem.id == "ffmpeg" && isInstallingFFmpeg)
+                        .disabled(isActionInFlight(for: nextRequiredItem.id))
                         if nextRequiredItem.id == "ffmpeg", let ffmpegActionMessage {
                             Text(ffmpegActionMessage)
                                 .font(.caption)
@@ -270,53 +272,17 @@ struct InitialSetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
-            if !failingRequiredItems.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Quick fixes")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    ForEach(failingRequiredItems, id: \.id) { item in
-                        HStack(alignment: .top) {
-                            Text("• \(item.title)")
-                                .font(.caption)
-                            Spacer()
-                            Button(guidedActionTitle(for: item.id)) {
-                                runAction(for: item.id)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                }
-                .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(8)
-            }
-
             HStack(spacing: 10) {
-                Button("Grant Accessibility") {
-                    runAccessibilityFlow()
+                Button(Self.restartActionTitle) {
+                    restartApp()
                 }
-                Button("Grant Microphone") {
-                    runMicrophoneFlow()
-                }
-                .disabled(isRequestingMicrophone)
-                Button("Grant Screen Recording") {
-                    runScreenRecordingFlow()
-                }
-                .disabled(isRequestingScreenRecording)
-                Button("Open System Settings") {
-                    openAccessibilitySettings()
-                }
+                .buttonStyle(.bordered)
                 Spacer()
-                Button("Re-check") {
-                    refreshChecks()
-                    shouldShowAccessibilityRestartHint = !isAccessibilityGranted
+                Button(Self.finishActionTitle) {
+                    completeSetup()
                 }
-                if !isAccessibilityGranted {
-                    Button("Restart App") {
-                        restartApp()
-                    }
-                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!report.canStartApplication || isCompletingSetup)
             }
 
             if isWaitingForAccessibilityUpdate {
@@ -327,26 +293,6 @@ struct InitialSetupView: View {
                 Text("Accessibility permission changes may take a few seconds to apply or may require a restart. After granting permission, click \"Restart App\".")
                     .font(.caption)
                     .foregroundColor(.orange)
-            }
-
-            if let automaticPermissionResetCommand, !automaticPermissionResetCommand.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Permissions Reset Automatically")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                    Text("KotoType detected missing required permissions at launch, cleared all saved privacy decisions for this app, and relaunched. Grant Accessibility, Microphone, and Screen Recording again in System Settings.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(automaticPermissionResetCommand)
-                        .font(.system(.caption, design: .monospaced))
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .cornerRadius(6)
-                }
-                .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(8)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -392,14 +338,6 @@ struct InitialSetupView: View {
                 .cornerRadius(8)
             }
 
-            HStack {
-                Spacer()
-                Button("Finish setup and start") {
-                    completeSetup()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!report.canStartApplication || isCompletingSetup)
-            }
         }
     }
 
@@ -429,6 +367,7 @@ struct InitialSetupView: View {
     private func runInitialBackendPreparationIfNeeded() async {
         guard !initialBackendPreparationStarted else { return }
         initialBackendPreparationStarted = true
+        backendPreparationProgressStore.reset()
         let prepared = await prepareBackend()
         if !prepared {
             backendPreparationNotice = "KotoType could not finish backend preparation before the permission walkthrough, so it will retry later during startup and when Settings-triggered reconfiguration runs."
@@ -560,29 +499,35 @@ struct InitialSetupView: View {
         }
     }
 
+    static func guidedActionTitle(for _: String) -> String {
+        "Grant Accessibility"
+    }
+
     private func guidedActionTitle(for itemID: String) -> String {
+        Self.guidedActionTitle(for: itemID)
+    }
+
+    private func isActionInFlight(for itemID: String) -> Bool {
         switch itemID {
-        case "accessibility":
-            return "Grant Accessibility"
         case "microphone":
-            return "Grant Microphone"
+            return isRequestingMicrophone
         case "screenRecording":
-            return "Grant Screen Recording"
+            return isRequestingScreenRecording
         case "ffmpeg":
-            return isInstallingFFmpeg ? "Installing FFmpeg..." : "Install FFmpeg automatically"
+            return isInstallingFFmpeg
         default:
-            return "Open"
+            return false
         }
     }
 
     private func guidedDetail(for itemID: String) -> String {
         switch itemID {
         case "accessibility":
-            return "Enable KotoType in Accessibility, then come back and Re-check."
+            return "Enable KotoType in Accessibility, then return to this window. If macOS does not apply the change right away, use Restart App."
         case "microphone":
-            return "Allow microphone permission when prompted."
+            return "Allow microphone permission when prompted. KotoType will refresh the status after the prompt finishes."
         case "screenRecording":
-            return "Enable KotoType in Screen Recording, then return to this window."
+            return "Enable KotoType in Screen Recording, then return to this window. KotoType will refresh the status when the app becomes active again."
         case "ffmpeg":
             return "KotoType will use Homebrew to install FFmpeg, and can bootstrap Homebrew first if needed."
         default:

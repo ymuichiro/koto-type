@@ -132,6 +132,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.shared.log("Application did finish launching", level: .info)
+        serverScriptPath = BackendLocator.serverScriptPath()
+        currentSettings = SettingsManager.shared.load()
+        Logger.shared.log("Starting Python process at: \(serverScriptPath)", level: .info)
 
         let diagnosticsService = InitialSetupDiagnosticsService()
         let report = diagnosticsService.evaluate()
@@ -182,25 +185,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
 
-        let preparationService = BackendPreparationService()
-        preparationService.configure(scriptPath: BackendLocator.serverScriptPath())
-        let settings = SettingsManager.shared.load()
+        currentSettings = SettingsManager.shared.load()
+        guard currentSettings.keepBackendReadyInBackground else {
+            return true
+        }
+
+        BackendPreparationProgressStore.shared.reset()
+        ensureMultiProcessManagerCreatedIfNeeded()
         Logger.shared.log(
             "Initial setup: starting backend preparation before permission walkthrough",
             level: .info
         )
-        let status = await preparationService.prepare(
-            settings: settings,
-            preloadModel: true,
-            timeout: initialSetupBackendPreparationTimeout
+        ensureRealtimeWorkersInitialized(
+            reason: "initial setup",
+            preloadModel: true
         )
-        return status != nil
+        return await waitForInitialBackendPreparation()
     }
 
     private func completeInitialSetup() async {
         InitialSetupStateManager.shared.markCompleted()
         continueSetup()
-        let prepared = await waitForInitialBackendPreparation()
+        let prepared = currentSettings.keepBackendReadyInBackground
+            ? await waitForInitialBackendPreparation()
+            : true
         if prepared {
             Logger.shared.log(
                 "Initial setup: backend preparation completed before setup finished",
@@ -226,8 +234,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         realtimeRecorder = RealtimeRecorder()
         Logger.shared.log("RealtimeRecorder created", level: .debug)
-        multiProcessManager = MultiProcessManager()
-        Logger.shared.log("MultiProcessManager created", level: .debug)
+        ensureMultiProcessManagerCreatedIfNeeded()
         settingsWindowController = SettingsWindowController()
         historyWindowController = HistoryWindowController()
         recordingIndicatorWindow = RecordingIndicatorWindow { [weak self] in
@@ -256,6 +263,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.onShowHistoryRequested = { [weak self] in
             self?.historyWindowController?.showHistory()
         }
+        settingsWindowController?.onSettingsChanged = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleSettingsDidChange()
+            }
+        }
         NotificationCenter.default.addObserver(
             forName: .transcriptionBackendStatusChanged,
             object: nil,
@@ -268,40 +280,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.handleBackendStatusChanged(status)
             }
         }
-        
-        let scriptPath = BackendLocator.serverScriptPath()
-        serverScriptPath = scriptPath
-        Logger.shared.log("Starting Python process at: \(scriptPath)", level: .info)
 
+        ensureMultiProcessManagerCallbacks()
         currentSettings = SettingsManager.shared.load()
-        reinitializeRealtimeWorkers(force: true, reason: "initial startup", preloadModel: true)
+        if currentSettings.keepBackendReadyInBackground {
+            ensureRealtimeWorkersInitialized(
+                reason: "initial startup",
+                preloadModel: true
+            )
+        }
         setupMemoryPressureMonitoring()
         cleanupStaleTemporaryBatchFiles()
         startTemporaryBatchCleanupTimer()
         _ = LaunchAtLoginManager.shared.setEnabled(currentSettings.launchAtLogin)
-
-        multiProcessManager?.outputReceived = { [weak self] processIndex, output in
-            guard self != nil else { return }
-            Logger.shared.log(
-                "Transcription received from process \(processIndex) (length=\(output.count))",
-                level: .info
-            )
-            
-            if output.isEmpty {
-                Logger.shared.log("Empty transcription received, skipping", level: .warning)
-            }
-        }
-        
-        multiProcessManager?.segmentComplete = { [weak self] segmentIndex, output in
-            guard let self = self else { return }
-            Logger.shared.log(
-                "Segment complete - index=\(segmentIndex), outputLength=\(output.count)",
-                level: .info
-            )
-            self.handleSegmentComplete(globalIndex: segmentIndex, output: output)
-        }
-
-        currentSettings = SettingsManager.shared.load()
         Logger.shared.log("Loaded settings: \(currentSettings)", level: .info)
         
         hotkeyManager = HotkeyManager()
@@ -315,19 +306,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .hotkeyConfigurationChanged, object: nil, queue: .main) { [weak self] notification in
             let config = notification.object as? HotkeyConfiguration
             Task { @MainActor [weak self] in
-                guard let self = self else { return }
+                guard self != nil else { return }
                 if let config = config {
                     Logger.shared.log("AppDelegate: Received hotkeyConfigurationChanged notification: \(config.description)")
-                }
-                let previousGPUAccelerationEnabled = self.currentSettings.gpuAccelerationEnabled
-                self.currentSettings = SettingsManager.shared.load()
-                Logger.shared.log(
-                    "AppDelegate: Reloaded settings - language=\(self.currentSettings.language), preset=\(self.currentSettings.transcriptionQualityPreset.rawValue), gpu=\(self.currentSettings.gpuAccelerationEnabled)"
-                )
-                if self.currentSettings.gpuAccelerationEnabled != previousGPUAccelerationEnabled {
-                    self.pendingWorkerReconfigure = true
-                    self.pendingWorkerReconfigurePreloadModel = true
-                    self.applyPendingWorkerReconfigureIfPossible()
                 }
             }
         }
@@ -379,6 +360,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Starting audio recording for session \(sessionID)...", level: .info)
 
         currentSettings = SettingsManager.shared.load()
+        ensureRealtimeWorkersInitialized(
+            reason: "recording start",
+            preloadModel: true
+        )
         realtimeRecorder?.batchInterval = defaultBatchInterval
         realtimeRecorder?.silenceThreshold = Float(defaultSilenceThreshold)
         realtimeRecorder?.silenceDuration = defaultSilenceDuration
@@ -633,6 +618,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         applyPendingWorkerReconfigureIfPossible()
+        stopRealtimeWorkersIfNeededForOnDemand(reason: "realtime transcription finished")
     }
 
     private func finalizeSession(sessionID: Int) {
@@ -800,12 +786,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         didSuspendRealtimeWorkersForImport = false
         pendingWorkerReconfigure = false
         pendingWorkerReconfigurePreloadModel = false
-        reinitializeRealtimeWorkers(
-            force: true,
-            reason: "resume after imported audio",
-            preloadModel: true
-        )
+        currentSettings = SettingsManager.shared.load()
+        if currentSettings.keepBackendReadyInBackground {
+            reinitializeRealtimeWorkers(
+                force: true,
+                reason: "resume after imported audio",
+                preloadModel: true
+            )
+        }
         applyPendingWorkerReconfigureIfPossible()
+        stopRealtimeWorkersIfNeededForOnDemand(reason: "imported audio finished")
     }
 
     private func effectiveRealtimeWorkerCount(requested: Int) -> Int {
@@ -1011,11 +1001,128 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let preloadModel = pendingWorkerReconfigurePreloadModel
         pendingWorkerReconfigure = false
         pendingWorkerReconfigurePreloadModel = false
+        if currentSettings.keepBackendReadyInBackground {
+            reinitializeRealtimeWorkers(
+                force: true,
+                reason: "adaptive reconfiguration",
+                preloadModel: preloadModel
+            )
+            return
+        }
+
+        stopRealtimeWorkers(reason: "on-demand setting change")
+    }
+
+    private func ensureMultiProcessManagerCreatedIfNeeded() {
+        guard multiProcessManager == nil else {
+            return
+        }
+        multiProcessManager = MultiProcessManager()
+        Logger.shared.log("MultiProcessManager created", level: .debug)
+        ensureMultiProcessManagerCallbacks()
+    }
+
+    private func ensureMultiProcessManagerCallbacks() {
+        multiProcessManager?.outputReceived = { [weak self] processIndex, output in
+            guard self != nil else { return }
+            Logger.shared.log(
+                "Transcription received from process \(processIndex) (length=\(output.count))",
+                level: .info
+            )
+
+            if output.isEmpty {
+                Logger.shared.log("Empty transcription received, skipping", level: .warning)
+            }
+        }
+
+        multiProcessManager?.segmentComplete = { [weak self] segmentIndex, output in
+            guard let self = self else { return }
+            Logger.shared.log(
+                "Segment complete - index=\(segmentIndex), outputLength=\(output.count)",
+                level: .info
+            )
+            self.handleSegmentComplete(globalIndex: segmentIndex, output: output)
+        }
+    }
+
+    private func ensureRealtimeWorkersInitialized(reason: String, preloadModel: Bool) {
+        ensureMultiProcessManagerCreatedIfNeeded()
+        guard !serverScriptPath.isEmpty else { return }
+
+        currentSettings = SettingsManager.shared.load()
+        let expectedWorkerCount = effectiveRealtimeWorkerCount(
+            requested: preferredRealtimeWorkerCount()
+        )
+        let activeProcessCount = multiProcessManager?.getProcessCount() ?? 0
+        if currentRealtimeWorkerCount == expectedWorkerCount && activeProcessCount == expectedWorkerCount {
+            if preloadModel && TranscriptionBackendStatusStore.shared.currentStatus == nil {
+                scheduleBackendPreparation(reason: reason, preloadModel: true)
+            }
+            return
+        }
+
         reinitializeRealtimeWorkers(
             force: true,
-            reason: "adaptive reconfiguration",
+            reason: reason,
             preloadModel: preloadModel
         )
+    }
+
+    private func handleSettingsDidChange() {
+        let previousSettings = currentSettings
+        currentSettings = SettingsManager.shared.load()
+        Logger.shared.log(
+            "AppDelegate: Reloaded settings - language=\(currentSettings.language), preset=\(currentSettings.transcriptionQualityPreset.rawValue), gpu=\(currentSettings.gpuAccelerationEnabled), keepBackendReady=\(currentSettings.keepBackendReadyInBackground)"
+        )
+
+        let keepBackendReadyChanged =
+            currentSettings.keepBackendReadyInBackground != previousSettings.keepBackendReadyInBackground
+        let gpuAccelerationChanged =
+            currentSettings.gpuAccelerationEnabled != previousSettings.gpuAccelerationEnabled
+
+        guard keepBackendReadyChanged || gpuAccelerationChanged else {
+            return
+        }
+
+        pendingWorkerReconfigure = true
+        pendingWorkerReconfigurePreloadModel = currentSettings.keepBackendReadyInBackground
+        applyPendingWorkerReconfigureIfPossible()
+    }
+
+    private func stopRealtimeWorkers(reason: String) {
+        guard let multiProcessManager else {
+            currentRealtimeWorkerCount = 0
+            return
+        }
+        guard multiProcessManager.getProcessCount() > 0 else {
+            currentRealtimeWorkerCount = 0
+            return
+        }
+
+        Logger.shared.log("Stopping realtime transcription workers (\(reason))", level: .info)
+        multiProcessManager.stop()
+        currentRealtimeWorkerCount = 0
+    }
+
+    private func stopRealtimeWorkersIfNeededForOnDemand(reason: String) {
+        currentSettings = SettingsManager.shared.load()
+        guard !currentSettings.keepBackendReadyInBackground else {
+            return
+        }
+        guard !isRecording else {
+            return
+        }
+        guard finalizationQueue.isEmpty else {
+            return
+        }
+        guard !isImportingAudio else {
+            return
+        }
+        guard !didSuspendRealtimeWorkersForImport else {
+            return
+        }
+
+        stopRealtimeWorkers(reason: reason)
     }
 
     private func startTemporaryBatchCleanupTimer() {

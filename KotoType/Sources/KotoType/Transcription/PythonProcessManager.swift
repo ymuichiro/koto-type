@@ -303,7 +303,7 @@ final class PythonProcessManager: @unchecked Sendable {
         return lines
     }
 
-    static func parseBackendStatus(from output: String) -> TranscriptionBackendStatus? {
+    private static func decodeControlMessage<T: Decodable>(_ type: T.Type, from output: String) -> T? {
         guard output.hasPrefix(controlMessagePrefix) else {
             return nil
         }
@@ -313,33 +313,35 @@ final class PythonProcessManager: @unchecked Sendable {
             return nil
         }
 
-        return try? JSONDecoder().decode(TranscriptionBackendStatus.self, from: data)
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    static func parseBackendStatus(from output: String) -> TranscriptionBackendStatus? {
+        decodeControlMessage(TranscriptionBackendStatus.self, from: output)
+    }
+
+    static func parseBackendPreparationProgress(from output: String) -> BackendPreparationProgress? {
+        guard let progress = decodeControlMessage(BackendPreparationProgress.self, from: output),
+              progress.type == "backend_preparation_progress" else {
+            return nil
+        }
+        return progress
     }
 
     static func parseManagedModelsResponse(from output: String) -> ManagedTranscriptionModelsResponse? {
-        guard output.hasPrefix(controlMessagePrefix) else {
+        guard let response = decodeControlMessage(ManagedTranscriptionModelsResponse.self, from: output),
+              response.type == "managed_models" else {
             return nil
         }
-
-        let payload = String(output.dropFirst(controlMessagePrefix.count))
-        guard let data = payload.data(using: .utf8) else {
-            return nil
-        }
-
-        return try? JSONDecoder().decode(ManagedTranscriptionModelsResponse.self, from: data)
+        return response
     }
 
     static func parseManagedModelResponse(from output: String) -> ManagedTranscriptionModelResponse? {
-        guard output.hasPrefix(controlMessagePrefix) else {
+        guard let response = decodeControlMessage(ManagedTranscriptionModelResponse.self, from: output),
+              response.type == "managed_model" else {
             return nil
         }
-
-        let payload = String(output.dropFirst(controlMessagePrefix.count))
-        guard let data = payload.data(using: .utf8) else {
-            return nil
-        }
-
-        return try? JSONDecoder().decode(ManagedTranscriptionModelResponse.self, from: data)
+        return response
     }
 
     private func sendLine(_ input: String) -> Bool {
