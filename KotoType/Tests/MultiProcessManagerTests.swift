@@ -322,6 +322,11 @@ final class MultiProcessManagerTests: XCTestCase {
                 )
                 instance.outputReceived?(
                     PythonProcessManager.controlMessagePrefix
+                        + "{\"type\":\"backend_preparation_progress\",\"step\":\"loading_mlx_model\",\"detail\":\"worker=0\"}"
+                )
+                XCTAssertEqual(manager.getIdleProcessCount(), 0)
+                instance.outputReceived?(
+                    PythonProcessManager.controlMessagePrefix
                         + "{\"effectiveBackend\":\"mlx\",\"gpuRequested\":true,\"gpuAvailable\":true}"
                 )
                 probeHandled.fulfill()
@@ -345,6 +350,33 @@ final class MultiProcessManagerTests: XCTestCase {
 
         wait(for: [probeHandled, segmentCompleted], timeout: 2.0)
         XCTAssertEqual(sendOrder.value, ["probe", "segment"])
+    }
+
+    func testBackendProbeUsesDedicatedTimeoutInsteadOfHealthCheckTimeout() {
+        let createdCount = LockedInt()
+
+        let manager = MultiProcessManager(
+            processManagerFactory: {
+                let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+                createdCount.increment()
+                return mock
+            },
+            segmentProcessingTimeoutSeconds: 60.0,
+            watchdogIntervalSeconds: 0.02,
+            healthCheckIntervalSeconds: 5.0,
+            healthCheckTimeoutSeconds: 0.05,
+            backendProbeTimeoutSeconds: 0.25,
+            healthCheckStartupGraceSeconds: 0.01
+        )
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        XCTAssertTrue(manager.requestBackendProbe(gpuAccelerationEnabled: true, preloadModel: true))
+
+        Thread.sleep(forTimeInterval: 0.12)
+        XCTAssertEqual(createdCount.value, 1)
+
+        Thread.sleep(forTimeInterval: 0.33)
+        XCTAssertGreaterThanOrEqual(createdCount.value, 2)
     }
 }
 

@@ -49,6 +49,7 @@ struct SettingsView: View {
     @State private var autoPunctuation: Bool
     @State private var qualityPreset: TranscriptionQualityPreset
     @State private var gpuAccelerationEnabled: Bool
+    @State private var keepBackendReadyInBackground: Bool
     @State private var launchAtLogin: Bool
     @State private var recordingCompletionTimeout: Double
     @State private var dictionaryWords: [String]
@@ -106,6 +107,7 @@ struct SettingsView: View {
         self._autoPunctuation = State(initialValue: settings.autoPunctuation)
         self._qualityPreset = State(initialValue: settings.transcriptionQualityPreset)
         self._gpuAccelerationEnabled = State(initialValue: settings.gpuAccelerationEnabled)
+        self._keepBackendReadyInBackground = State(initialValue: settings.keepBackendReadyInBackground)
         self._launchAtLogin = State(initialValue: settings.launchAtLogin)
         self._recordingCompletionTimeout = State(initialValue: settings.recordingCompletionTimeout)
         self._dictionaryWords = State(initialValue: userDictionaryWords)
@@ -234,6 +236,17 @@ struct SettingsView: View {
                 .disabled(!TranscriptionRuntimeSupport.supportsGPUAcceleration())
 
                 Text(gpuToggleDescription)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(
+                    "Keep backend ready in background",
+                    isOn: $keepBackendReadyInBackground
+                )
+
+                Text(backendReadinessDescription)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -486,6 +499,9 @@ struct SettingsView: View {
             return status.summaryText
         }
         if gpuAccelerationEnabled && TranscriptionRuntimeSupport.supportsGPUAcceleration() {
+            if !keepBackendReadyInBackground {
+                return "Backend detection runs when you start dictation."
+            }
             return "Detecting backend availability..."
         }
         return "Current backend: CPU"
@@ -496,25 +512,23 @@ struct SettingsView: View {
             return status.detailText
         }
         if gpuAccelerationEnabled && TranscriptionRuntimeSupport.supportsGPUAcceleration() {
-            return "KotoType checks the Python backend shortly after launch and warms the selected model in the background."
+            if keepBackendReadyInBackground {
+                return "KotoType checks the Python backend shortly after launch and keeps the selected model ready in the background."
+            }
+            return "KotoType starts the realtime backend when you begin dictation and stops it again after transcription work finishes."
         }
         return "GPU acceleration is turned off in Settings."
     }
 
-    private var displayedModelStatuses: [ManagedTranscriptionModelStatus] {
-        let byKind = Dictionary(uniqueKeysWithValues: storageSnapshot.models.map { ($0.kind, $0) })
-        return ManagedTranscriptionModelKind.allCases.map { kind in
-            byKind[kind]
-                ?? ManagedTranscriptionModelStatus(
-                    kind: kind,
-                    displayName: kind.displayName,
-                    modelID: kind.modelID,
-                    directoryPath: KotoTypeStoragePaths.managedModelDirectory(for: kind).path,
-                    isDownloaded: false,
-                    fileCount: 0,
-                    byteCount: 0
-                )
+    private var backendReadinessDescription: String {
+        if keepBackendReadyInBackground {
+            return "Recommended. KotoType keeps the realtime transcription worker alive and preloads the selected model after launch for the fastest first dictation."
         }
+        return "Uses less background CPU and memory, but KotoType starts the realtime worker on demand and shuts it down again after use."
+    }
+
+    private var displayedModelStatuses: [ManagedTranscriptionModelStatus] {
+        storageSnapshot.models
     }
 
     private var isStorageBusy: Bool {
@@ -558,6 +572,7 @@ struct SettingsView: View {
             autoPunctuation: autoPunctuation,
             transcriptionQualityPreset: qualityPreset,
             gpuAccelerationEnabled: gpuAccelerationEnabled,
+            keepBackendReadyInBackground: keepBackendReadyInBackground,
             launchAtLogin: launchAtLogin,
             recordingCompletionTimeout: recordingCompletionTimeout
         )

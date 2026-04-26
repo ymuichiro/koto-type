@@ -129,11 +129,11 @@ class FakeBackendManager(whisper_server.BackendManager):
             raise self.mlx_error
         return self.mlx_result
 
-    def _ensure_cpu_model(self):
+    def _ensure_cpu_model(self, progress=None):
         self.cpu_warmups += 1
         return object()
 
-    def _ensure_mlx_model(self):
+    def _ensure_mlx_model(self, progress=None):
         self.mlx_warmups += 1
         if self.mlx_error is not None:
             raise self.mlx_error

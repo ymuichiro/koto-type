@@ -30,6 +30,40 @@ final class BackendPreparationServiceTests: XCTestCase {
         XCTAssertEqual(mock.stopCallCount, 1)
     }
 
+    @MainActor
+    func testPreparePublishesBackendProgressBeforeCompletion() async {
+        let mock = MockPreparationPythonProcessManager()
+        let service = BackendPreparationService(processManager: mock)
+        service.configure(scriptPath: "/tmp/whisper_server.py")
+        BackendPreparationProgressStore.shared.reset()
+
+        let task = Task {
+            await service.prepare(
+                settings: AppSettings(gpuAccelerationEnabled: true),
+                preloadModel: true,
+                timeout: 5
+            )
+        }
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        mock.emitOutput(
+            PythonProcessManager.controlMessagePrefix
+                + "{\"type\":\"backend_preparation_progress\",\"step\":\"probing_gpu\",\"detail\":\"Checking whether Apple GPU acceleration is available on this Mac.\"}"
+        )
+        mock.emitOutput(
+            PythonProcessManager.controlMessagePrefix
+                + "{\"effectiveBackend\":\"mlx\",\"gpuRequested\":true,\"gpuAvailable\":true}"
+        )
+
+        let status = await task.value
+        XCTAssertEqual(status?.effectiveBackend, .mlx)
+        XCTAssertEqual(BackendPreparationProgressStore.shared.currentProgress.step, .probingGPU)
+        XCTAssertEqual(
+            BackendPreparationProgressStore.shared.currentProgress.detail,
+            "Checking whether Apple GPU acceleration is available on this Mac."
+        )
+    }
+
     func testPrepareReturnsNilWhenProbeCannotBeSent() async {
         let mock = MockPreparationPythonProcessManager(sendBackendProbeSucceeds: false)
         let service = BackendPreparationService(processManager: mock)

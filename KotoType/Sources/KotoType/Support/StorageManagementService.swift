@@ -35,6 +35,7 @@ final class StorageManagementService: @unchecked Sendable {
     private let scriptPathProvider: () -> String
     private let temporaryCacheURL: URL?
     private let managedDownloadCacheURL: URL?
+    private let managedModelsRootURL: URL?
 
     init(
         historyManager: TranscriptionHistoryManager = .shared,
@@ -42,7 +43,8 @@ final class StorageManagementService: @unchecked Sendable {
         fileManager: FileManager = .default,
         scriptPathProvider: @escaping () -> String = { BackendLocator.serverScriptPath() },
         temporaryCacheURL: URL? = nil,
-        managedDownloadCacheURL: URL? = nil
+        managedDownloadCacheURL: URL? = nil,
+        managedModelsRootURL: URL? = nil
     ) {
         self.historyManager = historyManager
         self.modelService = modelService
@@ -50,6 +52,7 @@ final class StorageManagementService: @unchecked Sendable {
         self.scriptPathProvider = scriptPathProvider
         self.temporaryCacheURL = temporaryCacheURL
         self.managedDownloadCacheURL = managedDownloadCacheURL
+        self.managedModelsRootURL = managedModelsRootURL
     }
 
     func snapshot() async -> StorageManagementSnapshot {
@@ -58,7 +61,7 @@ final class StorageManagementService: @unchecked Sendable {
         let historyEntries = historyManager.loadEntries()
         let historyPath = historyManager.storageURL.path
         let historyByteCount = fileSize(at: historyManager.storageURL)
-        let models = await modelService.fetchStatuses()
+        let models = mergedModelStatuses(with: await modelService.fetchStatuses())
         let caches = [
             directoryStatus(
                 id: "temporary-audio-cache",
@@ -77,7 +80,7 @@ final class StorageManagementService: @unchecked Sendable {
             historyPath: historyPath,
             historyByteCount: historyByteCount,
             caches: caches,
-            models: models.sorted { $0.kind.rawValue < $1.kind.rawValue }
+            models: models
         )
     }
 
@@ -119,6 +122,11 @@ final class StorageManagementService: @unchecked Sendable {
         managedDownloadCacheURL ?? KotoTypeStoragePaths.managedModelCacheRoot(fileManager: fileManager)
     }
 
+    private func resolvedManagedModelDirectory(for kind: ManagedTranscriptionModelKind) -> URL {
+        (managedModelsRootURL ?? KotoTypeStoragePaths.managedModelsRoot(fileManager: fileManager))
+            .appendingPathComponent(kind.storageDirectoryName, isDirectory: true)
+    }
+
     private func fileSize(at url: URL) -> Int64 {
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               let number = attributes[.size] as? NSNumber else {
@@ -153,6 +161,27 @@ final class StorageManagementService: @unchecked Sendable {
         }
 
         return (fileCount, byteCount)
+    }
+
+    private func inferredModelStatus(for kind: ManagedTranscriptionModelKind) -> ManagedTranscriptionModelStatus {
+        let directoryURL = resolvedManagedModelDirectory(for: kind)
+        let summary = directorySummary(at: directoryURL)
+        return ManagedTranscriptionModelStatus(
+            kind: kind,
+            displayName: kind.displayName,
+            modelID: kind.modelID,
+            directoryPath: directoryURL.path,
+            isDownloaded: kind.assetsExist(at: directoryURL, fileManager: fileManager),
+            fileCount: summary.fileCount,
+            byteCount: summary.byteCount
+        )
+    }
+
+    private func mergedModelStatuses(with liveModels: [ManagedTranscriptionModelStatus]) -> [ManagedTranscriptionModelStatus] {
+        let liveByKind = Dictionary(uniqueKeysWithValues: liveModels.map { ($0.kind, $0) })
+        return ManagedTranscriptionModelKind.allCases
+            .map { liveByKind[$0] ?? inferredModelStatus(for: $0) }
+            .sorted { $0.kind.rawValue < $1.kind.rawValue }
     }
 
     private func removeItemIfPresent(at url: URL) {

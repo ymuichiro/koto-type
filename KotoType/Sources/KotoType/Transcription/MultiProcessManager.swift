@@ -32,6 +32,7 @@ final class MultiProcessManager: @unchecked Sendable {
     private let watchdogIntervalSeconds: TimeInterval
     private let healthCheckIntervalSeconds: TimeInterval
     private let healthCheckTimeoutSeconds: TimeInterval
+    private let backendProbeTimeoutSeconds: TimeInterval
     private let healthCheckStartupGraceSeconds: TimeInterval
     private let processManagerFactory: () -> any PythonProcessManaging
     private var isStopping = false
@@ -59,6 +60,7 @@ final class MultiProcessManager: @unchecked Sendable {
         watchdogIntervalSeconds: TimeInterval = 2.0,
         healthCheckIntervalSeconds: TimeInterval = 30.0,
         healthCheckTimeoutSeconds: TimeInterval = 8.0,
+        backendProbeTimeoutSeconds: TimeInterval = 180.0,
         healthCheckStartupGraceSeconds: TimeInterval = 12.0
     ) {
         self.processManagerFactory = processManagerFactory
@@ -66,6 +68,7 @@ final class MultiProcessManager: @unchecked Sendable {
         self.watchdogIntervalSeconds = max(0.1, watchdogIntervalSeconds)
         self.healthCheckIntervalSeconds = max(0.1, healthCheckIntervalSeconds)
         self.healthCheckTimeoutSeconds = max(0.1, healthCheckTimeoutSeconds)
+        self.backendProbeTimeoutSeconds = max(0.1, backendProbeTimeoutSeconds)
         self.healthCheckStartupGraceSeconds = max(0.1, healthCheckStartupGraceSeconds)
     }
     
@@ -237,11 +240,22 @@ final class MultiProcessManager: @unchecked Sendable {
             return
         }
 
-        if backendProbeContextByProcess.removeValue(forKey: processIndex) != nil {
-            idleProcesses.insert(processIndex)
-            lastHealthCheckAtByProcess[processIndex] = now
-            processLock.unlock()
+        if backendProbeContextByProcess[processIndex] != nil {
+            if let progress = PythonProcessManager.parseBackendPreparationProgress(from: output) {
+                lastHealthCheckAtByProcess[processIndex] = now
+                processLock.unlock()
+                BackendPreparationProgressStore.publishFromAnyThread(progress)
+                Logger.shared.log(
+                    "MultiProcessManager: backend probe progress from process \(processIndex): \(progress.step.rawValue)",
+                    level: .debug
+                )
+                return
+            }
+
             guard let status = PythonProcessManager.parseBackendStatus(from: output) else {
+                backendProbeContextByProcess.removeValue(forKey: processIndex)
+                idleProcesses.insert(processIndex)
+                processLock.unlock()
                 Logger.shared.log(
                     "MultiProcessManager: invalid backend probe response from process \(processIndex) (length=\(output.count))",
                     level: .warning
@@ -249,6 +263,10 @@ final class MultiProcessManager: @unchecked Sendable {
                 recoverProcess(processIndex: processIndex)
                 return
             }
+            backendProbeContextByProcess.removeValue(forKey: processIndex)
+            idleProcesses.insert(processIndex)
+            lastHealthCheckAtByProcess[processIndex] = now
+            processLock.unlock()
             TranscriptionBackendStatusStore.publishFromAnyThread(status)
             Logger.shared.log(
                 "MultiProcessManager: backend probe completed for process \(processIndex): backend=\(status.effectiveBackend.rawValue), gpuRequested=\(status.gpuRequested), gpuAvailable=\(status.gpuAvailable), fallbackReason=\(status.fallbackReason ?? "none")",
@@ -721,7 +739,7 @@ final class MultiProcessManager: @unchecked Sendable {
 
         for processIndex in Array(backendProbeContextByProcess.keys) {
             guard let probeContext = backendProbeContextByProcess[processIndex] else { continue }
-            if now.timeIntervalSince(probeContext.sentAt) >= healthCheckTimeoutSeconds {
+            if now.timeIntervalSince(probeContext.sentAt) >= backendProbeTimeoutSeconds {
                 backendProbeContextByProcess.removeValue(forKey: processIndex)
                 idleProcesses.remove(processIndex)
                 timedOutBackendProbes.append((processIndex, probeContext))

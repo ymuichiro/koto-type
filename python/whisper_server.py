@@ -1041,6 +1041,19 @@ def emit_backend_status(status):
     sys.stdout.flush()
 
 
+def emit_backend_preparation_progress(step, detail=None):
+    payload = json.dumps(
+        {
+            "type": "backend_preparation_progress",
+            "step": step,
+            "detail": detail,
+        },
+        ensure_ascii=False,
+    )
+    print(f"{CONTROL_MESSAGE_PREFIX}{payload}", file=sys.stdout)
+    sys.stdout.flush()
+
+
 def serialize_managed_model_status(status):
     return {
         "kind": status.kind,
@@ -1329,7 +1342,12 @@ class BackendManager:
             self.log(f"MLX error: {error}")
             self.log(traceback.format_exc())
 
-    def _status_for_gpu_request(self, gpu_acceleration_enabled):
+    def _status_for_gpu_request(self, gpu_acceleration_enabled, progress=None):
+        if progress is not None:
+            progress(
+                "probing_gpu",
+                "Detecting whether Apple GPU acceleration is available on this Mac.",
+            )
         gpu_available, reason = self._probe_mlx_runtime()
         if not gpu_acceleration_enabled:
             return BackendStatus(
@@ -1353,20 +1371,39 @@ class BackendManager:
         )
 
     def probe_backend_status(self, gpu_acceleration_enabled, preload_model=False):
-        status = self._status_for_gpu_request(gpu_acceleration_enabled)
+        emit_backend_preparation_progress(
+            "starting",
+            "Launching the transcription backend for first-time setup.",
+        )
+        status = self._status_for_gpu_request(
+            gpu_acceleration_enabled,
+            progress=emit_backend_preparation_progress,
+        )
         if not preload_model:
             return status
 
         if status.effective_backend == "mlx":
+            emit_backend_preparation_progress(
+                "preparing_mlx_model",
+                "Getting the Apple GPU transcription model ready.",
+            )
             try:
-                self._ensure_mlx_model()
+                self._ensure_mlx_model(progress=emit_backend_preparation_progress)
                 return status
             except Exception as error:
                 fallback_reason = "mlx_model_load_failed"
                 if self.mlx_model_loaded:
                     fallback_reason = "mlx_transcription_failed"
+                emit_backend_preparation_progress(
+                    "fallback_to_cpu",
+                    "Apple GPU preparation failed, so KotoType is falling back to the CPU model.",
+                )
                 self._disable_mlx_for_session(fallback_reason, error=error)
-                self._ensure_cpu_model()
+                emit_backend_preparation_progress(
+                    "preparing_cpu_model",
+                    "Getting the CPU transcription model ready.",
+                )
+                self._ensure_cpu_model(progress=emit_backend_preparation_progress)
                 return BackendStatus(
                     effective_backend="cpu",
                     gpu_requested=True,
@@ -1374,15 +1411,40 @@ class BackendManager:
                     fallback_reason=fallback_reason,
                 )
 
-        self._ensure_cpu_model()
+        emit_backend_preparation_progress(
+            "preparing_cpu_model",
+            "Getting the CPU transcription model ready.",
+        )
+        self._ensure_cpu_model(progress=emit_backend_preparation_progress)
         return status
 
-    def _ensure_cpu_model(self):
+    def _ensure_cpu_model(self, progress=None):
         if self.cpu_model is not None:
+            if progress is not None:
+                progress(
+                    "loading_cpu_model",
+                    "CPU model is already loaded and ready for transcription.",
+                )
             return self.cpu_model
 
+        if progress is not None:
+            progress(
+                "checking_cpu_model_assets",
+                "Looking for the local CPU model so it does not need to be downloaded again.",
+            )
         if not self._cpu_model_assets_exist():
+            if progress is not None:
+                progress(
+                    "downloading_cpu_model",
+                    "Downloading the CPU transcription model. This can take a while on first launch.",
+                )
             self._download_cpu_model()
+
+        if progress is not None:
+            progress(
+                "loading_cpu_model",
+                "Loading the CPU model into memory.",
+            )
 
         def _load():
             from faster_whisper import WhisperModel
@@ -1400,19 +1462,40 @@ class BackendManager:
         self.cpu_model = self._run_with_model_load_slot(_load)
         return self.cpu_model
 
-    def _ensure_mlx_model(self):
+    def _ensure_mlx_model(self, progress=None):
         available, reason = self._probe_mlx_runtime()
         if not available:
             raise RuntimeError(reason or "mlx runtime unavailable")
         if self.mlx_model_loaded:
+            if progress is not None:
+                progress(
+                    "loading_mlx_model",
+                    "Apple GPU model is already loaded and ready for transcription.",
+                )
             return
 
         mlx_transcribe_module = self.mlx_transcribe_module
         mlx_core = self.mlx_core
         if mlx_transcribe_module is None or mlx_core is None:
             raise RuntimeError("mlx runtime unavailable")
+        if progress is not None:
+            progress(
+                "checking_mlx_model_assets",
+                "Looking for the local Apple GPU model so it does not need to be downloaded again.",
+            )
         if not self._mlx_model_assets_exist():
+            if progress is not None:
+                progress(
+                    "downloading_mlx_model",
+                    "Downloading the Apple GPU transcription model. This can take a while on first launch.",
+                )
             self._download_mlx_model()
+
+        if progress is not None:
+            progress(
+                "loading_mlx_model",
+                "Loading the Apple GPU model into memory.",
+            )
 
         def _load():
             self.log("Loading MLX Whisper model...")

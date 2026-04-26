@@ -48,6 +48,7 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertTrue(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .medium)
         XCTAssertTrue(settings.gpuAccelerationEnabled)
+        XCTAssertTrue(settings.keepBackendReadyInBackground)
         XCTAssertFalse(settings.launchAtLogin)
         XCTAssertEqual(
             settings.recordingCompletionTimeout,
@@ -68,6 +69,7 @@ final class SettingsManagerTests: XCTestCase {
             autoPunctuation: false,
             transcriptionQualityPreset: .high,
             gpuAccelerationEnabled: false,
+            keepBackendReadyInBackground: false,
             launchAtLogin: true,
             recordingCompletionTimeout: 480.0
         )
@@ -80,6 +82,7 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertFalse(loadedSettings.autoPunctuation)
         XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .high)
         XCTAssertFalse(loadedSettings.gpuAccelerationEnabled)
+        XCTAssertFalse(loadedSettings.keepBackendReadyInBackground)
         XCTAssertTrue(loadedSettings.launchAtLogin)
         XCTAssertEqual(loadedSettings.recordingCompletionTimeout, 480.0)
     }
@@ -136,6 +139,7 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertFalse(loadedSettings.autoPunctuation)
         XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .medium)
         XCTAssertTrue(loadedSettings.gpuAccelerationEnabled)
+        XCTAssertTrue(loadedSettings.keepBackendReadyInBackground)
         XCTAssertTrue(loadedSettings.launchAtLogin)
         XCTAssertEqual(loadedSettings.recordingCompletionTimeout, 450.0)
     }

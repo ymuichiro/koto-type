@@ -146,6 +146,26 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertNil(PythonProcessManager.parseBackendStatus(from: "hello world"))
     }
 
+    func testParseBackendPreparationProgressDecodesControlMessage() {
+        let output =
+            PythonProcessManager.controlMessagePrefix
+            + "{\"type\":\"backend_preparation_progress\",\"step\":\"downloading_mlx_model\",\"detail\":\"Downloading the Apple GPU transcription model.\"}"
+
+        let progress = PythonProcessManager.parseBackendPreparationProgress(from: output)
+
+        XCTAssertEqual(progress?.type, "backend_preparation_progress")
+        XCTAssertEqual(progress?.step, .downloadingMLXModel)
+        XCTAssertEqual(progress?.detail, "Downloading the Apple GPU transcription model.")
+    }
+
+    func testParseBackendPreparationProgressReturnsNilForOtherControlMessages() {
+        let output =
+            PythonProcessManager.controlMessagePrefix
+            + "{\"type\":\"managed_model\",\"model\":{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":false,\"fileCount\":0,\"byteCount\":0}}"
+
+        XCTAssertNil(PythonProcessManager.parseBackendPreparationProgress(from: output))
+    }
+
     func testParseManagedModelsResponseDecodesControlMessage() {
         let output =
             PythonProcessManager.controlMessagePrefix
