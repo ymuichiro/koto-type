@@ -31,7 +31,7 @@ jobs:
           echo "KOTOTYPE_VERSION=${TAG#v}" >> "${GITHUB_ENV}"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -227,7 +227,7 @@ jobs:
           printf 'Generated release files:\n%s\n' "${files[@]}"
       
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: KotoType-release-assets-${{ steps.release_tag.outputs.tag }}
           path: |
@@ -236,7 +236,7 @@ jobs:
             KotoType/appcast.xml
       
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
           files: |
