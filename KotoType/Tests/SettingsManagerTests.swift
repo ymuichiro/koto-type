@@ -46,7 +46,7 @@ final class SettingsManagerTests: XCTestCase {
 
         XCTAssertEqual(settings.language, "auto")
         XCTAssertTrue(settings.autoPunctuation)
-        XCTAssertEqual(settings.transcriptionQualityPreset, .medium)
+        XCTAssertEqual(settings.transcriptionQualityPreset, .high)
         XCTAssertTrue(settings.gpuAccelerationEnabled)
         XCTAssertTrue(settings.keepBackendReadyInBackground)
         XCTAssertFalse(settings.launchAtLogin)
@@ -137,7 +137,7 @@ final class SettingsManagerTests: XCTestCase {
         )
         XCTAssertEqual(loadedSettings.language, "ja")
         XCTAssertFalse(loadedSettings.autoPunctuation)
-        XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .medium)
+        XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .high)
         XCTAssertTrue(loadedSettings.gpuAccelerationEnabled)
         XCTAssertTrue(loadedSettings.keepBackendReadyInBackground)
         XCTAssertTrue(loadedSettings.launchAtLogin)

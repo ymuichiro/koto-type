@@ -10,6 +10,7 @@ enum IndicatorState {
 struct RecordingIndicatorView: View {
     let state: IndicatorState
     let attentionMessage: String?
+    let processingMessage: String?
     let recordingLevel: CGFloat
     let onCancelTapped: () -> Void
     private static let outerPadding: CGFloat = 6
@@ -18,33 +19,56 @@ struct RecordingIndicatorView: View {
     init(
         state: IndicatorState,
         attentionMessage: String? = nil,
+        processingMessage: String? = nil,
         recordingLevel: CGFloat = 0,
         onCancelTapped: @escaping () -> Void = {}
     ) {
         self.state = state
         self.attentionMessage = attentionMessage
+        self.processingMessage = processingMessage
         self.recordingLevel = max(0, min(recordingLevel, 1))
         self.onCancelTapped = onCancelTapped
     }
 
-    private static func frameSize(for state: IndicatorState, attentionMessage: String?) -> CGSize {
+    private static func frameSize(
+        for state: IndicatorState,
+        attentionMessage: String?,
+        processingMessage: String?
+    ) -> CGSize {
         let hasAttentionMessage = state == .attention && !(attentionMessage?.isEmpty ?? true)
         if hasAttentionMessage {
             return CGSize(width: 260, height: 68)
+        }
+
+        let hasProcessingMessage = state == .processing && !(processingMessage?.isEmpty ?? true)
+        if hasProcessingMessage {
+            return CGSize(width: 280, height: 68)
         }
 
         let width: CGFloat = (state == .recording || state == .processing) ? 368 : 124
         return CGSize(width: width, height: 68)
     }
 
-    static func preferredContentSize(for state: IndicatorState, attentionMessage: String?) -> CGSize {
-        let frameSize = Self.frameSize(for: state, attentionMessage: attentionMessage)
+    static func preferredContentSize(
+        for state: IndicatorState,
+        attentionMessage: String?,
+        processingMessage: String? = nil
+    ) -> CGSize {
+        let frameSize = Self.frameSize(
+            for: state,
+            attentionMessage: attentionMessage,
+            processingMessage: processingMessage
+        )
         let padding = Self.outerPadding * 2
         return CGSize(width: frameSize.width + padding, height: frameSize.height + padding)
     }
 
     private var preferredFrameSize: CGSize {
-        Self.frameSize(for: state, attentionMessage: attentionMessage)
+        Self.frameSize(
+            for: state,
+            attentionMessage: attentionMessage,
+            processingMessage: processingMessage
+        )
     }
 
     var body: some View {
@@ -59,6 +83,7 @@ struct RecordingIndicatorView: View {
         .padding(Self.outerPadding)
         .animation(.easeInOut(duration: 0.2), value: state)
         .animation(.easeInOut(duration: 0.2), value: attentionMessage ?? "")
+        .animation(.easeInOut(duration: 0.2), value: processingMessage ?? "")
     }
 
     @ViewBuilder
@@ -70,7 +95,7 @@ struct RecordingIndicatorView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
         case .processing:
-            ProcessingContent(onCancelTapped: onCancelTapped)
+            ProcessingContent(message: processingMessage, onCancelTapped: onCancelTapped)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -299,31 +324,24 @@ private struct WaveformAnimation: View {
 }
 
 private struct ProcessingContent: View {
+    let message: String?
     let onCancelTapped: () -> Void
     @State private var rotating = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
-                        .frame(width: 20, height: 20)
+                ProcessingSpinner(rotating: rotating)
 
-                    Circle()
-                        .trim(from: 0.1, to: 0.78)
-                        .stroke(
-                            AngularGradient(
-                                colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
-                                center: .center
-                            ),
-                            style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
-                        )
-                        .frame(width: 20, height: 20)
-                        .rotationEffect(.degrees(rotating ? 360 : 0))
+                if let message, !message.isEmpty {
+                    Text(message)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.94))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                } else {
+                    ProcessingDots()
                 }
-
-                ProcessingDots()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -350,6 +368,30 @@ private struct ProcessingContent: View {
             withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
                 rotating = true
             }
+        }
+    }
+}
+
+private struct ProcessingSpinner: View {
+    let rotating: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
+                .frame(width: 20, height: 20)
+
+            Circle()
+                .trim(from: 0.1, to: 0.78)
+                .stroke(
+                    AngularGradient(
+                        colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
+                )
+                .frame(width: 20, height: 20)
+                .rotationEffect(.degrees(rotating ? 360 : 0))
         }
     }
 }

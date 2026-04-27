@@ -158,6 +158,16 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(progress?.detail, "Downloading the Apple GPU transcription model.")
     }
 
+    func testParseBackendPreparationProgressDecodesMLXRuntimeImportStep() {
+        let output =
+            PythonProcessManager.controlMessagePrefix
+            + "{\"type\":\"backend_preparation_progress\",\"step\":\"importing_mlx_runtime\",\"detail\":\"Loading the MLX runtime components needed for Apple GPU transcription.\"}"
+
+        let progress = PythonProcessManager.parseBackendPreparationProgress(from: output)
+
+        XCTAssertEqual(progress?.step, .importingMLXRuntime)
+    }
+
     func testParseBackendPreparationProgressReturnsNilForOtherControlMessages() {
         let output =
             PythonProcessManager.controlMessagePrefix

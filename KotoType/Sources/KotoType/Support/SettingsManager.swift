@@ -46,7 +46,7 @@ struct AppSettings: Codable {
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
         language: String = "auto",
         autoPunctuation: Bool = true,
-        transcriptionQualityPreset: TranscriptionQualityPreset = .medium,
+        transcriptionQualityPreset: TranscriptionQualityPreset = .high,
         gpuAccelerationEnabled: Bool = true,
         keepBackendReadyInBackground: Bool = true,
         launchAtLogin: Bool = false,
@@ -74,7 +74,7 @@ struct AppSettings: Codable {
             try container.decodeIfPresent(Bool.self, forKey: .autoPunctuation) ?? true
         transcriptionQualityPreset =
             try container.decodeIfPresent(TranscriptionQualityPreset.self, forKey: .transcriptionQualityPreset)
-            ?? .medium
+            ?? .high
         gpuAccelerationEnabled =
             try container.decodeIfPresent(Bool.self, forKey: .gpuAccelerationEnabled) ?? true
         keepBackendReadyInBackground =
