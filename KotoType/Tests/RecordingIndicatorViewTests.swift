@@ -18,4 +18,16 @@ final class RecordingIndicatorViewTests: XCTestCase {
         XCTAssertGreaterThan(warningSize.width, defaultSize.width)
         XCTAssertEqual(warningSize.height, defaultSize.height)
     }
+
+    func testProcessingWithMessageUsesCompactStatusWidth() {
+        let defaultSize = RecordingIndicatorView.preferredContentSize(for: .processing, attentionMessage: nil)
+        let waitingSize = RecordingIndicatorView.preferredContentSize(
+            for: .processing,
+            attentionMessage: nil,
+            processingMessage: "Preparing backend..."
+        )
+
+        XCTAssertLessThan(waitingSize.width, defaultSize.width)
+        XCTAssertEqual(waitingSize.height, defaultSize.height)
+    }
 }

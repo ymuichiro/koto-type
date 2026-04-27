@@ -1305,7 +1305,7 @@ class BackendManager:
                 pid=self.pid,
             )
 
-    def _probe_mlx_runtime(self):
+    def _probe_mlx_runtime(self, progress=None):
         if self.mlx_disabled_for_session:
             return False, "mlx_disabled_for_session"
         if not self._is_apple_silicon():
@@ -1314,6 +1314,12 @@ class BackendManager:
             return self.mlx_runtime_available, self.mlx_runtime_reason
 
         try:
+            if progress is not None:
+                progress(
+                    "importing_mlx_runtime",
+                    "Loading the MLX runtime components needed for Apple GPU transcription.",
+                )
+            import_started_at = time.perf_counter()
             import importlib
 
             self.mlx_core = cast(MlxCoreModule, importlib.import_module("mlx.core"))
@@ -1323,10 +1329,13 @@ class BackendManager:
             )
             self.mlx_runtime_available = True
             self.mlx_runtime_reason = None
+            elapsed = time.perf_counter() - import_started_at
+            self.log(f"MLX runtime import completed in {elapsed:.2f} seconds")
         except Exception as error:
+            elapsed = time.perf_counter() - import_started_at
             self.mlx_runtime_available = False
             self.mlx_runtime_reason = "mlx_runtime_import_failed"
-            self.log(f"MLX runtime unavailable: {error}")
+            self.log(f"MLX runtime unavailable after {elapsed:.2f} seconds: {error}")
             self.log(traceback.format_exc())
         finally:
             self.mlx_runtime_checked = True
@@ -1348,7 +1357,7 @@ class BackendManager:
                 "probing_gpu",
                 "Detecting whether Apple GPU acceleration is available on this Mac.",
             )
-        gpu_available, reason = self._probe_mlx_runtime()
+        gpu_available, reason = self._probe_mlx_runtime(progress=progress)
         if not gpu_acceleration_enabled:
             return BackendStatus(
                 effective_backend="cpu",
@@ -1463,7 +1472,7 @@ class BackendManager:
         return self.cpu_model
 
     def _ensure_mlx_model(self, progress=None):
-        available, reason = self._probe_mlx_runtime()
+        available, reason = self._probe_mlx_runtime(progress=progress)
         if not available:
             raise RuntimeError(reason or "mlx runtime unavailable")
         if self.mlx_model_loaded:
@@ -1499,10 +1508,13 @@ class BackendManager:
 
         def _load():
             self.log("Loading MLX Whisper model...")
+            load_started_at = time.perf_counter()
             mlx_transcribe_module.ModelHolder.get_model(
                 self.mlx_model_dir,
                 mlx_core.float16,
             )
+            elapsed = time.perf_counter() - load_started_at
+            self.log(f"MLX model warmup completed in {elapsed:.2f} seconds")
             self.log(f"MLX model loaded (backend=mlx-whisper, model={DEFAULT_MLX_MODEL_ID})")
 
         self._run_with_model_load_slot(_load)

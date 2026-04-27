@@ -5,6 +5,7 @@ struct BackendPreparationProgress: Codable, Equatable, Sendable {
     enum Step: String, Codable, Sendable {
         case starting
         case probingGPU = "probing_gpu"
+        case importingMLXRuntime = "importing_mlx_runtime"
         case preparingMLXModel = "preparing_mlx_model"
         case checkingMLXModelAssets = "checking_mlx_model_assets"
         case downloadingMLXModel = "downloading_mlx_model"
@@ -36,6 +37,8 @@ struct BackendPreparationProgress: Codable, Equatable, Sendable {
             return "Starting transcription backend"
         case .probingGPU:
             return "Checking GPU support"
+        case .importingMLXRuntime:
+            return "Loading Apple GPU runtime"
         case .preparingMLXModel:
             return "Preparing Apple GPU model"
         case .checkingMLXModelAssets:
@@ -67,6 +70,8 @@ struct BackendPreparationProgress: Codable, Equatable, Sendable {
             return "Launching the transcription backend for first-time setup."
         case .probingGPU:
             return "Detecting whether Apple GPU acceleration is available on this Mac."
+        case .importingMLXRuntime:
+            return "Loading the MLX runtime components needed to use Apple GPU transcription."
         case .preparingMLXModel:
             return "Getting the Apple GPU transcription model ready."
         case .checkingMLXModelAssets:

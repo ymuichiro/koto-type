@@ -114,7 +114,7 @@ class FakeBackendManager(whisper_server.BackendManager):
         self.cpu_warmups = 0
         self.mlx_warmups = 0
 
-    def _probe_mlx_runtime(self):
+    def _probe_mlx_runtime(self, progress=None):
         if self.mlx_disabled_for_session:
             return False, "mlx_disabled_for_session"
         return self.probe_result

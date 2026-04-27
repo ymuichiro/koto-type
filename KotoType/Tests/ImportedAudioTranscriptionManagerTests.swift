@@ -32,7 +32,7 @@ final class ImportedAudioTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(mock.sendInputCallCount, 1)
         XCTAssertEqual(mock.lastLanguage, "auto")
         XCTAssertTrue(mock.lastAutoPunctuation ?? false)
-        XCTAssertEqual(mock.lastQualityPreset, .medium)
+        XCTAssertEqual(mock.lastQualityPreset, .high)
         XCTAssertTrue(mock.lastGPUAccelerationEnabled ?? false)
 
         mock.emitOutput("こんにちは")
