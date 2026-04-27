@@ -114,13 +114,29 @@ final class HotkeyRecorder: NSView {
             useOption: false,
             useControl: false,
             useShift: false,
+            commandSide: .either,
+            optionSide: .either,
+            controlSide: .either,
+            shiftSide: .either,
             keyCode: 0
         )
 
-        if modifiers.contains(.command) { config.useCommand = true }
-        if modifiers.contains(.option) { config.useOption = true }
-        if modifiers.contains(.control) { config.useControl = true }
-        if modifiers.contains(.shift) { config.useShift = true }
+        if let side = HotkeyConfiguration.side(for: .command, in: modifiers) {
+            config.useCommand = true
+            config.commandSide = side
+        }
+        if let side = HotkeyConfiguration.side(for: .option, in: modifiers) {
+            config.useOption = true
+            config.optionSide = side
+        }
+        if let side = HotkeyConfiguration.side(for: .control, in: modifiers) {
+            config.useControl = true
+            config.controlSide = side
+        }
+        if let side = HotkeyConfiguration.side(for: .shift, in: modifiers) {
+            config.useShift = true
+            config.shiftSide = side
+        }
 
         if keyCode > 0 {
             config.keyCode = keyCode
@@ -158,16 +174,11 @@ final class HotkeyRecorder: NSView {
     }
 
     static func relevantModifiers(from modifiers: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
-        modifiers.intersection([.command, .option, .control, .shift])
+        HotkeyConfiguration.relevantModifiers(from: modifiers)
     }
 
     static func modifierCount(_ modifiers: NSEvent.ModifierFlags) -> Int {
-        var count = 0
-        if modifiers.contains(.command) { count += 1 }
-        if modifiers.contains(.option) { count += 1 }
-        if modifiers.contains(.control) { count += 1 }
-        if modifiers.contains(.shift) { count += 1 }
-        return count
+        HotkeyConfiguration.modifierCount(modifiers)
     }
     
     private func isValidKeyCode(_ keyCode: UInt32) -> Bool {

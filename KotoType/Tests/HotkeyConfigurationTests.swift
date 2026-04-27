@@ -1,7 +1,8 @@
 @testable import KotoType
-import XCTest
-import Foundation
 import AppKit
+import Foundation
+import IOKit.hidsystem
+import XCTest
 
 final class HotkeyConfigurationTests: XCTestCase {
     func testDefaultConfiguration() throws {
@@ -43,6 +44,23 @@ final class HotkeyConfigurationTests: XCTestCase {
         XCTAssertTrue(description.contains("⌘"))
         XCTAssertTrue(description.contains("⌥"))
         XCTAssertTrue(description.contains("⇧"))
+    }
+
+    func testDescriptionIncludesRecordedModifierSide() {
+        let config = HotkeyConfiguration(
+            useCommand: true,
+            useOption: false,
+            useControl: true,
+            useShift: false,
+            commandSide: .left,
+            optionSide: .either,
+            controlSide: .right,
+            shiftSide: .either,
+            keyCode: 0
+        )
+
+        XCTAssertTrue(config.description.contains("L⌘"))
+        XCTAssertTrue(config.description.contains("R⌃"))
     }
 
     func testEquality() throws {
@@ -136,5 +154,49 @@ final class HotkeyConfigurationTests: XCTestCase {
         let modifierFlags = NSEvent.ModifierFlags(rawValue: flags)
         XCTAssertNotNil(modifierFlags)
         XCTAssertTrue(modifierFlags.isEmpty)
+    }
+
+    func testSideSpecificModifierMatchesRecordedSideOnly() {
+        let config = HotkeyConfiguration(
+            useCommand: true,
+            useOption: false,
+            useControl: false,
+            useShift: false,
+            commandSide: .left,
+            keyCode: 0
+        )
+        let leftCommand = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICELCMDKEYMASK)
+        )
+        let rightCommand = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICERCMDKEYMASK)
+        )
+
+        XCTAssertTrue(config.matches(modifierFlags: leftCommand))
+        XCTAssertFalse(config.matches(modifierFlags: rightCommand))
+    }
+
+    func testEitherSideModifierMatchesLegacyConfiguration() {
+        let config = HotkeyConfiguration(
+            useCommand: true,
+            useOption: false,
+            useControl: false,
+            useShift: false,
+            commandSide: .either,
+            keyCode: 0
+        )
+        let leftCommand = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICELCMDKEYMASK)
+        )
+        let rightCommand = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICERCMDKEYMASK)
+        )
+
+        XCTAssertTrue(config.matches(modifierFlags: leftCommand))
+        XCTAssertTrue(config.matches(modifierFlags: rightCommand))
     }
 }

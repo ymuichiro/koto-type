@@ -63,6 +63,10 @@ final class SettingsManagerTests: XCTestCase {
                 useOption: true,
                 useControl: true,
                 useShift: false,
+                commandSide: .either,
+                optionSide: .right,
+                controlSide: .left,
+                shiftSide: .either,
                 keyCode: 0x31
             ),
             language: "en",
@@ -132,6 +136,10 @@ final class SettingsManagerTests: XCTestCase {
                 useOption: false,
                 useControl: true,
                 useShift: false,
+                commandSide: .either,
+                optionSide: .either,
+                controlSide: .either,
+                shiftSide: .either,
                 keyCode: 36
             )
         )

@@ -1,6 +1,7 @@
 @testable import KotoType
-import XCTest
 import AppKit
+import IOKit.hidsystem
+import XCTest
 
 @MainActor
 final class HotkeyRecorderTests: XCTestCase {
@@ -34,6 +35,22 @@ final class HotkeyRecorderTests: XCTestCase {
         XCTAssertEqual(config.keyCode, 0x31)
     }
 
+    func testConfigurationCapturesModifierSidesFromFlags() {
+        let modifiers = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue
+                | NSEvent.ModifierFlags.option.rawValue
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICELCMDKEYMASK)
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICERALTKEYMASK)
+        )
+
+        let config = HotkeyRecorder.configuration(from: modifiers, keyCode: 0)
+
+        XCTAssertTrue(config.useCommand)
+        XCTAssertEqual(config.commandSide, .left)
+        XCTAssertTrue(config.useOption)
+        XCTAssertEqual(config.optionSide, .right)
+    }
+
     func testModifierCaptureDecisionCommitsPreviousOnFirstRelease() {
         let decision = HotkeyRecorder.modifierCaptureDecision(
             previous: [.control, .option],
@@ -65,5 +82,15 @@ final class HotkeyRecorderTests: XCTestCase {
         )
 
         XCTAssertEqual(decision, .resetLock)
+    }
+
+    func testModifierCountTreatsLeftAndRightOfSameFamilyAsOneModifier() {
+        let modifiers = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICELCMDKEYMASK)
+                | NSEvent.ModifierFlags.RawValue(NX_DEVICERCMDKEYMASK)
+        )
+
+        XCTAssertEqual(HotkeyRecorder.modifierCount(modifiers), 1)
     }
 }

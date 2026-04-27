@@ -22,6 +22,18 @@ A Mac-native voice-to-text application with high-accuracy transcription powered 
 
 </div>
 
+## Demo
+
+<p align="center">
+  <img
+    src="docs/assets/koto-type-demo.gif"
+    alt="Animated demo of KotoType recording from the menu bar and inserting transcribed text into a text field on macOS."
+    width="640"
+  />
+</p>
+
+Hold your hotkey, speak, release, and KotoType transcribes your speech and inserts the result at the current cursor position.
+
 ## Features
 
 - **Menu Bar Application**: Resides in the menu bar for quick access
