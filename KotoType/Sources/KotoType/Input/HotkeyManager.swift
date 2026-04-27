@@ -49,20 +49,19 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
         let currentConfig = configuration
         lock.unlock()
         
-        let currentModifiers = modifiers.intersection([.command, .option, .control, .shift])
-        let targetModifiers = NSEvent.ModifierFlags(rawValue: currentConfig.modifiers)
-        let modifiersMatch = currentModifiers == targetModifiers
+        let currentModifiers = HotkeyConfiguration.relevantModifiers(from: modifiers)
+        let modifiersMatch = currentConfig.matches(modifierFlags: currentModifiers)
 
         if currentConfig.keyCode == 0 {
             if event.type == .flagsChanged {
-                let prevModifiers = _previousModifiers.intersection([.command, .option, .control, .shift])
+                let prevModifiers = HotkeyConfiguration.relevantModifiers(from: _previousModifiers)
                 
-                if currentModifiers == targetModifiers && prevModifiers != targetModifiers {
+                if modifiersMatch && !currentConfig.matches(modifierFlags: prevModifiers) {
                     _isHotkeyPressed = true
                     DispatchQueue.main.async { [weak self] in
                         self?.hotkeyKeyDown?()
                     }
-                } else if prevModifiers == targetModifiers && currentModifiers != targetModifiers && _isHotkeyPressed {
+                } else if currentConfig.matches(modifierFlags: prevModifiers) && !modifiersMatch && _isHotkeyPressed {
                     _isHotkeyPressed = false
                     DispatchQueue.main.async { [weak self] in
                         self?.hotkeyKeyUp?()
@@ -88,9 +87,9 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
                 }
             }
         } else if event.type == .flagsChanged {
-            let prevModifiers = _previousModifiers.intersection([.command, .option, .control, .shift])
+            let prevModifiers = HotkeyConfiguration.relevantModifiers(from: _previousModifiers)
             
-            if _isHotkeyPressed && prevModifiers == targetModifiers && currentModifiers != targetModifiers {
+            if _isHotkeyPressed && currentConfig.matches(modifierFlags: prevModifiers) && !modifiersMatch {
                 _isHotkeyPressed = false
                 _isProcessingHotkey = false
                 DispatchQueue.main.async { [weak self] in

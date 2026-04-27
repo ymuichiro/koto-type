@@ -194,32 +194,23 @@ ffmpeg -version</code></pre>
       </section>
 
       <section class="demo reveal">
-        <h2>5秒で流れを確認</h2>
+        <h2>実際の動作を見る</h2>
         <p class="section-copy">
-          録音の流れはシンプルです。ホットキーを押す、話す、離す。すると文字が挿入されます。
+          これは実際のアプリ動作です。メニューバーから開始し、ホットキー長押しで録音し、離すと対象アプリへ文字起こし結果が入ります。
         </p>
-        <div class="demo-strip" aria-label="簡易ビジュアルガイド">
-          <div class="demo-step demo-step-hold">
-            <span class="demo-step-label">ホットキーを押す</span>
-            <span class="hotkey-visual" aria-hidden="true">
-              <span class="keycap">⌘</span>
-              <span class="key-plus">+</span>
-              <span class="keycap">⌥</span>
-            </span>
-            <span class="demo-step-sub">既定: ⌘+⌥</span>
-          </div>
-          <div class="demo-step">話す</div>
-          <div class="demo-step demo-step-release">
-            <span class="demo-step-label">ホットキーを離す</span>
-            <span class="hotkey-visual" aria-hidden="true">
-              <span class="keycap">⌘</span>
-              <span class="key-plus">+</span>
-              <span class="keycap">⌥</span>
-            </span>
-            <span class="demo-step-sub">指を離すと録音停止</span>
-          </div>
-          <div class="demo-step">文字を挿入</div>
-        </div>
+        <figure class="demo-frame">
+          <img
+            class="demo-gif"
+            src="../assets/koto-type-demo.gif"
+            alt="KotoType がメニューバーから録音し、macOS のテキスト欄へ文字起こし結果を挿入するアニメーションデモ"
+            width="640"
+            height="488"
+            loading="lazy"
+          />
+          <figcaption class="demo-caption">
+            ホットキーを押す、話す、離すだけで、KotoType がカーソル位置へ文字を入力します。
+          </figcaption>
+        </figure>
       </section>
 
       <section class="strengths">

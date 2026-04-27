@@ -54,6 +54,10 @@ final class AppSettingsTests: XCTestCase {
                 useOption: false,
                 useControl: true,
                 useShift: true,
+                commandSide: .right,
+                optionSide: .either,
+                controlSide: .left,
+                shiftSide: .right,
                 keyCode: 0x24
             ),
             language: "ja",
@@ -131,6 +135,10 @@ final class AppSettingsTests: XCTestCase {
                 useOption: true,
                 useControl: true,
                 useShift: false,
+                commandSide: .either,
+                optionSide: .either,
+                controlSide: .either,
+                shiftSide: .either,
                 keyCode: 49
             )
         )
