@@ -80,6 +80,71 @@ final class KeystrokeSimulator {
         Logger.shared.log("KeystrokeSimulator: Cmd+V executed via CGEvent", level: .info)
     }
 
+    static func executeKeyCommand(_ command: HotkeyConfiguration) {
+        guard command.keyCode > 0 else {
+            Logger.shared.log(
+                "KeystrokeSimulator: executeKeyCommand skipped because keyCode is missing",
+                level: .warning
+            )
+            return
+        }
+
+        Logger.shared.log(
+            "KeystrokeSimulator: executeKeyCommand called with keyCode=\(command.keyCode)",
+            level: .debug
+        )
+
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let modifierSequence = orderedModifierSequence(for: command)
+        var activeFlags: CGEventFlags = []
+
+        for modifier in modifierSequence {
+            guard let modifierDown = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: modifier.keyCode,
+                keyDown: true
+            ) else {
+                continue
+            }
+
+            activeFlags.formUnion(modifier.flag)
+            modifierDown.flags = activeFlags
+            modifierDown.post(tap: .cgSessionEventTap)
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+
+        let keyCode = CGKeyCode(command.keyCode)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+        keyDown?.flags = activeFlags
+        keyDown?.post(tap: .cgSessionEventTap)
+        Thread.sleep(forTimeInterval: 0.01)
+
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        keyUp?.flags = activeFlags
+        keyUp?.post(tap: .cgSessionEventTap)
+        Thread.sleep(forTimeInterval: 0.005)
+
+        for modifier in modifierSequence.reversed() {
+            guard let modifierUp = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: modifier.keyCode,
+                keyDown: false
+            ) else {
+                continue
+            }
+
+            modifierUp.flags = activeFlags
+            modifierUp.post(tap: .cgSessionEventTap)
+            activeFlags.remove(modifier.flag)
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+
+        Logger.shared.log(
+            "KeystrokeSimulator: key command executed for keyCode=\(command.keyCode)",
+            level: .info
+        )
+    }
+
     private static func snapshotForNextPasteboardOperation(
         from pasteboard: NSPasteboard
     ) -> PasteboardSnapshot {
@@ -140,6 +205,51 @@ final class KeystrokeSimulator {
                 "KeystrokeSimulator: pasteboard changed externally before restore; leaving current contents intact",
                 level: .debug
             )
+        }
+    }
+
+    static func orderedModifierSequence(
+        for command: HotkeyConfiguration
+    ) -> [(keyCode: CGKeyCode, flag: CGEventFlags)] {
+        var sequence: [(CGKeyCode, CGEventFlags)] = []
+
+        if command.useControl {
+            sequence.append((modifierKeyCode(for: .control, side: command.controlSide), .maskControl))
+        }
+        if command.useOption {
+            sequence.append((modifierKeyCode(for: .option, side: command.optionSide), .maskAlternate))
+        }
+        if command.useShift {
+            sequence.append((modifierKeyCode(for: .shift, side: command.shiftSide), .maskShift))
+        }
+        if command.useCommand {
+            sequence.append((modifierKeyCode(for: .command, side: command.commandSide), .maskCommand))
+        }
+
+        return sequence
+    }
+
+    private static func modifierKeyCode(
+        for modifier: HotkeyModifierKey,
+        side: ModifierSide
+    ) -> CGKeyCode {
+        switch (modifier, side) {
+        case (.control, .right):
+            return 0x3E
+        case (.control, _):
+            return 0x3B
+        case (.option, .right):
+            return 0x3D
+        case (.option, _):
+            return 0x3A
+        case (.shift, .right):
+            return 0x3C
+        case (.shift, _):
+            return 0x38
+        case (.command, .right):
+            return 0x36
+        case (.command, _):
+            return 0x37
         }
     }
 }

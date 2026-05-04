@@ -12,6 +12,7 @@ struct RecordingIndicatorView: View {
     let attentionMessage: String?
     let processingMessage: String?
     let recordingLevel: CGFloat
+    let recordingInputDeviceName: String?
     let onCancelTapped: () -> Void
     private static let outerPadding: CGFloat = 6
     private static let contentClipCornerRadius: CGFloat = 13
@@ -21,19 +22,22 @@ struct RecordingIndicatorView: View {
         attentionMessage: String? = nil,
         processingMessage: String? = nil,
         recordingLevel: CGFloat = 0,
+        recordingInputDeviceName: String? = nil,
         onCancelTapped: @escaping () -> Void = {}
     ) {
         self.state = state
         self.attentionMessage = attentionMessage
         self.processingMessage = processingMessage
         self.recordingLevel = max(0, min(recordingLevel, 1))
+        self.recordingInputDeviceName = recordingInputDeviceName
         self.onCancelTapped = onCancelTapped
     }
 
     private static func frameSize(
         for state: IndicatorState,
         attentionMessage: String?,
-        processingMessage: String?
+        processingMessage: String?,
+        recordingInputDeviceName _: String?
     ) -> CGSize {
         let hasAttentionMessage = state == .attention && !(attentionMessage?.isEmpty ?? true)
         if hasAttentionMessage {
@@ -45,6 +49,10 @@ struct RecordingIndicatorView: View {
             return CGSize(width: 280, height: 68)
         }
 
+        if state == .recording {
+            return CGSize(width: 368, height: 84)
+        }
+
         let width: CGFloat = (state == .recording || state == .processing) ? 368 : 124
         return CGSize(width: width, height: 68)
     }
@@ -52,12 +60,14 @@ struct RecordingIndicatorView: View {
     static func preferredContentSize(
         for state: IndicatorState,
         attentionMessage: String?,
-        processingMessage: String? = nil
+        processingMessage: String? = nil,
+        recordingInputDeviceName: String? = nil
     ) -> CGSize {
         let frameSize = Self.frameSize(
             for: state,
             attentionMessage: attentionMessage,
-            processingMessage: processingMessage
+            processingMessage: processingMessage,
+            recordingInputDeviceName: recordingInputDeviceName
         )
         let padding = Self.outerPadding * 2
         return CGSize(width: frameSize.width + padding, height: frameSize.height + padding)
@@ -67,7 +77,8 @@ struct RecordingIndicatorView: View {
         Self.frameSize(
             for: state,
             attentionMessage: attentionMessage,
-            processingMessage: processingMessage
+            processingMessage: processingMessage,
+            recordingInputDeviceName: recordingInputDeviceName
         )
     }
 
@@ -90,7 +101,11 @@ struct RecordingIndicatorView: View {
     private var stateContent: some View {
         switch state {
         case .recording:
-            RecordingContent(level: recordingLevel, onCancelTapped: onCancelTapped)
+            RecordingContent(
+                level: recordingLevel,
+                inputDeviceName: recordingInputDeviceName,
+                onCancelTapped: onCancelTapped
+            )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -159,31 +174,40 @@ private struct IndicatorBackground: View {
 
 private struct RecordingContent: View {
     let level: CGFloat
+    let inputDeviceName: String?
     let onCancelTapped: () -> Void
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Text("Mic: \(inputDeviceName ?? "Unknown input device")")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.88))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer()
+
+                Button(action: onCancelTapped) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            Circle()
+                                .fill(Color.black.opacity(0.45))
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Cancel recording")
+            }
+
             WaveformAnimation(color: .white, level: level)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-
-            Button(action: onCancelTapped) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.92))
-                    .frame(width: 22, height: 22)
-                    .background(
-                        Circle()
-                            .fill(Color.black.opacity(0.45))
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 1)
-            .padding(.trailing, 2)
-            .help("Cancel recording")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }

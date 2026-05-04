@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum StorageConfirmationAction: Identifiable {
     case clearHistory
@@ -54,6 +55,14 @@ struct SettingsView: View {
     @State private var recordingCompletionTimeout: Double
     @State private var dictionaryWords: [String]
     @State private var pendingDictionaryEntry: String
+    @State private var dictionaryStatusMessage: String?
+    @State private var dictionaryStatusMessageIsError = false
+    @State private var voiceShortcuts: [VoiceShortcut]
+    @State private var pendingVoiceShortcutTrigger: String
+    @State private var pendingVoiceShortcutActionKind: VoiceShortcutActionKind
+    @State private var pendingVoiceShortcutInsertText: String
+    @State private var pendingVoiceShortcutKeyCommand: HotkeyConfiguration
+    @State private var voiceShortcutStatusMessage: String?
     @State private var isShowingLicenses = false
     @State private var storageSnapshot = StorageManagementSnapshot(
         historyEntryCount: 0,
@@ -102,6 +111,7 @@ struct SettingsView: View {
 
         let settings = SettingsManager.shared.load()
         let userDictionaryWords = UserDictionaryManager.shared.loadWords()
+        let savedVoiceShortcuts = VoiceShortcutManager.shared.loadShortcuts()
         self._hotkeyConfig = State(initialValue: settings.hotkeyConfig)
         self._language = State(initialValue: settings.language)
         self._autoPunctuation = State(initialValue: settings.autoPunctuation)
@@ -112,6 +122,11 @@ struct SettingsView: View {
         self._recordingCompletionTimeout = State(initialValue: settings.recordingCompletionTimeout)
         self._dictionaryWords = State(initialValue: userDictionaryWords)
         self._pendingDictionaryEntry = State(initialValue: "")
+        self._voiceShortcuts = State(initialValue: savedVoiceShortcuts)
+        self._pendingVoiceShortcutTrigger = State(initialValue: "")
+        self._pendingVoiceShortcutActionKind = State(initialValue: .insertText)
+        self._pendingVoiceShortcutInsertText = State(initialValue: "")
+        self._pendingVoiceShortcutKeyCommand = State(initialValue: VoiceShortcutManager.emptyKeyCommand())
     }
 
     var body: some View {
@@ -122,6 +137,7 @@ struct SettingsView: View {
                 appSection
                 storageSection
                 quickActionsSection
+                voiceShortcutsSection
                 licensesSection
                 buttonRow
             }
@@ -267,9 +283,15 @@ struct SettingsView: View {
     }
 
     private var dictionarySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Custom terminology dictionary")
-                .font(.subheadline)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Custom terminology dictionary")
+                    .font(.subheadline)
+                Spacer()
+                Text("\(normalizedDictionaryWords.count)/\(UserDictionaryManager.maxWordCount) terms")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
             HStack {
                 TextField("e.g. ctranslate2, Whisper large-v3-turbo", text: $pendingDictionaryEntry)
@@ -282,6 +304,17 @@ struct SettingsView: View {
                 .disabled(pendingDictionaryEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
+            HStack(spacing: 10) {
+                Button("Import CSV…") {
+                    importDictionaryCSV()
+                }
+
+                Button("Export CSV…") {
+                    exportDictionaryCSV()
+                }
+                .disabled(normalizedDictionaryWords.isEmpty)
+            }
+
             if dictionaryWords.isEmpty {
                 Text("No terms registered")
                     .font(.caption)
@@ -291,13 +324,20 @@ struct SettingsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(dictionaryWords, id: \.self) { word in
+                        ForEach(Array(dictionaryWords.indices), id: \.self) { index in
                             HStack {
-                                Text(word)
-                                    .lineLimit(1)
+                                TextField(
+                                    "Term",
+                                    text: dictionaryWordBinding(for: index)
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    normalizeDictionaryWords()
+                                }
+
                                 Spacer()
                                 Button {
-                                    removeDictionaryWord(word)
+                                    removeDictionaryWord(at: index)
                                 } label: {
                                     Image(systemName: "trash")
                                 }
@@ -316,13 +356,115 @@ struct SettingsView: View {
                     Spacer()
                     Button("Remove all", role: .destructive) {
                         dictionaryWords.removeAll()
+                        dictionaryStatusMessage = nil
                     }
                 }
             }
 
-            Text("Up to 200 terms. Changes apply from the next transcription after saving.")
+            Text("Up to 200 terms. CSV import/export uses a single `term` column. Changes apply from the next transcription after saving.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            if let dictionaryStatusMessage {
+                Text(dictionaryStatusMessage)
+                    .font(.caption)
+                    .foregroundColor(dictionaryStatusMessageIsError ? .orange : .secondary)
+            }
+        }
+    }
+
+    private var voiceShortcutsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("Voice Shortcuts")
+
+            Text("Run a saved action only when the entire transcript matches a trigger phrase after normalization.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("Trigger phrase", text: $pendingVoiceShortcutTrigger)
+
+                Picker("Action", selection: $pendingVoiceShortcutActionKind) {
+                    ForEach(VoiceShortcutActionKind.allCases) { actionKind in
+                        Text(actionKind.displayName).tag(actionKind)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if pendingVoiceShortcutActionKind == .insertText {
+                    TextField(
+                        "Text to insert",
+                        text: $pendingVoiceShortcutInsertText,
+                        axis: .vertical
+                    )
+                    .lineLimit(2...4)
+                } else {
+                    HotkeyRecorderView(initialConfig: pendingVoiceShortcutKeyCommand) { config in
+                        pendingVoiceShortcutKeyCommand = config
+                    }
+                    .frame(height: 40)
+
+                    Text(
+                        "Current command: \(pendingVoiceShortcutKeyCommand.description.isEmpty ? "Not set" : pendingVoiceShortcutKeyCommand.description)"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Add shortcut") {
+                        addVoiceShortcut()
+                    }
+                    .disabled(!canAddVoiceShortcut)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text("Saved shortcuts")
+                    .font(.subheadline)
+                Spacer()
+                Text("\(normalizedVoiceShortcuts.count)/\(VoiceShortcutManager.maxShortcutCount)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if voiceShortcuts.isEmpty {
+                Text("No shortcuts registered")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(voiceShortcuts.indices), id: \.self) { index in
+                            VoiceShortcutRowView(
+                                shortcut: voiceShortcutBinding(for: index),
+                                onRemove: {
+                                    removeVoiceShortcut(at: index)
+                                }
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 300)
+            }
+
+            Text("Only exact matches after normalization trigger a shortcut. Changes apply after saving.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if let voiceShortcutStatusMessage {
+                Text(voiceShortcutStatusMessage)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 
@@ -535,6 +677,28 @@ struct SettingsView: View {
         isRefreshingStorage || activeModelOperation != nil
     }
 
+    private var normalizedDictionaryWords: [String] {
+        UserDictionaryManager.normalizedWords(dictionaryWords)
+    }
+
+    private var normalizedVoiceShortcuts: [VoiceShortcut] {
+        VoiceShortcutManager.normalizedShortcuts(voiceShortcuts)
+    }
+
+    private var canAddVoiceShortcut: Bool {
+        let normalizedTrigger = VoiceShortcutManager.normalizedTrigger(pendingVoiceShortcutTrigger)
+        guard !normalizedTrigger.isEmpty else {
+            return false
+        }
+
+        switch pendingVoiceShortcutActionKind {
+        case .insertText:
+            return !pendingVoiceShortcutInsertText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .keyCommand:
+            return pendingVoiceShortcutKeyCommand.keyCode > 0
+        }
+    }
+
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(.headline)
@@ -566,6 +730,8 @@ struct SettingsView: View {
 
     private func applySettings() {
         Logger.shared.log("SettingsView.applySettings called: hotkey=\(hotkeyConfig.description)")
+        normalizeDictionaryWords()
+        normalizeVoiceShortcuts()
         let settings = AppSettings(
             hotkeyConfig: hotkeyConfig,
             language: language,
@@ -579,6 +745,7 @@ struct SettingsView: View {
         _ = LaunchAtLoginManager.shared.setEnabled(launchAtLogin)
         SettingsManager.shared.save(settings)
         UserDictionaryManager.shared.saveWords(dictionaryWords)
+        VoiceShortcutManager.shared.saveShortcuts(voiceShortcuts)
         onHotkeyChanged(hotkeyConfig)
         onSettingsChanged?()
     }
@@ -588,10 +755,156 @@ struct SettingsView: View {
         guard !cleaned.isEmpty else { return }
         dictionaryWords = UserDictionaryManager.normalizedWords(dictionaryWords + [cleaned])
         pendingDictionaryEntry = ""
+        dictionaryStatusMessage = nil
     }
 
-    private func removeDictionaryWord(_ word: String) {
-        dictionaryWords.removeAll { $0 == word }
+    private func removeDictionaryWord(at index: Int) {
+        guard dictionaryWords.indices.contains(index) else {
+            return
+        }
+        dictionaryWords.remove(at: index)
+        dictionaryStatusMessage = nil
+    }
+
+    private func dictionaryWordBinding(for index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard dictionaryWords.indices.contains(index) else {
+                    return ""
+                }
+                return dictionaryWords[index]
+            },
+            set: { newValue in
+                guard dictionaryWords.indices.contains(index) else {
+                    return
+                }
+                dictionaryWords[index] = newValue
+                dictionaryStatusMessage = nil
+            }
+        )
+    }
+
+    private func normalizeDictionaryWords() {
+        dictionaryWords = UserDictionaryManager.normalizedWords(dictionaryWords)
+    }
+
+    private func importDictionaryCSV() {
+        let panel = NSOpenPanel()
+        panel.title = "Import terminology CSV"
+        panel.message = "Choose a CSV file with a single `term` column."
+        panel.allowedContentTypes = [.commaSeparatedText, .plainText]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let result = try UserDictionaryManager.shared.importWords(
+                fromCSVData: data,
+                existingWords: dictionaryWords
+            )
+            dictionaryWords = result.words
+            dictionaryStatusMessage = dictionaryImportMessage(from: result)
+            dictionaryStatusMessageIsError = false
+        } catch {
+            dictionaryStatusMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            dictionaryStatusMessageIsError = true
+        }
+    }
+
+    private func exportDictionaryCSV() {
+        let panel = NSSavePanel()
+        panel.title = "Export terminology CSV"
+        panel.message = "Choose where to save the current dictionary."
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "user_dictionary.csv"
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            let data = UserDictionaryManager.shared.csvData(for: dictionaryWords)
+            try data.write(to: url, options: [.atomic])
+            dictionaryStatusMessage = "Exported \(normalizedDictionaryWords.count) terms."
+            dictionaryStatusMessageIsError = false
+        } catch {
+            dictionaryStatusMessage = error.localizedDescription
+            dictionaryStatusMessageIsError = true
+        }
+    }
+
+    private func dictionaryImportMessage(from result: UserDictionaryCSVImportResult) -> String {
+        var message = "Imported \(result.importedCount) terms."
+        if result.duplicateCount > 0 {
+            message += " \(result.duplicateCount) duplicates skipped."
+        }
+        if result.blankCount > 0 {
+            message += " \(result.blankCount) blank rows ignored."
+        }
+        if result.truncatedCount > 0 {
+            message += " \(result.truncatedCount) terms exceeded the limit."
+        }
+        return message
+    }
+
+    private func addVoiceShortcut() {
+        var shortcut = VoiceShortcut(
+            triggerPhrase: pendingVoiceShortcutTrigger,
+            actionKind: pendingVoiceShortcutActionKind,
+            insertText: pendingVoiceShortcutInsertText,
+            keyCommand: pendingVoiceShortcutActionKind == .keyCommand ? pendingVoiceShortcutKeyCommand : nil
+        )
+
+        if shortcut.actionKind == .insertText {
+            shortcut.keyCommand = nil
+        } else {
+            shortcut.insertText = ""
+        }
+
+        voiceShortcuts.append(shortcut)
+        normalizeVoiceShortcuts()
+        pendingVoiceShortcutTrigger = ""
+        pendingVoiceShortcutActionKind = .insertText
+        pendingVoiceShortcutInsertText = ""
+        pendingVoiceShortcutKeyCommand = VoiceShortcutManager.emptyKeyCommand()
+        voiceShortcutStatusMessage = nil
+    }
+
+    private func removeVoiceShortcut(at index: Int) {
+        guard voiceShortcuts.indices.contains(index) else {
+            return
+        }
+        voiceShortcuts.remove(at: index)
+        voiceShortcutStatusMessage = nil
+    }
+
+    private func voiceShortcutBinding(for index: Int) -> Binding<VoiceShortcut> {
+        Binding(
+            get: {
+                guard voiceShortcuts.indices.contains(index) else {
+                    return VoiceShortcut(
+                        triggerPhrase: "",
+                        actionKind: .insertText
+                    )
+                }
+                return voiceShortcuts[index]
+            },
+            set: { newValue in
+                guard voiceShortcuts.indices.contains(index) else {
+                    return
+                }
+                voiceShortcuts[index] = newValue
+                voiceShortcutStatusMessage = nil
+            }
+        )
+    }
+
+    private func normalizeVoiceShortcuts() {
+        voiceShortcuts = VoiceShortcutManager.normalizedShortcuts(voiceShortcuts)
     }
 
     @MainActor
@@ -657,5 +970,64 @@ struct SettingsView: View {
             return "\(Int(minutes.rounded())) min"
         }
         return String(format: "%.1f min", minutes)
+    }
+}
+
+private struct VoiceShortcutRowView: View {
+    @Binding var shortcut: VoiceShortcut
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Toggle("Enabled", isOn: $shortcut.isEnabled)
+                Spacer()
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            TextField("Trigger phrase", text: $shortcut.triggerPhrase)
+
+            Picker("Action", selection: $shortcut.actionKind) {
+                ForEach(VoiceShortcutActionKind.allCases) { actionKind in
+                    Text(actionKind.displayName).tag(actionKind)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if shortcut.actionKind == .insertText {
+                TextField("Text to insert", text: $shortcut.insertText, axis: .vertical)
+                    .lineLimit(2...4)
+            } else {
+                HotkeyRecorderView(
+                    initialConfig: shortcut.keyCommand ?? VoiceShortcutManager.emptyKeyCommand()
+                ) { config in
+                    shortcut.keyCommand = config
+                }
+                .frame(height: 40)
+
+                Text(
+                    "Current command: \((shortcut.keyCommand?.description ?? "").isEmpty ? "Not set" : (shortcut.keyCommand?.description ?? ""))"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .onChange(of: shortcut.actionKind) { newActionKind in
+            switch newActionKind {
+            case .insertText:
+                shortcut.keyCommand = nil
+            case .keyCommand:
+                if shortcut.keyCommand == nil {
+                    shortcut.keyCommand = VoiceShortcutManager.emptyKeyCommand()
+                }
+            }
+        }
     }
 }

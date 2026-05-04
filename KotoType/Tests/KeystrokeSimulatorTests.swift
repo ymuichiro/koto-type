@@ -195,4 +195,41 @@ final class KeystrokeSimulatorTests: XCTestCase {
 
         wait(for: [expectation], timeout: 2.0)
     }
+
+    func testExecuteKeyCommand() throws {
+        let expectation = XCTestExpectation(description: "Key command execution should complete")
+
+        DispatchQueue.main.async {
+            KeystrokeSimulator.executeKeyCommand(
+                HotkeyConfiguration(
+                    useCommand: true,
+                    useOption: false,
+                    useControl: false,
+                    useShift: false,
+                    keyCode: 0x31
+                )
+            )
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 1.0)
+    }
+
+    func testOrderedModifierSequenceUsesRecordedModifierSides() {
+        let sequence = KeystrokeSimulator.orderedModifierSequence(
+            for: HotkeyConfiguration(
+                useCommand: true,
+                useOption: true,
+                useControl: true,
+                useShift: true,
+                commandSide: .right,
+                optionSide: .right,
+                controlSide: .right,
+                shiftSide: .right,
+                keyCode: 0x31
+            )
+        )
+
+        XCTAssertEqual(sequence.map(\.keyCode), [0x3E, 0x3D, 0x3C, 0x36])
+    }
 }

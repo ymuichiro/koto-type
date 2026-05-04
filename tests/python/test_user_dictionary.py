@@ -80,6 +80,30 @@ class UserDictionaryTests(unittest.TestCase):
             "こういったものは除外するか、またはそもそも入らないようにしたい。",
         )
 
+    def test_post_process_text_replaces_trailing_japanese_comma_with_period(self):
+        processed = whisper_server.post_process_text(
+            "これはテストです、",
+            language="ja",
+            auto_punctuation=True,
+        )
+        self.assertEqual(processed, "これはテストです。")
+
+    def test_post_process_text_normalizes_existing_comma_period_sequence(self):
+        processed = whisper_server.post_process_text(
+            "これはテストです、。",
+            language="ja",
+            auto_punctuation=True,
+        )
+        self.assertEqual(processed, "これはテストです。")
+
+    def test_post_process_text_normalizes_repeated_japanese_comma_period_sequence(self):
+        processed = whisper_server.post_process_text(
+            "これはテストです、、。",
+            language="ja",
+            auto_punctuation=True,
+        )
+        self.assertEqual(processed, "これはテストです。")
+
     def test_post_process_text_english_preserves_decimals_and_email(self):
         text = "The value is 3.14 and contact is a.b@example.com now"
         processed = whisper_server.post_process_text(
