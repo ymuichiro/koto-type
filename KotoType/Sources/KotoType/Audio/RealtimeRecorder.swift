@@ -20,18 +20,22 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     var onFileCreated: ((URL, Int) -> Void)?
     var onInputLevelChanged: ((Float) -> Void)?
     var onInputDeviceNameChanged: ((String?) -> Void)?
+    var onMaximumDurationReached: (() -> Void)?
     private(set) var lastStartFailureReason: RecordingStartFailureReason?
     private(set) var currentInputDeviceName: String?
+    private(set) var lastRecordingDuration: TimeInterval = 0
 
     var batchInterval: TimeInterval
     var silenceThreshold: Float
     var silenceDuration: TimeInterval
+    var maxRecordingDuration: TimeInterval?
     
     private var lastSoundTime: TimeInterval = 0
     private var recordingStartTime: TimeInterval = 0
     private var hasRecordedContent = false
     private var lastReportedInputLevel: Float = 0
     private var lastReportedInputDeviceName: String?
+    private var hasReachedMaximumDuration = false
     
     init(batchInterval: TimeInterval = 10.0, silenceThreshold: Float = -40.0, silenceDuration: TimeInterval = 0.5) {
         self.batchInterval = batchInterval
@@ -86,6 +90,8 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         lastSoundTime = Date().timeIntervalSince1970
         recordingStartTime = Date().timeIntervalSince1970
         hasRecordedContent = false
+        hasReachedMaximumDuration = false
+        lastRecordingDuration = 0
         reportInputLevel(0, force: true)
         
         node.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
@@ -120,6 +126,9 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         if let engine = audioEngine {
             engine.inputNode.removeTap(onBus: 0)
         }
+
+        let stopTime = Date().timeIntervalSince1970
+        lastRecordingDuration = max(0, stopTime - recordingStartTime)
         
         if !discardPendingAudio && hasRecordedContent && !audioBuffer.isEmpty {
             createAudioFile(force: true)
@@ -129,8 +138,10 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             audioBuffer.removeAll()
         }
         hasRecordedContent = false
+        hasReachedMaximumDuration = false
         isRecording = false
         audioEngine = nil
+        onMaximumDurationReached = nil
         currentInputDeviceName = nil
         reportInputLevel(0, force: true)
         reportInputDeviceName(nil, force: true)
@@ -155,21 +166,22 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             lastSoundTime = currentTime
             hasRecordedContent = true
         }
-        
-        let timeSinceLastSound = currentTime - lastSoundTime
-        let shouldSplit = Self.shouldSplitChunk(
-            elapsedTime: elapsedTime,
-            timeSinceLastSound: timeSinceLastSound,
-            batchInterval: batchInterval,
-            silenceDuration: silenceDuration
-        )
-        
-        if shouldSplit && hasRecordedContent && audioBuffer.count >= 4096 {
-            Logger.shared.log("RealtimeRecorder: splitting batch - elapsedTime=\(String(format: "%.1f", elapsedTime))s, timeSinceLastSound=\(String(format: "%.1f", timeSinceLastSound))s", level: .debug)
-            createAudioFile()
-            lastSoundTime = currentTime
-            recordingStartTime = currentTime
-            hasRecordedContent = false
+
+        if let maxRecordingDuration,
+           !hasReachedMaximumDuration,
+           Self.shouldAutoStopRecording(
+               elapsedTime: elapsedTime,
+               maxDuration: maxRecordingDuration
+           ) {
+            hasReachedMaximumDuration = true
+            Logger.shared.log(
+                "RealtimeRecorder: maximum recording duration reached at \(String(format: "%.1f", elapsedTime))s (limit=\(String(format: "%.1f", maxRecordingDuration))s)",
+                level: .info
+            )
+            let onMaximumDurationReached = onMaximumDurationReached
+            DispatchQueue.main.async {
+                onMaximumDurationReached?()
+            }
         }
     }
     
@@ -289,6 +301,16 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
 
         return normalizedElapsed >= normalizedBatchInterval &&
             normalizedSilence >= normalizedSilenceDuration
+    }
+
+    static func shouldAutoStopRecording(
+        elapsedTime: TimeInterval,
+        maxDuration: TimeInterval?
+    ) -> Bool {
+        guard let maxDuration else {
+            return false
+        }
+        return max(0, elapsedTime) >= max(0.1, maxDuration)
     }
 
     private func reportInputLevel(_ level: Float, force: Bool = false) {

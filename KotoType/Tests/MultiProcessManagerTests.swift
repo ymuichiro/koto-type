@@ -88,6 +88,44 @@ final class MultiProcessManagerTests: XCTestCase {
         XCTAssertEqual(sendAttempts.value, 3)
     }
 
+    func testProcessFileUsesPerRequestTimeoutOverride() {
+        let sendAttempts = LockedInt()
+        let completion = expectation(description: "segment completes after override timeout")
+
+        let manager = MultiProcessManager(
+            processManagerFactory: {
+                let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+                mock.onSend = { _, _ in
+                    sendAttempts.increment()
+                }
+                return mock
+            },
+            segmentProcessingTimeoutSeconds: 1.0,
+            watchdogIntervalSeconds: 0.02,
+            healthCheckIntervalSeconds: 5.0,
+            healthCheckTimeoutSeconds: 1.0,
+            healthCheckStartupGraceSeconds: 5.0
+        )
+
+        manager.segmentComplete = { index, text in
+            if index == 12 {
+                XCTAssertEqual(text, "")
+                completion.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/override-timeout.wav"),
+            index: 12,
+            settings: AppSettings(),
+            processingTimeout: 0.05
+        )
+
+        wait(for: [completion], timeout: 4.0)
+        XCTAssertEqual(sendAttempts.value, 3)
+    }
+
     func testIdleHealthCheckRequestIsSentAndAccepted() {
         let healthCheckSeen = expectation(description: "health check request sent")
         healthCheckSeen.assertForOverFulfill = false

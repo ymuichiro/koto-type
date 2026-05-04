@@ -113,7 +113,15 @@ final class MultiProcessManager: @unchecked Sendable {
         startWatchdog()
     }
     
-    func processFile(url: URL, index: Int, settings: AppSettings, screenshotContext: String? = nil, retryCount: Int = 0, queueAttempt: Int = 0) {
+    func processFile(
+        url: URL,
+        index: Int,
+        settings: AppSettings,
+        screenshotContext: String? = nil,
+        retryCount: Int = 0,
+        queueAttempt: Int = 0,
+        processingTimeout: TimeInterval? = nil
+    ) {
         Logger.shared.log("MultiProcessManager: processFile called - url=\(url.path), index=\(index)", level: .info)
         processLock.lock()
         if isStopping {
@@ -151,7 +159,8 @@ final class MultiProcessManager: @unchecked Sendable {
                     settings: settings,
                     screenshotContext: nil,
                     retryCount: retryCount,
-                    queueAttempt: queueAttempt + 1
+                    queueAttempt: queueAttempt + 1,
+                    processingTimeout: processingTimeout
                 )
             }
             return
@@ -164,7 +173,8 @@ final class MultiProcessManager: @unchecked Sendable {
                 url: url,
                 index: index,
                 settings: settings,
-                retryCount: retryCount
+                retryCount: retryCount,
+                processingTimeout: max(0.1, processingTimeout ?? segmentProcessingTimeoutSeconds)
             ),
             screenshotContext: screenshotContext
         )
@@ -194,7 +204,7 @@ final class MultiProcessManager: @unchecked Sendable {
         }
         
         Logger.shared.log(
-            "MultiProcessManager: process \(processIndex) processing file \(assignedContext.index): \(assignedContext.url.path) (retry=\(assignedContext.retryCount))",
+            "MultiProcessManager: process \(processIndex) processing file \(assignedContext.index): \(assignedContext.url.path) (retry=\(assignedContext.retryCount), timeout=\(Int(assignedContext.processingTimeout))s)",
             level: .info
         )
         
@@ -300,6 +310,10 @@ final class MultiProcessManager: @unchecked Sendable {
         recoverySuppressedUntil.removeValue(forKey: processIndex)
         lastHealthCheckAtByProcess[processIndex] = now
         processLock.unlock()
+        Logger.shared.log(
+            "MultiProcessManager: segment \(context.index) completed on process \(processIndex) in \(String(format: "%.1f", now.timeIntervalSince(context.assignedAt)))s",
+            level: .info
+        )
 
         DispatchQueue.main.async { [weak self] in
             self?.outputReceived?(processIndex, output)
@@ -418,16 +432,17 @@ final class MultiProcessManager: @unchecked Sendable {
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.processFile(
-                url: context.url,
-                index: context.index,
-                settings: context.settings,
-                screenshotContext: nil,
-                retryCount: nextRetry,
-                queueAttempt: 0
-            )
+                self?.processFile(
+                    url: context.url,
+                    index: context.index,
+                    settings: context.settings,
+                    screenshotContext: nil,
+                    retryCount: nextRetry,
+                    queueAttempt: 0,
+                    processingTimeout: context.processingTimeout
+                )
+            }
         }
-    }
 
     private func createProcess(processIndex: Int) {
         let now = Date()
@@ -721,7 +736,7 @@ final class MultiProcessManager: @unchecked Sendable {
 
         for processIndex in Array(segmentContextByProcess.keys) {
             guard let context = segmentContextByProcess[processIndex] else { continue }
-            if now.timeIntervalSince(context.assignedAt) >= segmentProcessingTimeoutSeconds {
+            if now.timeIntervalSince(context.assignedAt) >= context.processingTimeout {
                 segmentContextByProcess.removeValue(forKey: processIndex)
                 idleProcesses.remove(processIndex)
                 timedOutSegments.append((processIndex, context))
@@ -954,6 +969,7 @@ private struct SegmentContext {
     let index: Int
     let settings: AppSettings
     let retryCount: Int
+    let processingTimeout: TimeInterval
     var assignedAt: Date = .distantPast
 }
 

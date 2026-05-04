@@ -166,4 +166,13 @@ final class SettingsManagerTests: XCTestCase {
             AppSettings.minimumRecordingCompletionTimeout
         )
     }
+
+    func testSaveAndLoadExtendedRecordingCompletionTimeout() {
+        let modifiedSettings = AppSettings(recordingCompletionTimeout: 3_600.0)
+
+        settingsManager.save(modifiedSettings)
+        let loadedSettings = settingsManager.load()
+
+        XCTAssertEqual(loadedSettings.recordingCompletionTimeout, 3_600.0)
+    }
 }

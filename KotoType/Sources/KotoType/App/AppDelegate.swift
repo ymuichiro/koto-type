@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 private final class RecordingSessionContext {
     let id: Int
     let batchTranscriptionManager: BatchTranscriptionManager
+    var liveTranscriptionPolicy: LiveTranscriptionPolicy?
     var finalizationReadyWorkItem: DispatchWorkItem?
     var completionTimeoutWorkItem: DispatchWorkItem?
     private var screenshotContext: String?
@@ -78,15 +79,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isAwaitingPreparedRealtimeBackend = false
     private var pendingWorkerReconfigure = false
     private var pendingWorkerReconfigurePreloadModel = false
+    private var pendingLiveRecordingProcessingMessage: String?
     private let staleBatchFileMaxAge: TimeInterval = 6 * 60 * 60
     private let temporaryBatchCleanupInterval: TimeInterval = 10 * 60
     private let backendPreparationRetryDelay: TimeInterval = 0.25
     private let maxBackendPreparationRetries = 40
     private let initialSetupBackendPreparationTimeout: TimeInterval = 180
     private let permissionResetService: PermissionResetService
-    private let defaultBatchInterval: Double = 10.0
-    private let defaultSilenceThreshold: Double = -40.0
-    private let defaultSilenceDuration: Double = 0.5
 
     init(permissionResetService: PermissionResetService = PermissionResetService()) {
         self.permissionResetService = permissionResetService
@@ -406,24 +405,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func beginRecordingSession() {
         let session = createRecordingSession()
         let sessionID = session.id
+        let liveTranscriptionPolicy = LiveTranscriptionPolicy.resolve(
+            settings: currentSettings,
+            latestStatus: TranscriptionBackendStatusStore.shared.currentStatus
+        )
+        session.liveTranscriptionPolicy = liveTranscriptionPolicy
+        pendingLiveRecordingProcessingMessage = nil
         pendingRecordingStartAfterBackendReady = false
         isRecording = true
         activeRecordingSessionID = sessionID
         indicatorPresentation.beginLiveSession(sessionID)
-        Logger.shared.log("Starting audio recording for session \(sessionID)...", level: .info)
+        Logger.shared.log(
+            "Starting audio recording for session \(sessionID)... backendMode=\(liveTranscriptionPolicy.mode.rawValue), reason=\(liveTranscriptionPolicy.logReason), recordingMaxDuration=\(Int(liveTranscriptionPolicy.recordingMaxDuration))s, processingTimeout=\(Int(liveTranscriptionPolicy.processingTimeout))s, finalizationTimeout=\(Int(liveTranscriptionPolicy.finalizationTimeout))s",
+            level: .info
+        )
 
         ensureRealtimeWorkersInitialized(
             reason: "recording start",
             preloadModel: true
         )
-        realtimeRecorder?.batchInterval = defaultBatchInterval
-        realtimeRecorder?.silenceThreshold = Float(defaultSilenceThreshold)
-        realtimeRecorder?.silenceDuration = defaultSilenceDuration
+        realtimeRecorder?.maxRecordingDuration = liveTranscriptionPolicy.recordingMaxDuration
         realtimeRecorder?.onInputLevelChanged = { [weak self] level in
             self?.recordingIndicatorWindow?.updateRecordingLevel(CGFloat(level))
         }
         realtimeRecorder?.onInputDeviceNameChanged = { [weak self] name in
             self?.recordingIndicatorWindow?.updateRecordingInputDeviceName(name)
+        }
+        realtimeRecorder?.onMaximumDurationReached = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleLiveRecordingMaximumDurationReached(
+                    sessionID: sessionID,
+                    policy: liveTranscriptionPolicy
+                )
+            }
         }
         recordingIndicatorWindow?.updateRecordingLevel(0)
         recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
@@ -440,8 +454,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             let globalIndex = self.segmentRouter.register(sessionID: sessionID, localIndex: localIndex)
+            let recordingDuration = self.realtimeRecorder?.lastRecordingDuration ?? 0
+            let processingTimeout = currentSession.liveTranscriptionPolicy?.processingTimeout
             Logger.shared.log(
-                "File created: \(url.path), localIndex=\(localIndex), globalIndex=\(globalIndex), session=\(sessionID)",
+                "File created: \(url.path), localIndex=\(localIndex), globalIndex=\(globalIndex), session=\(sessionID), backendMode=\(currentSession.liveTranscriptionPolicy?.mode.rawValue ?? "unknown"), recordingDuration=\(String(format: "%.1f", recordingDuration))s, processingTimeout=\(Int(processingTimeout ?? 0))s",
                 level: .info
             )
             self.pendingSegmentFiles[globalIndex] = url
@@ -451,7 +467,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 url: url,
                 index: globalIndex,
                 settings: self.currentSettings,
-                screenshotContext: screenshotContext
+                screenshotContext: screenshotContext,
+                processingTimeout: processingTimeout
             )
         }
 
@@ -463,10 +480,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             realtimeRecorder?.onInputLevelChanged = nil
             realtimeRecorder?.onInputDeviceNameChanged = nil
+            realtimeRecorder?.onMaximumDurationReached = nil
+            realtimeRecorder?.maxRecordingDuration = nil
             recordingIndicatorWindow?.updateRecordingLevel(0)
             recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
             isRecording = false
             activeRecordingSessionID = nil
+            pendingLiveRecordingProcessingMessage = nil
             destroySession(sessionID: sessionID)
             return
         }
@@ -514,16 +534,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         realtimeRecorder?.stopRecording()
         realtimeRecorder?.onInputLevelChanged = nil
         realtimeRecorder?.onInputDeviceNameChanged = nil
+        realtimeRecorder?.onMaximumDurationReached = nil
+        realtimeRecorder?.maxRecordingDuration = nil
         recordingIndicatorWindow?.updateRecordingLevel(0)
         recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
         Logger.shared.log("Recording stopped (session \(sessionID))", level: .info)
         Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
-        recordingIndicatorWindow?.showProcessing()
+        let processingMessage = pendingLiveRecordingProcessingMessage
+        pendingLiveRecordingProcessingMessage = nil
+        recordingIndicatorWindow?.showProcessing(message: processingMessage)
         enqueueSessionForFinalization(
             sessionID: sessionID,
-            timeoutInterval: currentSettings.recordingCompletionTimeout
+            timeoutInterval: session.liveTranscriptionPolicy?.finalizationTimeout
+                ?? currentSettings.recordingCompletionTimeout
         )
         tryFinalizePendingSessionsIfNeeded()
+    }
+
+    private func handleLiveRecordingMaximumDurationReached(
+        sessionID: Int,
+        policy: LiveTranscriptionPolicy
+    ) {
+        guard isRecording, activeRecordingSessionID == sessionID else {
+            return
+        }
+        pendingLiveRecordingProcessingMessage = policy.autoStopMessage
+        Logger.shared.log(
+            "Live recording auto-stop triggered for session \(sessionID): backendMode=\(policy.mode.rawValue), recordingMaxDuration=\(Int(policy.recordingMaxDuration))s",
+            level: .info
+        )
+        stopRecording()
     }
 
     private func cancelRecording() {
@@ -542,6 +582,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             realtimeRecorder?.stopRecording(discardPendingAudio: true)
             realtimeRecorder?.onInputLevelChanged = nil
             realtimeRecorder?.onInputDeviceNameChanged = nil
+            realtimeRecorder?.onMaximumDurationReached = nil
+            realtimeRecorder?.maxRecordingDuration = nil
+            pendingLiveRecordingProcessingMessage = nil
             recordingIndicatorWindow?.updateRecordingLevel(0)
             recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
             destroySession(sessionID: sessionID)

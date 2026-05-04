@@ -160,4 +160,22 @@ final class RealtimeRecorderTests: XCTestCase {
 
         XCTAssertFalse(shouldSplit)
     }
+
+    func testShouldAutoStopRecordingWhenElapsedTimeReachesMaximumDuration() {
+        XCTAssertTrue(
+            RealtimeRecorder.shouldAutoStopRecording(
+                elapsedTime: 60.0,
+                maxDuration: 60.0
+            )
+        )
+    }
+
+    func testShouldNotAutoStopRecordingBeforeMaximumDuration() {
+        XCTAssertFalse(
+            RealtimeRecorder.shouldAutoStopRecording(
+                elapsedTime: 59.9,
+                maxDuration: 60.0
+            )
+        )
+    }
 }
