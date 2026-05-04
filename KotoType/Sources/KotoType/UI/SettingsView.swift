@@ -45,19 +45,11 @@ struct SettingsView: View {
     @ObservedObject private var backendStatusStore = TranscriptionBackendStatusStore.shared
 
     private let storageManagementService: StorageManagementService
-    @State private var hotkeyConfig: HotkeyConfiguration
-    @State private var language: String
-    @State private var autoPunctuation: Bool
-    @State private var qualityPreset: TranscriptionQualityPreset
-    @State private var gpuAccelerationEnabled: Bool
-    @State private var keepBackendReadyInBackground: Bool
-    @State private var launchAtLogin: Bool
-    @State private var recordingCompletionTimeout: Double
-    @State private var dictionaryWords: [String]
+    private let draftBridge: SettingsDraftBridge?
+    @State private var draft: SettingsDraft
     @State private var pendingDictionaryEntry: String
     @State private var dictionaryStatusMessage: String?
     @State private var dictionaryStatusMessageIsError = false
-    @State private var voiceShortcuts: [VoiceShortcut]
     @State private var pendingVoiceShortcutTrigger: String
     @State private var pendingVoiceShortcutActionKind: VoiceShortcutActionKind
     @State private var pendingVoiceShortcutInsertText: String
@@ -97,6 +89,7 @@ struct SettingsView: View {
     init(
         isPresented: Binding<Bool>,
         storageManagementService: StorageManagementService = StorageManagementService(),
+        draftBridge: SettingsDraftBridge? = nil,
         onHotkeyChanged: @escaping (HotkeyConfiguration) -> Void,
         onSettingsChanged: (() -> Void)? = nil,
         onImportAudioRequested: (() -> Void)? = nil,
@@ -104,25 +97,15 @@ struct SettingsView: View {
     ) {
         self._isPresented = isPresented
         self.storageManagementService = storageManagementService
+        self.draftBridge = draftBridge
         self.onHotkeyChanged = onHotkeyChanged
         self.onSettingsChanged = onSettingsChanged
         self.onImportAudioRequested = onImportAudioRequested
         self.onShowHistoryRequested = onShowHistoryRequested
 
-        let settings = SettingsManager.shared.load()
-        let userDictionaryWords = UserDictionaryManager.shared.loadWords()
-        let savedVoiceShortcuts = VoiceShortcutManager.shared.loadShortcuts()
-        self._hotkeyConfig = State(initialValue: settings.hotkeyConfig)
-        self._language = State(initialValue: settings.language)
-        self._autoPunctuation = State(initialValue: settings.autoPunctuation)
-        self._qualityPreset = State(initialValue: settings.transcriptionQualityPreset)
-        self._gpuAccelerationEnabled = State(initialValue: settings.gpuAccelerationEnabled)
-        self._keepBackendReadyInBackground = State(initialValue: settings.keepBackendReadyInBackground)
-        self._launchAtLogin = State(initialValue: settings.launchAtLogin)
-        self._recordingCompletionTimeout = State(initialValue: settings.recordingCompletionTimeout)
-        self._dictionaryWords = State(initialValue: userDictionaryWords)
+        let initialDraft = SettingsDraft()
+        self._draft = State(initialValue: initialDraft)
         self._pendingDictionaryEntry = State(initialValue: "")
-        self._voiceShortcuts = State(initialValue: savedVoiceShortcuts)
         self._pendingVoiceShortcutTrigger = State(initialValue: "")
         self._pendingVoiceShortcutActionKind = State(initialValue: .insertText)
         self._pendingVoiceShortcutInsertText = State(initialValue: "")
@@ -148,7 +131,11 @@ struct SettingsView: View {
             ThirdPartyLicensesView(isPresented: $isShowingLicenses)
         }
         .task {
+            updateDraftBridge()
             await refreshStorageSnapshot()
+        }
+        .onChange(of: draft) { _ in
+            updateDraftBridge()
         }
         .alert(item: $pendingStorageConfirmation) { action in
             Alert(
@@ -169,11 +156,11 @@ struct SettingsView: View {
             sectionTitle("Hotkey")
 
             HotkeyRecorderView(initialConfig: hotkeyConfig) { config in
-                hotkeyConfig = config
+                draft.hotkeyConfig = config
             }
             .frame(height: 40)
 
-            Text("Current shortcut: \(hotkeyConfig.description.isEmpty ? "Not set" : hotkeyConfig.description)")
+            Text("Current shortcut: \(draft.hotkeyConfig.description.isEmpty ? "Not set" : draft.hotkeyConfig.description)")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -182,7 +169,7 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Button("⌘+⌥ (Default)") {
-                    hotkeyConfig = HotkeyConfiguration(
+                    draft.hotkeyConfig = HotkeyConfiguration(
                         useCommand: true,
                         useOption: true,
                         useControl: false,
@@ -191,7 +178,7 @@ struct SettingsView: View {
                     )
                 }
                 Button("⌘+⌃") {
-                    hotkeyConfig = HotkeyConfiguration(
+                    draft.hotkeyConfig = HotkeyConfiguration(
                         useCommand: true,
                         useOption: false,
                         useControl: true,
@@ -200,7 +187,7 @@ struct SettingsView: View {
                     )
                 }
                 Button("⌘+⌃+Space") {
-                    hotkeyConfig = HotkeyConfiguration(
+                    draft.hotkeyConfig = HotkeyConfiguration(
                         useCommand: true,
                         useOption: false,
                         useControl: true,
@@ -219,7 +206,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Language")
                     .font(.subheadline)
-                Picker("", selection: $language) {
+                Picker("", selection: $draft.language) {
                     ForEach(availableLanguages, id: \.0) { code, name in
                         Text(name).tag(code)
                     }
@@ -227,19 +214,19 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
             }
 
-            Toggle("Automatically improve punctuation", isOn: $autoPunctuation)
+            Toggle("Automatically improve punctuation", isOn: $draft.autoPunctuation)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Quality preset")
                     .font(.subheadline)
-                Picker("", selection: $qualityPreset) {
+                Picker("", selection: $draft.qualityPreset) {
                     ForEach(TranscriptionQualityPreset.allCases, id: \.self) { preset in
                         Text(preset.displayName).tag(preset)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Text(qualityPreset.summary)
+                Text(draft.qualityPreset.summary)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -247,7 +234,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle(
                     "Use GPU acceleration when available",
-                    isOn: $gpuAccelerationEnabled
+                    isOn: $draft.gpuAccelerationEnabled
                 )
                 .disabled(!TranscriptionRuntimeSupport.supportsGPUAcceleration())
 
@@ -259,7 +246,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle(
                     "Keep backend ready in background",
-                    isOn: $keepBackendReadyInBackground
+                    isOn: $draft.keepBackendReadyInBackground
                 )
 
                 Text(backendReadinessDescription)
@@ -315,7 +302,7 @@ struct SettingsView: View {
                 .disabled(normalizedDictionaryWords.isEmpty)
             }
 
-            if dictionaryWords.isEmpty {
+            if draft.dictionaryWords.isEmpty {
                 Text("No terms registered")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -324,7 +311,7 @@ struct SettingsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(dictionaryWords.indices), id: \.self) { index in
+                        ForEach(Array(draft.dictionaryWords.indices), id: \.self) { index in
                             HStack {
                                 TextField(
                                     "Term",
@@ -355,7 +342,7 @@ struct SettingsView: View {
                 HStack {
                     Spacer()
                     Button("Remove all", role: .destructive) {
-                        dictionaryWords.removeAll()
+                        draft.dictionaryWords.removeAll()
                         dictionaryStatusMessage = nil
                     }
                 }
@@ -433,7 +420,7 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
 
-            if voiceShortcuts.isEmpty {
+            if draft.voiceShortcuts.isEmpty {
                 Text("No shortcuts registered")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -442,7 +429,7 @@ struct SettingsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(Array(voiceShortcuts.indices), id: \.self) { index in
+                        ForEach(Array(draft.voiceShortcuts.indices), id: \.self) { index in
                             VoiceShortcutRowView(
                                 shortcut: voiceShortcutBinding(for: index),
                                 onRemove: {
@@ -474,7 +461,7 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 14) {
             sectionTitle("App")
 
-            Toggle("Launch at login", isOn: $launchAtLogin)
+            Toggle("Launch at login", isOn: $draft.launchAtLogin)
                 .disabled(!canManageLaunchAtLogin)
 
             Text(
@@ -489,12 +476,12 @@ struct SettingsView: View {
                 Text("Post-recording finalize timeout")
                     .font(.subheadline)
                 Slider(
-                    value: $recordingCompletionTimeout,
+                    value: $draft.recordingCompletionTimeout,
                     in: AppSettings.minimumRecordingCompletionTimeout...AppSettings.maximumRecordingCompletionTimeout,
                     step: 30.0
                 )
 
-                Text(recordingCompletionTimeoutDescription(recordingCompletionTimeout))
+                Text(recordingCompletionTimeoutDescription(draft.recordingCompletionTimeout))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -640,8 +627,8 @@ struct SettingsView: View {
         if let status = backendStatusStore.currentStatus {
             return status.summaryText
         }
-        if gpuAccelerationEnabled && TranscriptionRuntimeSupport.supportsGPUAcceleration() {
-            if !keepBackendReadyInBackground {
+        if draft.gpuAccelerationEnabled && TranscriptionRuntimeSupport.supportsGPUAcceleration() {
+            if !draft.keepBackendReadyInBackground {
                 return "Backend detection runs when you start dictation."
             }
             return "Detecting backend availability..."
@@ -653,8 +640,8 @@ struct SettingsView: View {
         if let status = backendStatusStore.currentStatus {
             return status.detailText
         }
-        if gpuAccelerationEnabled && TranscriptionRuntimeSupport.supportsGPUAcceleration() {
-            if keepBackendReadyInBackground {
+        if draft.gpuAccelerationEnabled && TranscriptionRuntimeSupport.supportsGPUAcceleration() {
+            if draft.keepBackendReadyInBackground {
                 return "KotoType checks the Python backend shortly after launch and keeps the selected model ready in the background."
             }
             return "KotoType starts the realtime backend when you begin dictation and stops it again after transcription work finishes."
@@ -663,7 +650,7 @@ struct SettingsView: View {
     }
 
     private var backendReadinessDescription: String {
-        if keepBackendReadyInBackground {
+        if draft.keepBackendReadyInBackground {
             return "Recommended. KotoType keeps the realtime transcription worker alive and preloads the selected model after launch for the fastest first dictation."
         }
         return "Uses less background CPU and memory, but KotoType starts the realtime worker on demand and shuts it down again after use."
@@ -678,11 +665,11 @@ struct SettingsView: View {
     }
 
     private var normalizedDictionaryWords: [String] {
-        UserDictionaryManager.normalizedWords(dictionaryWords)
+        draft.normalizedDictionaryWords
     }
 
     private var normalizedVoiceShortcuts: [VoiceShortcut] {
-        VoiceShortcutManager.normalizedShortcuts(voiceShortcuts)
+        draft.normalizedVoiceShortcuts
     }
 
     private var canAddVoiceShortcut: Bool {
@@ -730,62 +717,54 @@ struct SettingsView: View {
 
     private func applySettings() {
         Logger.shared.log("SettingsView.applySettings called: hotkey=\(hotkeyConfig.description)")
-        normalizeDictionaryWords()
-        normalizeVoiceShortcuts()
-        let settings = AppSettings(
-            hotkeyConfig: hotkeyConfig,
-            language: language,
-            autoPunctuation: autoPunctuation,
-            transcriptionQualityPreset: qualityPreset,
-            gpuAccelerationEnabled: gpuAccelerationEnabled,
-            keepBackendReadyInBackground: keepBackendReadyInBackground,
-            launchAtLogin: launchAtLogin,
-            recordingCompletionTimeout: recordingCompletionTimeout
-        )
-        _ = LaunchAtLoginManager.shared.setEnabled(launchAtLogin)
+        draft.dictionaryWords = draft.normalizedDictionaryWords
+        draft.voiceShortcuts = draft.normalizedVoiceShortcuts
+        let settings = draft.appSettings
+        _ = LaunchAtLoginManager.shared.setEnabled(draft.launchAtLogin)
         SettingsManager.shared.save(settings)
-        UserDictionaryManager.shared.saveWords(dictionaryWords)
-        VoiceShortcutManager.shared.saveShortcuts(voiceShortcuts)
-        onHotkeyChanged(hotkeyConfig)
+        UserDictionaryManager.shared.saveWords(draft.dictionaryWords)
+        VoiceShortcutManager.shared.saveShortcuts(draft.voiceShortcuts)
+        onHotkeyChanged(draft.hotkeyConfig)
         onSettingsChanged?()
+        draftBridge?.markSaved(snapshot: draft.snapshot)
     }
 
     private func addDictionaryWord() {
         let cleaned = pendingDictionaryEntry.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
-        dictionaryWords = UserDictionaryManager.normalizedWords(dictionaryWords + [cleaned])
+        draft.dictionaryWords = UserDictionaryManager.normalizedWords(draft.dictionaryWords + [cleaned])
         pendingDictionaryEntry = ""
         dictionaryStatusMessage = nil
     }
 
     private func removeDictionaryWord(at index: Int) {
-        guard dictionaryWords.indices.contains(index) else {
+        guard draft.dictionaryWords.indices.contains(index) else {
             return
         }
-        dictionaryWords.remove(at: index)
+        draft.dictionaryWords.remove(at: index)
         dictionaryStatusMessage = nil
     }
 
     private func dictionaryWordBinding(for index: Int) -> Binding<String> {
         Binding(
             get: {
-                guard dictionaryWords.indices.contains(index) else {
+                guard draft.dictionaryWords.indices.contains(index) else {
                     return ""
                 }
-                return dictionaryWords[index]
+                return draft.dictionaryWords[index]
             },
             set: { newValue in
-                guard dictionaryWords.indices.contains(index) else {
+                guard draft.dictionaryWords.indices.contains(index) else {
                     return
                 }
-                dictionaryWords[index] = newValue
+                draft.dictionaryWords[index] = newValue
                 dictionaryStatusMessage = nil
             }
         )
     }
 
     private func normalizeDictionaryWords() {
-        dictionaryWords = UserDictionaryManager.normalizedWords(dictionaryWords)
+        draft.dictionaryWords = draft.normalizedDictionaryWords
     }
 
     private func importDictionaryCSV() {
@@ -804,9 +783,9 @@ struct SettingsView: View {
             let data = try Data(contentsOf: url)
             let result = try UserDictionaryManager.shared.importWords(
                 fromCSVData: data,
-                existingWords: dictionaryWords
+                existingWords: draft.dictionaryWords
             )
-            dictionaryWords = result.words
+            draft.dictionaryWords = result.words
             dictionaryStatusMessage = dictionaryImportMessage(from: result)
             dictionaryStatusMessageIsError = false
         } catch {
@@ -827,7 +806,7 @@ struct SettingsView: View {
         }
 
         do {
-            let data = UserDictionaryManager.shared.csvData(for: dictionaryWords)
+            let data = UserDictionaryManager.shared.csvData(for: draft.dictionaryWords)
             try data.write(to: url, options: [.atomic])
             dictionaryStatusMessage = "Exported \(normalizedDictionaryWords.count) terms."
             dictionaryStatusMessageIsError = false
@@ -865,7 +844,7 @@ struct SettingsView: View {
             shortcut.insertText = ""
         }
 
-        voiceShortcuts.append(shortcut)
+        draft.voiceShortcuts.append(shortcut)
         normalizeVoiceShortcuts()
         pendingVoiceShortcutTrigger = ""
         pendingVoiceShortcutActionKind = .insertText
@@ -875,36 +854,45 @@ struct SettingsView: View {
     }
 
     private func removeVoiceShortcut(at index: Int) {
-        guard voiceShortcuts.indices.contains(index) else {
+        guard draft.voiceShortcuts.indices.contains(index) else {
             return
         }
-        voiceShortcuts.remove(at: index)
+        draft.voiceShortcuts.remove(at: index)
         voiceShortcutStatusMessage = nil
     }
 
     private func voiceShortcutBinding(for index: Int) -> Binding<VoiceShortcut> {
         Binding(
             get: {
-                guard voiceShortcuts.indices.contains(index) else {
+                guard draft.voiceShortcuts.indices.contains(index) else {
                     return VoiceShortcut(
                         triggerPhrase: "",
                         actionKind: .insertText
                     )
                 }
-                return voiceShortcuts[index]
+                return draft.voiceShortcuts[index]
             },
             set: { newValue in
-                guard voiceShortcuts.indices.contains(index) else {
+                guard draft.voiceShortcuts.indices.contains(index) else {
                     return
                 }
-                voiceShortcuts[index] = newValue
+                draft.voiceShortcuts[index] = newValue
                 voiceShortcutStatusMessage = nil
             }
         )
     }
 
     private func normalizeVoiceShortcuts() {
-        voiceShortcuts = VoiceShortcutManager.normalizedShortcuts(voiceShortcuts)
+        draft.voiceShortcuts = draft.normalizedVoiceShortcuts
+    }
+
+    private var hotkeyConfig: HotkeyConfiguration {
+        draft.hotkeyConfig
+    }
+
+    private func updateDraftBridge() {
+        draftBridge?.currentSnapshot = draft.snapshot
+        draftBridge?.applyChanges = { applySettings() }
     }
 
     @MainActor

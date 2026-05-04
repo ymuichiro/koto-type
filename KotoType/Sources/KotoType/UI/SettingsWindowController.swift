@@ -1,11 +1,17 @@
 import AppKit
-import SwiftUI
 import Foundation
+import SwiftUI
 
-class SettingsWindowController: NSWindowController {
+@MainActor
+class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    typealias UnsavedChangesPresenter = @MainActor (NSWindow) -> SettingsCloseConfirmationChoice
+
     private static let minimumContentSize = NSSize(width: 600, height: 600)
     private static let initialContentSize = NSSize(width: 640, height: 640)
 
+    private let draftBridge: SettingsDraftBridge
+    private let unsavedChangesPresenter: UnsavedChangesPresenter
+    private let resetDraftBridgeOnViewLoad: Bool
     private var settingsView: SettingsView?
     private var hostingController: NSHostingController<SettingsView>?
     
@@ -13,7 +19,16 @@ class SettingsWindowController: NSWindowController {
     var onImportAudioRequested: (() -> Void)?
     var onShowHistoryRequested: (() -> Void)?
     
-    init() {
+    init(
+        draftBridge: SettingsDraftBridge = SettingsDraftBridge(initialSnapshot: SettingsDraft().snapshot),
+        unsavedChangesPresenter: UnsavedChangesPresenter? = nil,
+        resetDraftBridgeOnViewLoad: Bool = true
+    ) {
+        self.draftBridge = draftBridge
+        self.unsavedChangesPresenter = unsavedChangesPresenter ?? { window in
+            Self.presentUnsavedChangesConfirmation(window: window)
+        }
+        self.resetDraftBridgeOnViewLoad = resetDraftBridgeOnViewLoad
         let window = NSWindow(
             contentRect: NSRect(
                 x: 0,
@@ -29,8 +44,10 @@ class SettingsWindowController: NSWindowController {
         window.center()
         window.isReleasedWhenClosed = false
         window.minSize = Self.minimumContentSize
+        window.delegate = nil
         
         super.init(window: window)
+        window.delegate = self
         
         setupSettingsView()
     }
@@ -47,8 +64,12 @@ class SettingsWindowController: NSWindowController {
     }
 
     private func makeSettingsView(for window: NSWindow) -> SettingsView {
-        SettingsView(
+        if resetDraftBridgeOnViewLoad {
+            syncDraftBridgeToSavedState()
+        }
+        return SettingsView(
             isPresented: makeIsPresentedBinding(for: window),
+            draftBridge: draftBridge,
             onHotkeyChanged: { config in
                 Logger.shared.log("SettingsWindowController: Posting hotkeyConfigurationChanged notification: \(config.description)")
                 NotificationCenter.default.post(
@@ -67,6 +88,11 @@ class SettingsWindowController: NSWindowController {
                 self?.onShowHistoryRequested?()
             }
         )
+    }
+
+    private func syncDraftBridgeToSavedState() {
+        draftBridge.markSaved(snapshot: SettingsDraft().snapshot)
+        draftBridge.applyChanges = nil
     }
 
     private func ensureMinimumContentSize(for window: NSWindow) {
@@ -98,6 +124,53 @@ class SettingsWindowController: NSWindowController {
         
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        shouldAllowWindowClose(for: sender)
+    }
+
+    func shouldAllowWindowClose(for window: NSWindow) -> Bool {
+        guard draftBridge.hasUnsavedChanges else {
+            return true
+        }
+
+        switch unsavedChangesPresenter(window) {
+        case .save:
+            guard let applyChanges = draftBridge.applyChanges else {
+                Logger.shared.log(
+                    "SettingsWindowController: save requested during close, but no apply handler is available",
+                    level: .warning
+                )
+                return false
+            }
+            applyChanges()
+            return true
+        case .discard:
+            return true
+        case .cancel:
+            return false
+        }
+    }
+
+    private static func presentUnsavedChangesConfirmation(window: NSWindow) -> SettingsCloseConfirmationChoice {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Save changes before closing?"
+        alert.informativeText = "If you close now, your unsaved Settings changes will be lost."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Cancel")
+
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .save
+        case .alertSecondButtonReturn:
+            return .discard
+        default:
+            return .cancel
+        }
     }
 }
 
