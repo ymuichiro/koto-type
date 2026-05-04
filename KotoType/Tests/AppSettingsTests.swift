@@ -165,4 +165,11 @@ final class AppSettingsTests: XCTestCase {
             AppSettings.defaultRecordingCompletionTimeout
         )
     }
+
+    func testRecordingCompletionTimeoutSupportsExtendedMLXRange() {
+        XCTAssertEqual(
+            AppSettings(recordingCompletionTimeout: 3_600.0).recordingCompletionTimeout,
+            3_600.0
+        )
+    }
 }
