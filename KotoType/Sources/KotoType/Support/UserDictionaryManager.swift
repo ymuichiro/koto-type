@@ -127,7 +127,9 @@ final class UserDictionaryManager: @unchecked Sendable {
                 throw UserDictionaryCSVError.invalidFormat(row: index + 1)
             }
 
-            let rawValue = row[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawValue = Self.strippingLeadingByteOrderMark(
+                row[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            )
             if rawValue.isEmpty {
                 blankCount += 1
                 continue
@@ -209,6 +211,13 @@ final class UserDictionaryManager: @unchecked Sendable {
 
     private static func normalizedKey(_ word: String) -> String {
         word.lowercased()
+    }
+
+    private static func strippingLeadingByteOrderMark(_ value: String) -> String {
+        guard value.unicodeScalars.first == "\u{FEFF}" else {
+            return value
+        }
+        return String(value.unicodeScalars.dropFirst())
     }
 
     private static func escapedCSVField(_ field: String) -> String {

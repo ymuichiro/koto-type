@@ -80,6 +80,18 @@ final class UserDictionaryManagerTests: XCTestCase {
         XCTAssertEqual(result.truncatedCount, 0)
     }
 
+    func testImportCSVSkipsHeaderWhenUTF8BOMIsPresent() throws {
+        let csv = "\u{FEFF}term\nOpenAI\n"
+
+        let result = try manager.importWords(
+            fromCSVData: Data(csv.utf8),
+            existingWords: []
+        )
+
+        XCTAssertEqual(result.words, ["OpenAI"])
+        XCTAssertEqual(result.importedCount, 1)
+    }
+
     func testImportCSVRejectsRowsWithMultipleColumns() {
         let csv = """
         term,alias

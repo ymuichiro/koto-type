@@ -37,7 +37,7 @@ struct RecordingIndicatorView: View {
         for state: IndicatorState,
         attentionMessage: String?,
         processingMessage: String?,
-        recordingInputDeviceName: String?
+        recordingInputDeviceName _: String?
     ) -> CGSize {
         let hasAttentionMessage = state == .attention && !(attentionMessage?.isEmpty ?? true)
         if hasAttentionMessage {
@@ -49,7 +49,7 @@ struct RecordingIndicatorView: View {
             return CGSize(width: 280, height: 68)
         }
 
-        if state == .recording && !(recordingInputDeviceName?.isEmpty ?? true) {
+        if state == .recording {
             return CGSize(width: 368, height: 84)
         }
 

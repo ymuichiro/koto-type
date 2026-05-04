@@ -208,24 +208,48 @@ final class KeystrokeSimulator {
         }
     }
 
-    private static func orderedModifierSequence(
+    static func orderedModifierSequence(
         for command: HotkeyConfiguration
     ) -> [(keyCode: CGKeyCode, flag: CGEventFlags)] {
         var sequence: [(CGKeyCode, CGEventFlags)] = []
 
         if command.useControl {
-            sequence.append((0x3B, .maskControl))
+            sequence.append((modifierKeyCode(for: .control, side: command.controlSide), .maskControl))
         }
         if command.useOption {
-            sequence.append((0x3A, .maskAlternate))
+            sequence.append((modifierKeyCode(for: .option, side: command.optionSide), .maskAlternate))
         }
         if command.useShift {
-            sequence.append((0x38, .maskShift))
+            sequence.append((modifierKeyCode(for: .shift, side: command.shiftSide), .maskShift))
         }
         if command.useCommand {
-            sequence.append((0x37, .maskCommand))
+            sequence.append((modifierKeyCode(for: .command, side: command.commandSide), .maskCommand))
         }
 
         return sequence
+    }
+
+    private static func modifierKeyCode(
+        for modifier: HotkeyModifierKey,
+        side: ModifierSide
+    ) -> CGKeyCode {
+        switch (modifier, side) {
+        case (.control, .right):
+            return 0x3E
+        case (.control, _):
+            return 0x3B
+        case (.option, .right):
+            return 0x3D
+        case (.option, _):
+            return 0x3A
+        case (.shift, .right):
+            return 0x3C
+        case (.shift, _):
+            return 0x38
+        case (.command, .right):
+            return 0x36
+        case (.command, _):
+            return 0x37
+        }
     }
 }

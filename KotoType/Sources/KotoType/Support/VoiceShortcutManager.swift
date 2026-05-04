@@ -54,6 +54,7 @@ struct VoiceShortcut: Codable, Equatable, Identifiable, Sendable {
 final class VoiceShortcutManager: @unchecked Sendable {
     static let shared = VoiceShortcutManager()
     static let maxShortcutCount = 100
+    private static let normalizationLocale = Locale(identifier: "en_US_POSIX")
 
     private let storageURL: URL
     private let lock = NSLock()
@@ -149,7 +150,7 @@ final class VoiceShortcutManager: @unchecked Sendable {
         return normalized
             .folding(
                 options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
-                locale: .current
+                locale: normalizationLocale
             )
             .lowercased()
     }

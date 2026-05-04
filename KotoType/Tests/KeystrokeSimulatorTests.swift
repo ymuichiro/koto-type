@@ -214,4 +214,22 @@ final class KeystrokeSimulatorTests: XCTestCase {
 
         wait(for: [expectation], timeout: 1.0)
     }
+
+    func testOrderedModifierSequenceUsesRecordedModifierSides() {
+        let sequence = KeystrokeSimulator.orderedModifierSequence(
+            for: HotkeyConfiguration(
+                useCommand: true,
+                useOption: true,
+                useControl: true,
+                useShift: true,
+                commandSide: .right,
+                optionSide: .right,
+                controlSide: .right,
+                shiftSide: .right,
+                keyCode: 0x31
+            )
+        )
+
+        XCTAssertEqual(sequence.map(\.keyCode), [0x3E, 0x3D, 0x3C, 0x36])
+    }
 }

@@ -63,7 +63,6 @@ struct SettingsView: View {
     @State private var pendingVoiceShortcutInsertText: String
     @State private var pendingVoiceShortcutKeyCommand: HotkeyConfiguration
     @State private var voiceShortcutStatusMessage: String?
-    @State private var voiceShortcutStatusMessageIsError = false
     @State private var isShowingLicenses = false
     @State private var storageSnapshot = StorageManagementSnapshot(
         historyEntryCount: 0,
@@ -464,7 +463,7 @@ struct SettingsView: View {
             if let voiceShortcutStatusMessage {
                 Text(voiceShortcutStatusMessage)
                     .font(.caption)
-                    .foregroundColor(voiceShortcutStatusMessageIsError ? .orange : .secondary)
+                    .foregroundColor(.secondary)
             }
         }
     }
