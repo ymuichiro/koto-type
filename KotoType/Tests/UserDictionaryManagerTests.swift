@@ -59,6 +59,68 @@ final class UserDictionaryManagerTests: XCTestCase {
         XCTAssertEqual(manager.loadWords().count, UserDictionaryManager.maxWordCount)
     }
 
+    func testImportCSVAddsUniqueTermsAndSkipsDuplicatesAndBlanks() throws {
+        let csv = """
+        term
+        OpenAI
+        openai
+        
+          Whisper Turbo  
+        """
+
+        let result = try manager.importWords(
+            fromCSVData: Data(csv.utf8),
+            existingWords: ["Existing Term"]
+        )
+
+        XCTAssertEqual(result.words, ["Existing Term", "OpenAI", "Whisper Turbo"])
+        XCTAssertEqual(result.importedCount, 2)
+        XCTAssertEqual(result.duplicateCount, 1)
+        XCTAssertEqual(result.blankCount, 1)
+        XCTAssertEqual(result.truncatedCount, 0)
+    }
+
+    func testImportCSVRejectsRowsWithMultipleColumns() {
+        let csv = """
+        term,alias
+        OpenAI,test
+        """
+
+        XCTAssertThrowsError(
+            try manager.importWords(fromCSVData: Data(csv.utf8), existingWords: [])
+        ) { error in
+            XCTAssertEqual(error as? UserDictionaryCSVError, .invalidFormat(row: 1))
+        }
+    }
+
+    func testImportCSVTruncatesWhenLimitReached() throws {
+        let existingWords = (0..<UserDictionaryManager.maxWordCount - 1).map { "existing-\($0)" }
+        let csv = """
+        term
+        first-new
+        second-new
+        """
+
+        let result = try manager.importWords(
+            fromCSVData: Data(csv.utf8),
+            existingWords: existingWords
+        )
+
+        XCTAssertEqual(result.words.count, UserDictionaryManager.maxWordCount)
+        XCTAssertEqual(result.importedCount, 1)
+        XCTAssertEqual(result.truncatedCount, 1)
+    }
+
+    func testCSVExportEscapesQuotesAndCommas() {
+        let data = manager.csvData(for: ["OpenAI", "Hello, \"World\""])
+        let csvString = String(decoding: data, as: UTF8.self)
+
+        XCTAssertEqual(
+            csvString,
+            "term\nOpenAI\n\"Hello, \"\"World\"\"\"\n"
+        )
+    }
+
     func testSaveUsesOwnerOnlyPermissions() throws {
         manager.saveWords(["secret"])
 

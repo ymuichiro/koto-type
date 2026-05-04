@@ -29,15 +29,20 @@ final class RealtimeRecorderTests: XCTestCase {
         let result = recorder.startRecording()
         if result {
             XCTAssertNil(recorder.lastStartFailureReason)
+            XCTAssertFalse((recorder.currentInputDeviceName ?? "").isEmpty)
         } else {
             XCTAssertEqual(recorder.lastStartFailureReason, .noInputDevice)
+            XCTAssertNil(recorder.currentInputDeviceName)
         }
     }
 
     func testStopRecording() {
-        _ = recorder.startRecording()
+        let didStart = recorder.startRecording()
         recorder.stopRecording()
         XCTAssertNil(recorder.recordingURL, "Recording URL should be nil after stop without content")
+        if didStart {
+            XCTAssertNil(recorder.currentInputDeviceName)
+        }
     }
 
     func testFileCreationCallback() {

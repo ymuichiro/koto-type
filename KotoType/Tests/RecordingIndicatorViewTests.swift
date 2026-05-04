@@ -8,6 +8,19 @@ final class RecordingIndicatorViewTests: XCTestCase {
         XCTAssertEqual(size.width, 380, accuracy: 0.001)
     }
 
+    func testRecordingWithInputDeviceNameUsesTallerLayout() {
+        let defaultSize = RecordingIndicatorView.preferredContentSize(for: .recording, attentionMessage: nil)
+        let namedSize = RecordingIndicatorView.preferredContentSize(
+            for: .recording,
+            attentionMessage: nil,
+            processingMessage: nil,
+            recordingInputDeviceName: "MacBook Pro Microphone"
+        )
+
+        XCTAssertEqual(namedSize.width, defaultSize.width)
+        XCTAssertGreaterThan(namedSize.height, defaultSize.height)
+    }
+
     func testAttentionWithMessageUsesWiderSize() {
         let defaultSize = RecordingIndicatorView.preferredContentSize(for: .attention, attentionMessage: nil)
         let warningSize = RecordingIndicatorView.preferredContentSize(

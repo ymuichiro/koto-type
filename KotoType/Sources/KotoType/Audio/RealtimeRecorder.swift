@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 
 enum RecordingStartFailureReason: Equatable {
     case noInputDevice
@@ -18,7 +19,9 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     var recordingURL: URL? { lastFileURL }
     var onFileCreated: ((URL, Int) -> Void)?
     var onInputLevelChanged: ((Float) -> Void)?
+    var onInputDeviceNameChanged: ((String?) -> Void)?
     private(set) var lastStartFailureReason: RecordingStartFailureReason?
+    private(set) var currentInputDeviceName: String?
 
     var batchInterval: TimeInterval
     var silenceThreshold: Float
@@ -28,6 +31,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     private var recordingStartTime: TimeInterval = 0
     private var hasRecordedContent = false
     private var lastReportedInputLevel: Float = 0
+    private var lastReportedInputDeviceName: String?
     
     init(batchInterval: TimeInterval = 10.0, silenceThreshold: Float = -40.0, silenceDuration: TimeInterval = 0.5) {
         self.batchInterval = batchInterval
@@ -53,6 +57,8 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         guard let node = inputNode else {
             Logger.shared.log("RealtimeRecorder: failed to get input node", level: .error)
             lastStartFailureReason = .failedToGetInputNode
+            currentInputDeviceName = nil
+            reportInputDeviceName(nil, force: true)
             return false
         }
 
@@ -64,8 +70,13 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             )
             audioEngine = nil
             lastStartFailureReason = .noInputDevice
+            currentInputDeviceName = nil
+            reportInputDeviceName(nil, force: true)
             return false
         }
+
+        currentInputDeviceName = Self.currentDefaultInputDeviceName() ?? Self.unknownInputDeviceName
+        reportInputDeviceName(currentInputDeviceName, force: true)
         
         let recordingFormat = node.outputFormat(forBus: 0)
         capturedSampleRate = Self.normalizeSampleRate(recordingFormat.sampleRate)
@@ -89,6 +100,8 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         } catch {
             Logger.shared.log("RealtimeRecorder: failed to start audio engine: \(error)", level: .error)
             lastStartFailureReason = .failedToStartAudioEngine
+            currentInputDeviceName = nil
+            reportInputDeviceName(nil, force: true)
             return false
         }
     }
@@ -118,7 +131,9 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         hasRecordedContent = false
         isRecording = false
         audioEngine = nil
+        currentInputDeviceName = nil
         reportInputLevel(0, force: true)
+        reportInputDeviceName(nil, force: true)
         Logger.shared.log("RealtimeRecorder: recording stopped", level: .info)
     }
     
@@ -287,5 +302,87 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         DispatchQueue.main.async {
             handler?(clamped)
         }
+    }
+
+    private func reportInputDeviceName(_ name: String?, force: Bool = false) {
+        if !force && lastReportedInputDeviceName == name {
+            return
+        }
+
+        lastReportedInputDeviceName = name
+        let handler = onInputDeviceNameChanged
+        DispatchQueue.main.async {
+            handler?(name)
+        }
+    }
+
+    private static let unknownInputDeviceName = "Unknown input device"
+
+    private static func currentDefaultInputDeviceName() -> String? {
+        guard let deviceID = defaultInputDeviceID() else {
+            return nil
+        }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var name: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+
+        let status = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &name
+        )
+
+        guard status == noErr else {
+            Logger.shared.log(
+                "RealtimeRecorder: failed to read input device name (status=\(status))",
+                level: .warning
+            )
+            return nil
+        }
+
+        let resolvedName = name?.takeUnretainedValue() as String? ?? ""
+        let trimmed = resolvedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func defaultInputDeviceID() -> AudioObjectID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioObjectID()
+        var dataSize = UInt32(MemoryLayout<AudioObjectID>.size)
+
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
+
+        guard status == noErr else {
+            Logger.shared.log(
+                "RealtimeRecorder: failed to resolve default input device (status=\(status))",
+                level: .warning
+            )
+            return nil
+        }
+
+        guard deviceID != AudioObjectID(kAudioObjectUnknown) else {
+            return nil
+        }
+
+        return deviceID
     }
 }

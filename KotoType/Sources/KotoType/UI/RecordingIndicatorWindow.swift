@@ -7,6 +7,7 @@ class RecordingIndicatorWindow: NSPanel {
     private var currentAttentionMessage: String?
     private var currentProcessingMessage: String?
     private var currentRecordingLevel: CGFloat = 0
+    private var currentRecordingInputDeviceName: String?
     private let onCancelTapped: () -> Void
     private var visibilityToken: Int = 0
     
@@ -48,6 +49,7 @@ class RecordingIndicatorWindow: NSPanel {
             attentionMessage: currentAttentionMessage,
             processingMessage: currentProcessingMessage,
             recordingLevel: currentRecordingLevel,
+            recordingInputDeviceName: currentRecordingInputDeviceName,
             onCancelTapped: onCancelTapped
         )
         hostingController = NSHostingController(rootView: view)
@@ -55,7 +57,8 @@ class RecordingIndicatorWindow: NSPanel {
         updatePanelSize(
             state: currentState,
             attentionMessage: currentAttentionMessage,
-            processingMessage: currentProcessingMessage
+            processingMessage: currentProcessingMessage,
+            recordingInputDeviceName: currentRecordingInputDeviceName
         )
     }
     
@@ -76,11 +79,17 @@ class RecordingIndicatorWindow: NSPanel {
         )
     }
     
-    private func updatePanelSize(state: IndicatorState, attentionMessage: String?, processingMessage: String?) {
+    private func updatePanelSize(
+        state: IndicatorState,
+        attentionMessage: String?,
+        processingMessage: String?,
+        recordingInputDeviceName: String?
+    ) {
         let size = RecordingIndicatorView.preferredContentSize(
             for: state,
             attentionMessage: attentionMessage,
-            processingMessage: processingMessage
+            processingMessage: processingMessage,
+            recordingInputDeviceName: recordingInputDeviceName
         )
         if contentRect(forFrameRect: frame).size != size {
             setContentSize(size)
@@ -99,18 +108,21 @@ class RecordingIndicatorWindow: NSPanel {
         currentProcessingMessage = processingMessage
         if state != .recording {
             currentRecordingLevel = 0
+            currentRecordingInputDeviceName = nil
         }
         hostingController?.rootView = RecordingIndicatorView(
             state: state,
             attentionMessage: attentionMessage,
             processingMessage: processingMessage,
             recordingLevel: currentRecordingLevel,
+            recordingInputDeviceName: currentRecordingInputDeviceName,
             onCancelTapped: onCancelTapped
         )
         updatePanelSize(
             state: state,
             attentionMessage: attentionMessage,
-            processingMessage: processingMessage
+            processingMessage: processingMessage,
+            recordingInputDeviceName: currentRecordingInputDeviceName
         )
         if ensureVisible {
             visibilityToken += 1
@@ -168,6 +180,21 @@ class RecordingIndicatorWindow: NSPanel {
             guard self.currentState == .recording else {
                 return
             }
+            self.render(state: .recording, attentionMessage: nil, processingMessage: nil, ensureVisible: false)
+        }
+    }
+
+    func updateRecordingInputDeviceName(_ name: String?) {
+        DispatchQueue.main.async {
+            guard self.currentRecordingInputDeviceName != name else {
+                return
+            }
+
+            self.currentRecordingInputDeviceName = name
+            guard self.currentState == .recording else {
+                return
+            }
+
             self.render(state: .recording, attentionMessage: nil, processingMessage: nil, ensureVisible: false)
         }
     }

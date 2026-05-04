@@ -905,16 +905,25 @@ def post_process_text(text, language="ja", auto_punctuation=True):
         return text
 
     if language == "ja":
+        def normalize_japanese_punctuation_sequence(value):
+            value = re.sub(r"、+([。！？])", r"\1", value)
+            value = re.sub(r"。{2,}", "。", value)
+            value = re.sub(r"！{2,}", "！", value)
+            value = re.sub(r"？{2,}", "？", value)
+            value = re.sub(r"、{2,}", "、", value)
+            return value
+
         text = text.translate(str.maketrans({",": "、", ".": "。", "!": "！", "?": "？"}))
         text = re.sub(r"\s*([、。！？])\s*", r"\1", text)
-        text = re.sub(r"、{2,}", "、", text)
-        text = re.sub(r"。{2,}", "。", text)
-        text = re.sub(r"！{2,}", "！", text)
-        text = re.sub(r"？{2,}", "？", text)
-        text = text.replace("、。", "。")
+        text = normalize_japanese_punctuation_sequence(text)
 
         if text and not text.endswith(("。", "！", "？", "!", "?")):
-            text += "。"
+            if text.endswith("、"):
+                text = text[:-1] + "。"
+            else:
+                text += "。"
+
+        text = normalize_japanese_punctuation_sequence(text)
     else:
         text = text.translate(str.maketrans({"、": ",", "。": ".", "！": "!", "？": "?"}))
         text = re.sub(r"\s+([,.!?])", r"\1", text)

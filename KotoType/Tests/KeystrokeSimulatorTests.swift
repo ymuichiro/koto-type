@@ -195,4 +195,23 @@ final class KeystrokeSimulatorTests: XCTestCase {
 
         wait(for: [expectation], timeout: 2.0)
     }
+
+    func testExecuteKeyCommand() throws {
+        let expectation = XCTestExpectation(description: "Key command execution should complete")
+
+        DispatchQueue.main.async {
+            KeystrokeSimulator.executeKeyCommand(
+                HotkeyConfiguration(
+                    useCommand: true,
+                    useOption: false,
+                    useControl: false,
+                    useShift: false,
+                    keyCode: 0x31
+                )
+            )
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 1.0)
+    }
 }

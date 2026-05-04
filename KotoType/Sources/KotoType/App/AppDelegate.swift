@@ -422,7 +422,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         realtimeRecorder?.onInputLevelChanged = { [weak self] level in
             self?.recordingIndicatorWindow?.updateRecordingLevel(CGFloat(level))
         }
+        realtimeRecorder?.onInputDeviceNameChanged = { [weak self] name in
+            self?.recordingIndicatorWindow?.updateRecordingInputDeviceName(name)
+        }
         recordingIndicatorWindow?.updateRecordingLevel(0)
+        recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
 
         realtimeRecorder?.onFileCreated = { [weak self] url, localIndex in
             guard let self = self else { return }
@@ -458,13 +462,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 showTransientRecordingAttention("Microphone not detected")
             }
             realtimeRecorder?.onInputLevelChanged = nil
+            realtimeRecorder?.onInputDeviceNameChanged = nil
             recordingIndicatorWindow?.updateRecordingLevel(0)
+            recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
             isRecording = false
             activeRecordingSessionID = nil
             destroySession(sessionID: sessionID)
             return
         }
         Logger.shared.log("Recording started (session \(sessionID))", level: .info)
+        recordingIndicatorWindow?.updateRecordingInputDeviceName(realtimeRecorder?.currentInputDeviceName)
         recordingIndicatorWindow?.show()
     }
 
@@ -506,7 +513,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Stopping audio recording for session \(sessionID)...", level: .info)
         realtimeRecorder?.stopRecording()
         realtimeRecorder?.onInputLevelChanged = nil
+        realtimeRecorder?.onInputDeviceNameChanged = nil
         recordingIndicatorWindow?.updateRecordingLevel(0)
+        recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
         Logger.shared.log("Recording stopped (session \(sessionID))", level: .info)
         Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
         recordingIndicatorWindow?.showProcessing()
@@ -532,7 +541,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             activeRecordingSessionID = nil
             realtimeRecorder?.stopRecording(discardPendingAudio: true)
             realtimeRecorder?.onInputLevelChanged = nil
+            realtimeRecorder?.onInputDeviceNameChanged = nil
             recordingIndicatorWindow?.updateRecordingLevel(0)
+            recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
             destroySession(sessionID: sessionID)
 
             if indicatorPresentation.currentLiveSessionID == nil {
@@ -705,16 +716,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let didInsertText: Bool
         if !finalText.isEmpty {
             Logger.shared.log(
-                "Typing text into active window (session \(sessionID), length=\(finalText.count))",
+                "Processing finalized live recording output (session \(sessionID), length=\(finalText.count))",
                 level: .info
             )
-            KeystrokeSimulator.typeText(finalText)
-            Logger.shared.log("Text typing completed (session \(sessionID))", level: .info)
+
+            if let shortcut = VoiceShortcutManager.shared.resolve(input: finalText) {
+                Logger.shared.log(
+                    "Voice shortcut matched for session \(sessionID) with action=\(shortcut.actionKind.rawValue) and inputLength=\(finalText.count)",
+                    level: .info
+                )
+
+                if VoiceShortcutExecutor.execute(shortcut) {
+                    Logger.shared.log(
+                        "Voice shortcut executed successfully (session \(sessionID))",
+                        level: .info
+                    )
+                    didInsertText = true
+                } else {
+                    Logger.shared.log(
+                        "Voice shortcut execution failed; falling back to text insertion (session \(sessionID))",
+                        level: .warning
+                    )
+                    KeystrokeSimulator.typeText(finalText)
+                    didInsertText = true
+                }
+            } else {
+                KeystrokeSimulator.typeText(finalText)
+                Logger.shared.log("Text typing completed (session \(sessionID))", level: .info)
+                didInsertText = true
+            }
+
             TranscriptionHistoryManager.shared.addEntry(
                 text: finalText,
                 source: .liveRecording
             )
-            didInsertText = true
         } else {
             didInsertText = false
         }
