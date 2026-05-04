@@ -26,6 +26,7 @@ CONTROL_MESSAGE_PREFIX = "__KOTOTYPE_CONTROL__:"
 DEFAULT_CPU_MODEL_ID = "large-v3-turbo"
 DEFAULT_MLX_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
 DEFAULT_TASK = "transcribe"
+DEFAULT_CONDITION_ON_PREVIOUS_TEXT = False
 DEFAULT_NO_SPEECH_THRESHOLD = 0.6
 DEFAULT_COMPRESSION_RATIO_THRESHOLD = 2.4
 DEFAULT_AUTO_GAIN_ENABLED = True
@@ -788,6 +789,10 @@ def transcribe_once(model, transcribe_kwargs, vad_filter, vad_parameters=None):
         "best_of": transcribe_kwargs["best_of"],
         "vad_filter": vad_filter,
         "word_timestamps": transcribe_kwargs["word_timestamps"],
+        "condition_on_previous_text": transcribe_kwargs.get(
+            "condition_on_previous_text",
+            DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
+        ),
         "initial_prompt": transcribe_kwargs["initial_prompt"],
         "no_speech_threshold": transcribe_kwargs["no_speech_threshold"],
         "compression_ratio_threshold": transcribe_kwargs["compression_ratio_threshold"],
@@ -1541,12 +1546,13 @@ class BackendManager:
             "beam_size": profile.beam_size,
             "best_of": profile.best_of,
             "word_timestamps": False,
+            "condition_on_previous_text": DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
             "initial_prompt": initial_prompt,
             "no_speech_threshold": DEFAULT_NO_SPEECH_THRESHOLD,
             "compression_ratio_threshold": DEFAULT_COMPRESSION_RATIO_THRESHOLD,
         }
         self.log(
-            f"CPU transcription parameters: language={language}, preset={quality_preset}, beam_size={profile.beam_size}, best_of={profile.best_of}, vad_parameters={vad_parameters}, initial_prompt_present={initial_prompt is not None}"
+            f"CPU transcription parameters: language={language}, preset={quality_preset}, beam_size={profile.beam_size}, best_of={profile.best_of}, vad_parameters={vad_parameters}, condition_on_previous_text={DEFAULT_CONDITION_ON_PREVIOUS_TEXT}, initial_prompt_present={initial_prompt is not None}"
         )
         segments, info = transcribe_with_vad_fallback(
             model=model,
@@ -1565,7 +1571,7 @@ class BackendManager:
         if mlx_whisper is None:
             raise RuntimeError("mlx runtime unavailable")
         self.log(
-            f"MLX transcription parameters: language={language}, preset={quality_preset}, temperature={profile.temperature}, initial_prompt_present={initial_prompt is not None}"
+            f"MLX transcription parameters: language={language}, preset={quality_preset}, temperature={profile.temperature}, condition_on_previous_text={DEFAULT_CONDITION_ON_PREVIOUS_TEXT}, initial_prompt_present={initial_prompt is not None}"
         )
         result = mlx_whisper.transcribe(
             audio_path,
@@ -1574,6 +1580,7 @@ class BackendManager:
             task=DEFAULT_TASK,
             temperature=profile.temperature,
             word_timestamps=False,
+            condition_on_previous_text=DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
             initial_prompt=initial_prompt,
             no_speech_threshold=DEFAULT_NO_SPEECH_THRESHOLD,
             compression_ratio_threshold=DEFAULT_COMPRESSION_RATIO_THRESHOLD,
@@ -1683,34 +1690,51 @@ def load_user_dictionary(path=None, log=None):
 
 
 def generate_initial_prompt(language, use_context=True, user_words=None, screenshot_context=None):
-    base_prompts = {
-        "ja": "これは会話の文字起こしです。正確な日本語で出力してください。",
-        "en": "This is a speech transcription. Please output accurate English.",
+    language_hint_by_code = {
+        "ja": "Japanese",
+        "en": "English",
+        "zh": "Chinese",
+        "ko": "Korean",
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
     }
+    prompt_parts = [
+        (
+            "Verbatim transcription. Preserve the original spoken wording and language as much as possible. "
+            "Keep code-switching, proper nouns, acronyms, product names, and technical terms in the form they "
+            "were spoken. Do not translate, summarize, or rewrite into another language."
+        )
+    ]
 
-    prompt = base_prompts.get(language, "")
+    normalized_language = str(language or "").strip().lower()
+    language_hint = language_hint_by_code.get(normalized_language)
+    if language_hint:
+        prompt_parts.append(
+            f"Expected spoken language hint: {language_hint}. Preserve any spoken code-switching."
+        )
 
     if use_context:
         words_for_prompt = user_words if user_words is not None else load_user_dictionary()
         normalized_words = normalize_user_words(words_for_prompt)
         if normalized_words:
-            if language == "ja":
-                word_list = "、".join(normalized_words[:20])
-                prompt += f" 以下の単語や専門用語を正確に認識してください: {word_list}。"
-            else:
-                word_list = ", ".join(normalized_words[:20])
-                prompt += f" Please accurately recognize these terms: {word_list}."
+            word_list = ", ".join(normalized_words[:20])
+            prompt_parts.append(
+                "User vocabulary hints: "
+                f"{word_list}. Use these only to improve recognition when they are spoken."
+            )
 
     if screenshot_context:
         normalized_screenshot_context = " ".join(str(screenshot_context).split())
         if normalized_screenshot_context:
             clipped_screenshot_context = normalized_screenshot_context[:250]
-            if language == "ja":
-                prompt += f" 画面上の情報: {clipped_screenshot_context}。"
-            else:
-                prompt += f" On-screen context: {clipped_screenshot_context}."
+            prompt_parts.append(
+                "Contextual vocabulary hints from the current screen: "
+                f"{clipped_screenshot_context}. Use these only to improve recognition of spoken terms. "
+                "Do not copy unrelated context and do not translate the spoken language."
+            )
 
-    return prompt if prompt else None
+    return " ".join(prompt_parts)
 
 
 def main():

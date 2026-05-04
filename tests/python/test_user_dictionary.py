@@ -13,6 +13,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class UserDictionaryTests(unittest.TestCase):
+    def assertPromptUsesNoTranslationGuidance(self, prompt):
+        self.assertIsNotNone(prompt)
+        self.assertIn("Do not translate, summarize, or rewrite into another language.", prompt)
+
     def test_normalize_user_words(self):
         words = whisper_server.normalize_user_words(
             ["  OpenAI  ", "", "openai", "  Whisper   Turbo ", "日本語  用語", None]
@@ -39,16 +43,65 @@ class UserDictionaryTests(unittest.TestCase):
             words = whisper_server.load_user_dictionary(path=str(dict_path))
             self.assertEqual(words, ["Faster Whisper", "GPU"])
 
-    def test_generate_initial_prompt_includes_terms(self):
+    def test_generate_initial_prompt_uses_language_preserving_default_for_auto(self):
+        prompt = whisper_server.generate_initial_prompt(
+            "auto",
+            use_context=False,
+        )
+
+        self.assertPromptUsesNoTranslationGuidance(prompt)
+        self.assertIn("Verbatim transcription.", prompt)
+        self.assertNotIn("正確な日本語で出力してください", prompt)
+        self.assertNotIn("accurate English", prompt)
+        self.assertNotIn("Expected spoken language hint:", prompt)
+
+    def test_generate_initial_prompt_adds_explicit_japanese_language_hint(self):
         prompt = whisper_server.generate_initial_prompt(
             "ja",
+            use_context=False,
+        )
+
+        self.assertPromptUsesNoTranslationGuidance(prompt)
+        self.assertIn("Expected spoken language hint: Japanese.", prompt)
+        self.assertIn("Preserve any spoken code-switching.", prompt)
+        self.assertNotIn("正確な日本語で出力してください", prompt)
+
+    def test_generate_initial_prompt_includes_user_vocabulary_hints(self):
+        prompt = whisper_server.generate_initial_prompt(
+            "auto",
             use_context=True,
             user_words=["OpenAI", "openai", "faster-whisper"],
         )
-        self.assertIsNotNone(prompt)
+
+        self.assertPromptUsesNoTranslationGuidance(prompt)
         self.assertIn("OpenAI", prompt)
         self.assertIn("faster-whisper", prompt)
         self.assertEqual(prompt.count("OpenAI"), 1)
+        self.assertIn("User vocabulary hints:", prompt)
+        self.assertIn(
+            "Use these only to improve recognition when they are spoken.",
+            prompt,
+        )
+        self.assertNotIn("Please accurately recognize these terms", prompt)
+
+    def test_generate_initial_prompt_frames_screenshot_context_as_hints_only(self):
+        prompt = whisper_server.generate_initial_prompt(
+            "auto",
+            use_context=False,
+            screenshot_context="GitHub issue pull request README TypeScript FastAPI",
+        )
+
+        self.assertPromptUsesNoTranslationGuidance(prompt)
+        self.assertIn("Contextual vocabulary hints from the current screen:", prompt)
+        self.assertIn("GitHub issue pull request README TypeScript FastAPI", prompt)
+        self.assertIn(
+            "Use these only to improve recognition of spoken terms.",
+            prompt,
+        )
+        self.assertIn(
+            "Do not copy unrelated context and do not translate the spoken language.",
+            prompt,
+        )
 
     def test_post_process_text_with_auto_punctuation_enabled(self):
         text = "今日は晴れです そして散歩に行きます"

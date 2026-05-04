@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import unittest
 import tempfile
+import unittest
+from unittest.mock import patch
+
 from python import whisper_server
 
 
@@ -318,6 +320,79 @@ class BackendSelectionTests(unittest.TestCase):
         self.assertFalse(status.is_downloaded)
         self.assertEqual(status.file_count, 0)
         self.assertEqual(status.byte_count, 0)
+
+
+class RecordingOptionsBackendManager(whisper_server.BackendManager):
+    def __init__(self):
+        temp_root = tempfile.mkdtemp(prefix="kototype-recording-options-")
+        super().__init__(
+            state_path="/tmp/server_state.json",
+            lock_path="/tmp/server_state.lock",
+            pid=1234,
+            max_parallel_model_loads=1,
+            model_load_wait_timeout=1,
+            cpu_model_dir=f"{temp_root}/cpu",
+            mlx_model_dir=f"{temp_root}/mlx",
+            model_cache_dir=f"{temp_root}/cache",
+            log=lambda _: None,
+        )
+
+    def _ensure_cpu_model(self, progress=None):
+        return object()
+
+    def _ensure_mlx_model(self, progress=None):
+        return None
+
+
+class ConditionOnPreviousTextTests(unittest.TestCase):
+    def test_cpu_transcription_disables_condition_on_previous_text(self):
+        manager = RecordingOptionsBackendManager()
+        captured_kwargs = {}
+
+        def fake_transcribe_with_vad_fallback(*, model, transcribe_kwargs, vad_parameters, log):
+            captured_kwargs.update(transcribe_kwargs)
+            return [], type("Info", (), {"language": "ja"})()
+
+        with patch.object(
+            whisper_server,
+            "transcribe_with_vad_fallback",
+            side_effect=fake_transcribe_with_vad_fallback,
+        ):
+            manager._transcribe_with_cpu(
+                "/tmp/test.wav",
+                "ja",
+                "medium",
+                "prompt",
+            )
+
+        self.assertIs(
+            captured_kwargs["condition_on_previous_text"],
+            whisper_server.DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
+        )
+        self.assertFalse(captured_kwargs["condition_on_previous_text"])
+
+    def test_mlx_transcription_disables_condition_on_previous_text(self):
+        manager = RecordingOptionsBackendManager()
+        captured_kwargs = {}
+
+        class RecordingMLXWhisper:
+            def transcribe(self, audio, **kwargs):
+                captured_kwargs.update(kwargs)
+                return {"text": "mlx text", "language": "ja"}
+
+        manager.mlx_whisper = RecordingMLXWhisper()
+        manager._transcribe_with_mlx(
+            "/tmp/test.wav",
+            "ja",
+            "medium",
+            "prompt",
+        )
+
+        self.assertIs(
+            captured_kwargs["condition_on_previous_text"],
+            whisper_server.DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
+        )
+        self.assertFalse(captured_kwargs["condition_on_previous_text"])
 
 
 if __name__ == "__main__":
