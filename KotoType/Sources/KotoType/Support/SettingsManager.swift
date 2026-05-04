@@ -1,6 +1,6 @@
 import Foundation
 
-enum TranscriptionQualityPreset: String, Codable, CaseIterable, Sendable {
+enum TranscriptionQualityPreset: String, Codable, CaseIterable, Equatable, Sendable {
     case low
     case medium
     case high
@@ -28,10 +28,10 @@ enum TranscriptionQualityPreset: String, Codable, CaseIterable, Sendable {
     }
 }
 
-struct AppSettings: Codable {
+struct AppSettings: Codable, Equatable {
     static let defaultRecordingCompletionTimeout: Double = 600.0
     static let minimumRecordingCompletionTimeout: Double = 30.0
-    static let maximumRecordingCompletionTimeout: Double = 600.0
+    static let maximumRecordingCompletionTimeout: Double = 3_600.0
 
     var hotkeyConfig: HotkeyConfiguration
     var language: String
