@@ -286,7 +286,12 @@ def release_model_load_slot(state_path, lock_path, pid):
     mutate_server_state(state_path, lock_path, mutator)
 
 
-def build_audio_filter_chain(enable_noise_reduction=True, use_nlm_denoise=False):
+def build_audio_filter_chain(
+    enable_noise_reduction=True,
+    use_nlm_denoise=False,
+    use_fft_denoise=False,
+    use_compressor=False,
+):
     filters = [
         "highpass=f=100",
         "lowpass=f=7800",
@@ -296,27 +301,35 @@ def build_audio_filter_chain(enable_noise_reduction=True, use_nlm_denoise=False)
         if use_nlm_denoise:
             # Non-local means denoise (stronger but not always available)
             filters.append("anlmdn=s=0.08:p=0.003")
-        # Spectral denoise to suppress stationary noise (air conditioner, fan, etc.)
-        filters.append("afftdn=nf=-26:tn=1")
+        if use_fft_denoise:
+            # Spectral denoise to suppress stationary noise (air conditioner, fan, etc.)
+            filters.append("afftdn=nf=-26:tn=1")
 
-    filters.extend(
-        [
-            "dynaudnorm=f=90:g=15:p=0.8",
-            "acompressor=threshold=-21dB:ratio=2.8:attack=5:release=90",
-        ]
-    )
+    filters.append("dynaudnorm=f=90:g=15:p=0.8")
+    if use_compressor:
+        filters.append("acompressor=threshold=-21dB:ratio=2.8:attack=5:release=90")
     return ",".join(filters)
 
 
 def build_audio_filter_chain_candidates(enable_noise_reduction=True):
+    candidates = [build_audio_filter_chain(enable_noise_reduction=False)]
     if not enable_noise_reduction:
-        return [build_audio_filter_chain(enable_noise_reduction=False)]
+        return candidates
 
-    return [
-        build_audio_filter_chain(enable_noise_reduction=True, use_nlm_denoise=True),
-        build_audio_filter_chain(enable_noise_reduction=True, use_nlm_denoise=False),
-        build_audio_filter_chain(enable_noise_reduction=False),
-    ]
+    candidates.append(
+        build_audio_filter_chain(
+            enable_noise_reduction=True,
+            use_fft_denoise=True,
+        )
+    )
+    candidates.append(
+        build_audio_filter_chain(
+            enable_noise_reduction=True,
+            use_nlm_denoise=True,
+            use_fft_denoise=True,
+        )
+    )
+    return candidates
 
 
 def format_ffmpeg_error(error):
