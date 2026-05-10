@@ -13,7 +13,10 @@ from python import whisper_server
 
 class AudioPreprocessTests(unittest.TestCase):
     def test_build_audio_filter_chain_with_noise_reduction(self):
-        chain = whisper_server.build_audio_filter_chain(enable_noise_reduction=True)
+        chain = whisper_server.build_audio_filter_chain(
+            enable_noise_reduction=True,
+            use_fft_denoise=True,
+        )
         self.assertIn("afftdn", chain)
         self.assertIn("highpass=f=100", chain)
         self.assertIn("lowpass=f=7800", chain)
@@ -22,15 +25,18 @@ class AudioPreprocessTests(unittest.TestCase):
         chain = whisper_server.build_audio_filter_chain(enable_noise_reduction=False)
         self.assertNotIn("afftdn", chain)
         self.assertIn("dynaudnorm", chain)
+        self.assertNotIn("acompressor", chain)
 
     def test_build_audio_filter_chain_candidates(self):
         candidates = whisper_server.build_audio_filter_chain_candidates(
             enable_noise_reduction=True
         )
         self.assertEqual(len(candidates), 3)
-        self.assertIn("anlmdn", candidates[0])
+        self.assertNotIn("afftdn", candidates[0])
+        self.assertNotIn("anlmdn", candidates[0])
         self.assertIn("afftdn", candidates[1])
-        self.assertNotIn("afftdn", candidates[2])
+        self.assertNotIn("anlmdn", candidates[1])
+        self.assertIn("anlmdn", candidates[2])
 
     def test_audio_preprocess_retries_without_denoise_filter(self):
         fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=True)
@@ -66,16 +72,12 @@ class AudioPreprocessTests(unittest.TestCase):
                     os.environ["KOTOTYPE_AUTO_GAIN_ENABLED"] = original_auto_gain_env
 
             self.assertTrue(output_path.endswith("_processed.wav"))
-            self.assertEqual(fake_ffmpeg.run_call_count, 3)
-            self.assertIn("afftdn", fake_ffmpeg.filter_history[0])
-            self.assertIn("afftdn", fake_ffmpeg.filter_history[1])
-            self.assertNotIn("afftdn", fake_ffmpeg.filter_history[2])
+            self.assertEqual(fake_ffmpeg.run_call_count, 1)
+            self.assertNotIn("afftdn", fake_ffmpeg.filter_history[0])
+            self.assertNotIn("anlmdn", fake_ffmpeg.filter_history[0])
             self.assertTrue(
-                any(
-                    "trying next filter chain" in line
-                    for line in logs
-                ),
-                "Expected fallback log when denoise filter fails",
+                all("trying next filter chain" not in line for line in logs),
+                "Did not expect denoise fallback when light chain succeeds first",
             )
 
     def test_audio_preprocess_can_be_skipped_via_environment(self):
