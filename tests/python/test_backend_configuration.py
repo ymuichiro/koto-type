@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import math
 import tempfile
 import unittest
+import wave
 from unittest.mock import patch
 
 from python import whisper_server
@@ -27,7 +29,7 @@ class DecodeProfileTests(unittest.TestCase):
         self.assertEqual(high.best_of, 10)
         self.assertEqual(high.vad_threshold, 0.5)
 
-    def test_build_mlx_decode_profile_omits_non_compatible_controls(self):
+    def test_build_mlx_decode_profile_uses_deterministic_profiles_without_beam_search(self):
         low = whisper_server.build_mlx_decode_profile("low")
         medium = whisper_server.build_mlx_decode_profile("medium")
         high = whisper_server.build_mlx_decode_profile("high")
@@ -37,8 +39,13 @@ class DecodeProfileTests(unittest.TestCase):
         self.assertIsNone(low.best_of)
         self.assertIsNone(low.vad_threshold)
 
-        self.assertEqual(medium.temperature, (0.0, 0.2, 0.4))
-        self.assertEqual(high.temperature, (0.0, 0.2, 0.4, 0.6, 0.8, 1.0))
+        self.assertEqual(medium.temperature, 0.0)
+        self.assertIsNone(medium.beam_size)
+        self.assertIsNone(medium.best_of)
+
+        self.assertEqual(high.temperature, 0.0)
+        self.assertIsNone(high.beam_size)
+        self.assertIsNone(high.best_of)
 
 
 class ParseRequestLineTests(unittest.TestCase):
@@ -393,6 +400,106 @@ class ConditionOnPreviousTextTests(unittest.TestCase):
             whisper_server.DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
         )
         self.assertFalse(captured_kwargs["condition_on_previous_text"])
+        self.assertEqual(captured_kwargs["temperature"], 0.0)
+        self.assertNotIn("beam_size", captured_kwargs)
+        self.assertNotIn("best_of", captured_kwargs)
+
+
+class ActiveClipRetryTests(unittest.TestCase):
+    def write_wav(self, path, segments):
+        sample_rate = 16000
+        with wave.open(path, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            for duration_seconds, amplitude in segments:
+                frame_count = int(sample_rate * duration_seconds)
+                for index in range(frame_count):
+                    value = 0
+                    if amplitude > 0:
+                        value = int(
+                            amplitude * math.sin(2.0 * math.pi * 440.0 * index / sample_rate)
+                        )
+                    wav_file.writeframesraw(value.to_bytes(2, "little", signed=True))
+
+    def test_build_active_clip_timestamps_detects_speech_region(self):
+        with tempfile.NamedTemporaryFile(suffix=".wav") as handle:
+            self.write_wav(
+                handle.name,
+                [
+                    (0.45, 0),
+                    (0.35, 9000),
+                    (0.50, 0),
+                ],
+            )
+
+            clip = whisper_server.build_active_clip_timestamps(handle.name)
+
+        self.assertIsNotNone(clip)
+        assert clip is not None
+        self.assertGreaterEqual(clip[0], 0.20)
+        self.assertLessEqual(clip[0], 0.45)
+        self.assertGreaterEqual(clip[1], 0.70)
+        self.assertLessEqual(clip[1], 1.05)
+
+    def test_mlx_retry_uses_active_clip_when_available(self):
+        manager = RecordingOptionsBackendManager()
+        calls = []
+
+        class RecordingMLXWhisper:
+            def transcribe(self, audio, **kwargs):
+                calls.append(kwargs)
+                return {"text": "mlx text", "language": "ja"}
+
+        manager.mlx_whisper = RecordingMLXWhisper()
+
+        with patch.object(
+            whisper_server,
+            "resolve_mlx_active_clip_timestamps",
+            return_value=[0.12, 1.24],
+        ):
+            manager._transcribe_with_mlx(
+                "/tmp/test.wav",
+                "ja",
+                "high",
+                "prompt",
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["clip_timestamps"], [0.12, 1.24])
+        self.assertNotIn("beam_size", calls[0])
+        self.assertNotIn("best_of", calls[0])
+
+    def test_mlx_retry_falls_back_to_full_audio_when_active_clip_is_empty(self):
+        manager = RecordingOptionsBackendManager()
+        calls = []
+
+        class RecordingMLXWhisper:
+            def transcribe(self, audio, **kwargs):
+                calls.append(kwargs)
+                if len(calls) == 1:
+                    return {"text": "", "language": "ja"}
+                return {"text": "retry text", "language": "ja"}
+
+        manager.mlx_whisper = RecordingMLXWhisper()
+
+        with patch.object(
+            whisper_server,
+            "resolve_mlx_active_clip_timestamps",
+            return_value=[0.18, 1.08],
+        ):
+            text, language = manager._transcribe_with_mlx(
+                "/tmp/test.wav",
+                None,
+                "medium",
+                "prompt",
+            )
+
+        self.assertEqual(text, "retry text")
+        self.assertEqual(language, "ja")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["clip_timestamps"], [0.18, 1.08])
+        self.assertNotIn("clip_timestamps", calls[1])
 
 
 if __name__ == "__main__":

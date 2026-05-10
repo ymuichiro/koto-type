@@ -38,6 +38,8 @@ DEFAULT_ACTIVITY_THRESHOLD_DBFS = -38.0
 DEFAULT_MIN_ACTIVE_AUDIO_SECONDS = 0.18
 DEFAULT_MIN_ACTIVE_AUDIO_RATIO = 0.12
 DEFAULT_MIN_AUDIO_DURATION_FOR_SKIP_SECONDS = 0.8
+DEFAULT_ACTIVE_REGION_PADDING_MS = 150
+DEFAULT_ACTIVE_REGION_MIN_TRIM_SAVED_SECONDS = 0.25
 
 
 class MlxCoreModule(Protocol):
@@ -388,7 +390,7 @@ def analyze_wav_peak_dbfs(wav_path):
     return 20.0 * log10(max_peak / 32767.0)
 
 
-def analyze_wav_activity(
+def scan_wav_activity(
     wav_path,
     window_ms=DEFAULT_ACTIVITY_WINDOW_MS,
     activity_threshold_dbfs=DEFAULT_ACTIVITY_THRESHOLD_DBFS,
@@ -397,6 +399,8 @@ def analyze_wav_activity(
     active_windows = 0
     total_windows = 0
     total_samples = 0
+    first_active_window_index = None
+    last_active_window_index = None
 
     with wave.open(wav_path, "rb") as wav_file:
         sample_width = wav_file.getsampwidth()
@@ -445,28 +449,179 @@ def analyze_wav_activity(
                 rms_dbfs = 20.0 * log10(rms / 32767.0)
                 if rms_dbfs >= activity_threshold_dbfs:
                     active_windows += 1
+                    if first_active_window_index is None:
+                        first_active_window_index = total_windows - 1
+                    last_active_window_index = total_windows - 1
 
     if total_samples <= 0:
-        return AudioActivityStats(
-            duration_seconds=0.0,
-            peak_dbfs=-inf,
-            active_duration_seconds=0.0,
-            active_ratio=0.0,
-            window_count=0,
+        return WavActivityAnalysis(
+            stats=AudioActivityStats(
+                duration_seconds=0.0,
+                peak_dbfs=-inf,
+                active_duration_seconds=0.0,
+                active_ratio=0.0,
+                window_count=0,
+            ),
+            window_duration_seconds=0.0,
         )
 
     duration_seconds = total_samples / sample_rate
     peak_dbfs = -inf if max_peak <= 0 else 20.0 * log10(max_peak / 32767.0)
     active_ratio = active_windows / total_windows if total_windows > 0 else 0.0
-    active_duration_seconds = active_windows * (window_sample_count / sample_rate)
+    window_duration_seconds = window_sample_count / sample_rate
+    active_duration_seconds = active_windows * window_duration_seconds
 
-    return AudioActivityStats(
-        duration_seconds=duration_seconds,
-        peak_dbfs=peak_dbfs,
-        active_duration_seconds=active_duration_seconds,
-        active_ratio=active_ratio,
-        window_count=total_windows,
+    return WavActivityAnalysis(
+        stats=AudioActivityStats(
+            duration_seconds=duration_seconds,
+            peak_dbfs=peak_dbfs,
+            active_duration_seconds=active_duration_seconds,
+            active_ratio=active_ratio,
+            window_count=total_windows,
+        ),
+        window_duration_seconds=window_duration_seconds,
+        first_active_window_index=first_active_window_index,
+        last_active_window_index=last_active_window_index,
     )
+
+
+def analyze_wav_activity(
+    wav_path,
+    window_ms=DEFAULT_ACTIVITY_WINDOW_MS,
+    activity_threshold_dbfs=DEFAULT_ACTIVITY_THRESHOLD_DBFS,
+):
+    return scan_wav_activity(
+        wav_path,
+        window_ms=window_ms,
+        activity_threshold_dbfs=activity_threshold_dbfs,
+    ).stats
+
+
+def build_active_clip_timestamps(
+    wav_path,
+    *,
+    window_ms=DEFAULT_ACTIVITY_WINDOW_MS,
+    activity_threshold_dbfs=DEFAULT_ACTIVITY_THRESHOLD_DBFS,
+    padding_ms=DEFAULT_ACTIVE_REGION_PADDING_MS,
+    min_trim_saved_seconds=DEFAULT_ACTIVE_REGION_MIN_TRIM_SAVED_SECONDS,
+):
+    analysis = scan_wav_activity(
+        wav_path,
+        window_ms=window_ms,
+        activity_threshold_dbfs=activity_threshold_dbfs,
+    )
+    if (
+        analysis.first_active_window_index is None
+        or analysis.last_active_window_index is None
+        or analysis.window_duration_seconds <= 0
+    ):
+        return None
+
+    total_duration = analysis.stats.duration_seconds
+    padding_seconds = max(0.0, padding_ms / 1000.0)
+    start_seconds = max(
+        0.0,
+        analysis.first_active_window_index * analysis.window_duration_seconds
+        - padding_seconds,
+    )
+    end_seconds = min(
+        total_duration,
+        (analysis.last_active_window_index + 1) * analysis.window_duration_seconds
+        + padding_seconds,
+    )
+    trimmed_duration = end_seconds - start_seconds
+    if trimmed_duration <= 0:
+        return None
+    if total_duration - trimmed_duration < min_trim_saved_seconds:
+        return None
+
+    return [round(start_seconds, 3), round(end_seconds, 3)]
+
+
+def should_retry_mlx_with_full_audio(text):
+    return not str(text or "").strip()
+
+
+def build_mlx_transcribe_kwargs(
+    *,
+    model_path,
+    language,
+    profile,
+    initial_prompt,
+    clip_timestamps=None,
+):
+    kwargs = {
+        "path_or_hf_repo": model_path,
+        "language": language,
+        "task": DEFAULT_TASK,
+        "temperature": profile.temperature,
+        "word_timestamps": False,
+        "condition_on_previous_text": DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
+        "initial_prompt": initial_prompt,
+        "no_speech_threshold": DEFAULT_NO_SPEECH_THRESHOLD,
+        "compression_ratio_threshold": DEFAULT_COMPRESSION_RATIO_THRESHOLD,
+    }
+    if profile.beam_size is not None:
+        kwargs["beam_size"] = profile.beam_size
+    if profile.best_of is not None:
+        kwargs["best_of"] = profile.best_of
+    if clip_timestamps is not None:
+        kwargs["clip_timestamps"] = clip_timestamps
+    return kwargs
+
+
+def format_clip_timestamps(clip_timestamps):
+    if clip_timestamps is None:
+        return "full"
+    if isinstance(clip_timestamps, str):
+        return clip_timestamps
+    if len(clip_timestamps) >= 2:
+        return f"{clip_timestamps[0]:.3f},{clip_timestamps[1]:.3f}"
+    return str(clip_timestamps)
+
+
+def should_use_mlx_active_clip_retry(audio_path):
+    return str(audio_path).lower().endswith(".wav")
+
+
+def resolve_mlx_active_clip_timestamps(audio_path, log):
+    if not should_use_mlx_active_clip_retry(audio_path):
+        return None
+    try:
+        clip_timestamps = build_active_clip_timestamps(audio_path)
+    except Exception as error:
+        log(f"MLX active clip analysis failed: {error}")
+        return None
+    if clip_timestamps is not None:
+        log(
+            "MLX active clip retry enabled: "
+            f"clip_timestamps={format_clip_timestamps(clip_timestamps)}"
+        )
+    return clip_timestamps
+
+
+def transcribe_with_mlx_active_clip_retry(
+    *,
+    mlx_whisper,
+    audio_path,
+    transcribe_kwargs,
+    log,
+):
+    clip_timestamps = resolve_mlx_active_clip_timestamps(audio_path, log)
+    attempt_kwargs = dict(transcribe_kwargs)
+    if clip_timestamps is not None:
+        attempt_kwargs["clip_timestamps"] = clip_timestamps
+        log("Starting MLX transcription with active clip")
+    else:
+        log("Starting MLX transcription with full audio")
+
+    result = mlx_whisper.transcribe(audio_path, **attempt_kwargs)
+    text = str(result.get("text", "")).strip()
+    if clip_timestamps is None or not should_retry_mlx_with_full_audio(text):
+        return result
+
+    log("MLX active clip transcription returned empty text; retrying with full audio")
+    return mlx_whisper.transcribe(audio_path, **transcribe_kwargs)
 
 
 def should_skip_transcription_for_low_activity(
@@ -989,6 +1144,14 @@ class AudioActivityStats:
 
 
 @dataclass(frozen=True)
+class WavActivityAnalysis:
+    stats: AudioActivityStats
+    window_duration_seconds: float
+    first_active_window_index: int | None = None
+    last_active_window_index: int | None = None
+
+
+@dataclass(frozen=True)
 class BackendStatus:
     effective_backend: str
     gpu_requested: bool
@@ -1021,8 +1184,8 @@ def build_mlx_decode_profile(quality_preset):
     preset = normalize_quality_preset(quality_preset)
     profiles = {
         "low": DecodeProfile(temperature=0.0),
-        "medium": DecodeProfile(temperature=(0.0, 0.2, 0.4)),
-        "high": DecodeProfile(temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0)),
+        "medium": DecodeProfile(temperature=0.0),
+        "high": DecodeProfile(temperature=0.0),
     }
     return profiles[preset]
 
@@ -1570,20 +1733,27 @@ class BackendManager:
         mlx_whisper = self.mlx_whisper
         if mlx_whisper is None:
             raise RuntimeError("mlx runtime unavailable")
-        self.log(
-            f"MLX transcription parameters: language={language}, preset={quality_preset}, temperature={profile.temperature}, condition_on_previous_text={DEFAULT_CONDITION_ON_PREVIOUS_TEXT}, initial_prompt_present={initial_prompt is not None}"
-        )
-        result = mlx_whisper.transcribe(
-            audio_path,
-            path_or_hf_repo=self.mlx_model_dir,
+        transcribe_kwargs = build_mlx_transcribe_kwargs(
+            model_path=self.mlx_model_dir,
             language=language,
-            task=DEFAULT_TASK,
-            temperature=profile.temperature,
-            word_timestamps=False,
-            condition_on_previous_text=DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
+            profile=profile,
             initial_prompt=initial_prompt,
-            no_speech_threshold=DEFAULT_NO_SPEECH_THRESHOLD,
-            compression_ratio_threshold=DEFAULT_COMPRESSION_RATIO_THRESHOLD,
+        )
+        self.log(
+            "MLX transcription parameters: "
+            f"language={language}, "
+            f"preset={quality_preset}, "
+            f"temperature={profile.temperature}, "
+            f"beam_size={profile.beam_size}, "
+            f"best_of={profile.best_of}, "
+            f"condition_on_previous_text={DEFAULT_CONDITION_ON_PREVIOUS_TEXT}, "
+            f"initial_prompt_present={initial_prompt is not None}"
+        )
+        result = transcribe_with_mlx_active_clip_retry(
+            mlx_whisper=mlx_whisper,
+            audio_path=audio_path,
+            transcribe_kwargs=transcribe_kwargs,
+            log=self.log,
         )
         text = str(result.get("text", "")).strip()
         detected_language = result.get("language") if language is None else language
