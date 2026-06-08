@@ -70,11 +70,13 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return SettingsView(
             isPresented: makeIsPresentedBinding(for: window),
             draftBridge: draftBridge,
-            onHotkeyChanged: { config in
-                Logger.shared.log("SettingsWindowController: Posting hotkeyConfigurationChanged notification: \(config.description)")
+            onHotkeyChanged: { settings in
+                Logger.shared.log(
+                    "SettingsWindowController: Posting hotkey settings notification: transcription=\(settings.hotkeyConfig.description), translation=\(settings.translationHotkeyConfig.description)"
+                )
                 NotificationCenter.default.post(
-                    name: .hotkeyConfigurationChanged,
-                    object: config
+                    name: .hotkeySettingsChanged,
+                    object: settings
                 )
             },
             onSettingsChanged: { [weak self] in
@@ -144,8 +146,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 )
                 return false
             }
-            applyChanges()
-            return true
+            return applyChanges()
         case .discard:
             return true
         case .cancel:
@@ -175,5 +176,5 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 }
 
 extension Notification.Name {
-    static let hotkeyConfigurationChanged = Notification.Name("hotkeyConfigurationChanged")
+    static let hotkeySettingsChanged = Notification.Name("hotkeySettingsChanged")
 }

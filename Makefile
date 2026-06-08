@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-noise-eval test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -18,6 +18,7 @@ help:
 	@echo "テスト:"
 	@echo "  make test-transcription - 音声前処理/文字起こし関連ユニットテスト"
 	@echo "  make test-backend-config - backend 選択/プリセット関連ユニットテスト"
+	@echo "  make test-noise-eval - ノイズ戦略評価 CLI のユニットテスト"
 	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
 	@echo "  make test-benchmark - test-smoke-server の互換エイリアス"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
@@ -52,6 +53,10 @@ test-backend-config:
 	@echo "backend 選択/プリセット関連ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_backend_configuration.py
 
+test-noise-eval:
+	@echo "ノイズ戦略評価 CLI のユニットテストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_noise_strategy_eval.py
+
 test-benchmark: test-smoke-server
 
 test-smoke-server:
@@ -62,7 +67,7 @@ test-user-dictionary:
 	@echo "辞書機能ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_user_dictionary.py
 
-test-all: test-audio-preprocess test-backend-config test-user-dictionary
+test-all: test-audio-preprocess test-backend-config test-noise-eval test-user-dictionary
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 

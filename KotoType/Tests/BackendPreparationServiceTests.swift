@@ -111,6 +111,8 @@ private final class MockPreparationPythonProcessManager: PythonProcessManaging {
         autoPunctuation: Bool,
         qualityPreset: TranscriptionQualityPreset,
         gpuAccelerationEnabled: Bool,
+        mode: RecordingRequestMode,
+        translationTargetLanguage: String,
         screenshotContext: String?
     ) -> Bool {
         sendInputCallCount += 1

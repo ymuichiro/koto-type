@@ -19,6 +19,8 @@ protocol PythonProcessManaging: AnyObject {
         autoPunctuation: Bool,
         qualityPreset: TranscriptionQualityPreset,
         gpuAccelerationEnabled: Bool,
+        mode: RecordingRequestMode,
+        translationTargetLanguage: String,
         screenshotContext: String?
     ) -> Bool
     func sendBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool
@@ -95,6 +97,8 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
             autoPunctuation: settings.autoPunctuation,
             qualityPreset: settings.transcriptionQualityPreset,
             gpuAccelerationEnabled: settings.gpuAccelerationEnabled,
+            mode: .transcribe,
+            translationTargetLanguage: AppSettings.defaultTranslationTargetLanguage,
             screenshotContext: nil
         )
 

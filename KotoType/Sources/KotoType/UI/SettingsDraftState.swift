@@ -2,7 +2,9 @@ import Foundation
 
 struct SettingsDraft: Equatable {
     var hotkeyConfig: HotkeyConfiguration
+    var translationHotkeyConfig: HotkeyConfiguration
     var language: String
+    var translationTargetLanguage: String
     var autoPunctuation: Bool
     var qualityPreset: TranscriptionQualityPreset
     var gpuAccelerationEnabled: Bool
@@ -18,7 +20,9 @@ struct SettingsDraft: Equatable {
         voiceShortcuts: [VoiceShortcut] = VoiceShortcutManager.shared.loadShortcuts()
     ) {
         hotkeyConfig = settings.hotkeyConfig
+        translationHotkeyConfig = settings.translationHotkeyConfig
         language = settings.language
+        translationTargetLanguage = settings.translationTargetLanguage
         autoPunctuation = settings.autoPunctuation
         qualityPreset = settings.transcriptionQualityPreset
         gpuAccelerationEnabled = settings.gpuAccelerationEnabled
@@ -40,7 +44,9 @@ struct SettingsDraft: Equatable {
     var appSettings: AppSettings {
         AppSettings(
             hotkeyConfig: hotkeyConfig,
+            translationHotkeyConfig: translationHotkeyConfig,
             language: language,
+            translationTargetLanguage: translationTargetLanguage,
             autoPunctuation: autoPunctuation,
             transcriptionQualityPreset: qualityPreset,
             gpuAccelerationEnabled: gpuAccelerationEnabled,
@@ -85,7 +91,7 @@ struct ComparableVoiceShortcut: Equatable {
 final class SettingsDraftBridge {
     private(set) var lastSavedSnapshot: SettingsDraftSnapshot
     var currentSnapshot: SettingsDraftSnapshot
-    var applyChanges: (() -> Void)?
+    var applyChanges: (() -> Bool)?
 
     init(initialSnapshot: SettingsDraftSnapshot) {
         lastSavedSnapshot = initialSnapshot

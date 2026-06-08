@@ -70,7 +70,7 @@ struct SettingsView: View {
     @State private var pendingStorageConfirmation: StorageConfirmationAction?
     @Binding var isPresented: Bool
 
-    let onHotkeyChanged: (HotkeyConfiguration) -> Void
+    let onHotkeyChanged: (AppSettings) -> Void
     let onSettingsChanged: (() -> Void)?
     let onImportAudioRequested: (() -> Void)?
     let onShowHistoryRequested: (() -> Void)?
@@ -90,7 +90,7 @@ struct SettingsView: View {
         isPresented: Binding<Bool>,
         storageManagementService: StorageManagementService = StorageManagementService(),
         draftBridge: SettingsDraftBridge? = nil,
-        onHotkeyChanged: @escaping (HotkeyConfiguration) -> Void,
+        onHotkeyChanged: @escaping (AppSettings) -> Void,
         onSettingsChanged: (() -> Void)? = nil,
         onImportAudioRequested: (() -> Void)? = nil,
         onShowHistoryRequested: (() -> Void)? = nil
@@ -155,14 +155,19 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("Hotkey")
 
-            HotkeyRecorderView(initialConfig: hotkeyConfig) { config in
-                draft.hotkeyConfig = config
-            }
-            .frame(height: 40)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Transcription shortcut")
+                    .font(.subheadline)
 
-            Text("Current shortcut: \(draft.hotkeyConfig.description.isEmpty ? "Not set" : draft.hotkeyConfig.description)")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                HotkeyRecorderView(initialConfig: hotkeyConfig) { config in
+                    draft.hotkeyConfig = config
+                }
+                .frame(height: 40)
+
+                Text("Current shortcut: \(hotkeyDescription(for: draft.hotkeyConfig))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
             Text("Presets")
                 .font(.subheadline)
@@ -196,6 +201,35 @@ struct SettingsView: View {
                     )
                 }
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Translation shortcut")
+                    .font(.subheadline)
+
+                HotkeyRecorderView(initialConfig: draft.translationHotkeyConfig) { config in
+                    draft.translationHotkeyConfig = config
+                }
+                .frame(height: 40)
+
+                HStack(spacing: 12) {
+                    Text("Current shortcut: \(hotkeyDescription(for: draft.translationHotkeyConfig))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Button("Disable") {
+                        draft.translationHotkeyConfig = .unset
+                    }
+                    .disabled(!draft.translationHotkeyConfig.isSet)
+                }
+            }
+
+            if let hotkeyValidationMessage {
+                Text(hotkeyValidationMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
         }
     }
 
@@ -212,6 +246,17 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Translation target language")
+                    .font(.subheadline)
+                TextField("en", text: $draft.translationTargetLanguage)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 180)
+                Text("Examples: en, ja, zh, pt-br. Up to 10 characters using lowercase letters, numbers, and hyphens.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Toggle("Automatically improve punctuation", isOn: $draft.autoPunctuation)
@@ -607,8 +652,9 @@ struct SettingsView: View {
         HStack {
             Spacer()
             Button("Save") {
-                applySettings()
+                _ = applySettings()
             }
+            .disabled(!canSaveSettings)
             .keyboardShortcut(.defaultAction)
             Button("Cancel") {
                 isPresented = false
@@ -715,18 +761,30 @@ struct SettingsView: View {
         .cornerRadius(8)
     }
 
-    private func applySettings() {
-        Logger.shared.log("SettingsView.applySettings called: hotkey=\(hotkeyConfig.description)")
+    private func applySettings() -> Bool {
+        guard canSaveSettings else {
+            Logger.shared.log(
+                "SettingsView.applySettings blocked by validation: \(hotkeyValidationMessage ?? "unknown")",
+                level: .warning
+            )
+            return false
+        }
+
         draft.dictionaryWords = draft.normalizedDictionaryWords
         draft.voiceShortcuts = draft.normalizedVoiceShortcuts
         let settings = draft.appSettings
+        draft.translationTargetLanguage = settings.translationTargetLanguage
+        Logger.shared.log(
+            "SettingsView.applySettings called: transcriptionHotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), translationTargetLanguage=\(settings.translationTargetLanguage)"
+        )
         _ = LaunchAtLoginManager.shared.setEnabled(draft.launchAtLogin)
         SettingsManager.shared.save(settings)
         UserDictionaryManager.shared.saveWords(draft.dictionaryWords)
         VoiceShortcutManager.shared.saveShortcuts(draft.voiceShortcuts)
-        onHotkeyChanged(draft.hotkeyConfig)
+        onHotkeyChanged(settings)
         onSettingsChanged?()
         draftBridge?.markSaved(snapshot: draft.snapshot)
+        return true
     }
 
     private func addDictionaryWord() {
@@ -888,6 +946,33 @@ struct SettingsView: View {
 
     private var hotkeyConfig: HotkeyConfiguration {
         draft.hotkeyConfig
+    }
+
+    private var canSaveSettings: Bool {
+        hotkeyValidationMessage == nil
+    }
+
+    private var hotkeyValidationMessage: String? {
+        Self.hotkeyValidationMessage(
+            transcriptionHotkey: draft.hotkeyConfig,
+            translationHotkey: draft.translationHotkeyConfig
+        )
+    }
+
+    static func hotkeyValidationMessage(
+        transcriptionHotkey: HotkeyConfiguration,
+        translationHotkey: HotkeyConfiguration
+    ) -> String? {
+        guard translationHotkey.isSet,
+            translationHotkey == transcriptionHotkey
+        else {
+            return nil
+        }
+        return "Translation shortcut must differ from transcription."
+    }
+
+    private func hotkeyDescription(for configuration: HotkeyConfiguration) -> String {
+        configuration.description.isEmpty ? "Not set" : configuration.description
     }
 
     private func updateDraftBridge() {

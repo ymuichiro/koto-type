@@ -12,31 +12,24 @@ from python import whisper_server
 
 
 class AudioPreprocessTests(unittest.TestCase):
-    def test_build_audio_filter_chain_with_noise_reduction(self):
-        chain = whisper_server.build_audio_filter_chain(
-            enable_noise_reduction=True,
-            use_fft_denoise=True,
-        )
-        self.assertIn("afftdn", chain)
-        self.assertIn("highpass=f=100", chain)
-        self.assertIn("lowpass=f=7800", chain)
+    def test_build_audio_filter_chain_uses_office_preset(self):
+        chain = whisper_server.build_audio_filter_chain()
 
-    def test_build_audio_filter_chain_without_noise_reduction(self):
-        chain = whisper_server.build_audio_filter_chain(enable_noise_reduction=False)
-        self.assertNotIn("afftdn", chain)
-        self.assertIn("dynaudnorm", chain)
+        self.assertIn("afftdn", chain)
+        self.assertIn("highpass=f=120", chain)
+        self.assertIn("lowpass=f=6800", chain)
+        self.assertNotIn("dynaudnorm", chain)
         self.assertNotIn("acompressor", chain)
+        self.assertNotIn("volume=", chain)
 
     def test_build_audio_filter_chain_candidates(self):
-        candidates = whisper_server.build_audio_filter_chain_candidates(
-            enable_noise_reduction=True
-        )
-        self.assertEqual(len(candidates), 3)
-        self.assertNotIn("afftdn", candidates[0])
-        self.assertNotIn("anlmdn", candidates[0])
-        self.assertIn("afftdn", candidates[1])
-        self.assertNotIn("anlmdn", candidates[1])
-        self.assertIn("anlmdn", candidates[2])
+        candidates = whisper_server.build_audio_filter_chain_candidates()
+
+        self.assertEqual(len(candidates), 2)
+        self.assertIn("afftdn", candidates[0])
+        self.assertNotIn("dynaudnorm", candidates[0])
+        self.assertNotIn("afftdn", candidates[1])
+        self.assertNotIn("dynaudnorm", candidates[1])
 
     def test_audio_preprocess_retries_without_denoise_filter(self):
         fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=True)
@@ -50,34 +43,19 @@ class AudioPreprocessTests(unittest.TestCase):
             def capture_log(message):
                 logs.append(message)
 
-            original_env = os.environ.get("KOTOTYPE_ENABLE_NOISE_REDUCTION")
-            original_auto_gain_env = os.environ.get("KOTOTYPE_AUTO_GAIN_ENABLED")
-            os.environ["KOTOTYPE_ENABLE_NOISE_REDUCTION"] = "1"
-            os.environ["KOTOTYPE_AUTO_GAIN_ENABLED"] = "0"
-            try:
-                output_path = whisper_server.audio_preprocess(
-                    str(input_path),
-                    capture_log,
-                    ffmpeg_module=fake_ffmpeg,
-                    peak_analyzer=lambda _: -12.0,
-                )
-            finally:
-                if original_env is None:
-                    os.environ.pop("KOTOTYPE_ENABLE_NOISE_REDUCTION", None)
-                else:
-                    os.environ["KOTOTYPE_ENABLE_NOISE_REDUCTION"] = original_env
-                if original_auto_gain_env is None:
-                    os.environ.pop("KOTOTYPE_AUTO_GAIN_ENABLED", None)
-                else:
-                    os.environ["KOTOTYPE_AUTO_GAIN_ENABLED"] = original_auto_gain_env
+            output_path = whisper_server.audio_preprocess(
+                str(input_path),
+                capture_log,
+                ffmpeg_module=fake_ffmpeg,
+            )
 
             self.assertTrue(output_path.endswith("_processed.wav"))
-            self.assertEqual(fake_ffmpeg.run_call_count, 1)
-            self.assertNotIn("afftdn", fake_ffmpeg.filter_history[0])
-            self.assertNotIn("anlmdn", fake_ffmpeg.filter_history[0])
+            self.assertEqual(fake_ffmpeg.run_call_count, 2)
+            self.assertIn("afftdn", fake_ffmpeg.filter_history[0])
+            self.assertNotIn("afftdn", fake_ffmpeg.filter_history[1])
             self.assertTrue(
-                all("trying next filter chain" not in line for line in logs),
-                "Did not expect denoise fallback when light chain succeeds first",
+                any("trying next filter chain" in line for line in logs),
+                "Expected denoise fallback when office filter is unavailable",
             )
 
     def test_audio_preprocess_can_be_skipped_via_environment(self):
@@ -113,75 +91,6 @@ class AudioPreprocessTests(unittest.TestCase):
                 )
             )
 
-    def test_auto_gain_applies_boost_for_weak_input(self):
-        fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=False)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            input_path = Path(temp_dir) / "input.wav"
-            input_path.write_bytes(b"dummy")
-
-            logs = []
-
-            def capture_log(message):
-                logs.append(message)
-
-            original_noise_env = os.environ.get("KOTOTYPE_ENABLE_NOISE_REDUCTION")
-            original_auto_gain_env = os.environ.get("KOTOTYPE_AUTO_GAIN_ENABLED")
-            os.environ["KOTOTYPE_ENABLE_NOISE_REDUCTION"] = "0"
-            os.environ["KOTOTYPE_AUTO_GAIN_ENABLED"] = "1"
-            try:
-                whisper_server.audio_preprocess(
-                    str(input_path),
-                    capture_log,
-                    ffmpeg_module=fake_ffmpeg,
-                    peak_analyzer=lambda _: -30.0,
-                )
-            finally:
-                if original_noise_env is None:
-                    os.environ.pop("KOTOTYPE_ENABLE_NOISE_REDUCTION", None)
-                else:
-                    os.environ["KOTOTYPE_ENABLE_NOISE_REDUCTION"] = original_noise_env
-                if original_auto_gain_env is None:
-                    os.environ.pop("KOTOTYPE_AUTO_GAIN_ENABLED", None)
-                else:
-                    os.environ["KOTOTYPE_AUTO_GAIN_ENABLED"] = original_auto_gain_env
-
-            self.assertEqual(fake_ffmpeg.run_call_count, 2)
-            self.assertIn("volume=", fake_ffmpeg.filter_history[1])
-            self.assertTrue(
-                any("Applied automatic gain for weak input" in line for line in logs),
-                "Expected auto gain log for weak input",
-            )
-
-    def test_auto_gain_request_overrides_environment_flag(self):
-        fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=False)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            input_path = Path(temp_dir) / "input.wav"
-            input_path.write_bytes(b"dummy")
-
-            original_auto_gain_env = os.environ.get("KOTOTYPE_AUTO_GAIN_ENABLED")
-            os.environ["KOTOTYPE_AUTO_GAIN_ENABLED"] = "0"
-            try:
-                whisper_server.audio_preprocess(
-                    str(input_path),
-                    lambda _: None,
-                    ffmpeg_module=fake_ffmpeg,
-                    peak_analyzer=lambda _: -40.0,
-                    auto_gain_enabled=True,
-                    auto_gain_weak_threshold_dbfs=-20.0,
-                    auto_gain_target_peak_dbfs=-10.0,
-                    auto_gain_max_db=9.0,
-                )
-            finally:
-                if original_auto_gain_env is None:
-                    os.environ.pop("KOTOTYPE_AUTO_GAIN_ENABLED", None)
-                else:
-                    os.environ["KOTOTYPE_AUTO_GAIN_ENABLED"] = original_auto_gain_env
-
-            self.assertEqual(fake_ffmpeg.run_call_count, 2)
-            self.assertIn("volume=9.00dB", fake_ffmpeg.filter_history[1])
-
     def test_audio_preprocess_cleans_partial_files_after_failure(self):
         fake_ffmpeg = FakeFFmpegModule(fail_after_write=True)
 
@@ -193,29 +102,10 @@ class AudioPreprocessTests(unittest.TestCase):
                 str(input_path),
                 lambda _: None,
                 ffmpeg_module=fake_ffmpeg,
-                peak_analyzer=lambda _: -12.0,
             )
 
             self.assertEqual(output_path, str(input_path))
             self.assertFalse((Path(temp_dir) / "input_processed.wav").exists())
-            self.assertFalse((Path(temp_dir) / "input_processed_gain.wav").exists())
-
-    def test_determine_gain_for_weak_audio(self):
-        gain = whisper_server.determine_gain_for_weak_audio(
-            peak_dbfs=-30.0,
-            weak_threshold_dbfs=-18.0,
-            target_peak_dbfs=-10.0,
-            max_gain_db=18.0,
-        )
-        self.assertEqual(gain, 18.0)
-
-        no_gain = whisper_server.determine_gain_for_weak_audio(
-            peak_dbfs=-12.0,
-            weak_threshold_dbfs=-18.0,
-            target_peak_dbfs=-10.0,
-            max_gain_db=18.0,
-        )
-        self.assertEqual(no_gain, 0.0)
 
     def test_build_vad_parameters_strict_mode_default(self):
         original_env = os.environ.get("KOTOTYPE_VAD_STRICT")
@@ -307,6 +197,55 @@ class AudioPreprocessTests(unittest.TestCase):
             self.assertFalse(
                 whisper_server.should_skip_transcription_for_low_activity(stats)
             )
+
+    def test_confidence_gate_suppresses_low_logprob_hallucination(self):
+        decision = whisper_server.evaluate_transcription_confidence_gate(
+            "ご視聴ありがとうございました",
+            [
+                whisper_server.TranscriptionSegmentMetrics(
+                    avg_logprob=-1.29,
+                    compression_ratio=1.0,
+                    no_speech_prob=0.0,
+                )
+            ],
+        )
+
+        self.assertTrue(decision.should_suppress)
+        self.assertIn("avg_logprob", decision.reason)
+
+    def test_confidence_gate_preserves_confident_speech(self):
+        decision = whisper_server.evaluate_transcription_confidence_gate(
+            "本日の議事録を以下にまとめます",
+            [
+                whisper_server.TranscriptionSegmentMetrics(
+                    avg_logprob=-0.18,
+                    compression_ratio=1.2,
+                    no_speech_prob=0.01,
+                )
+            ],
+        )
+
+        self.assertFalse(decision.should_suppress)
+
+    def test_collect_segment_metrics_accepts_object_and_dict_segments(self):
+        metrics = whisper_server.collect_segment_metrics(
+            [
+                SimpleNamespace(
+                    avg_logprob=-0.2,
+                    compression_ratio=1.1,
+                    no_speech_prob=0.3,
+                ),
+                {
+                    "avg_logprob": "-0.4",
+                    "compression_ratio": 1.3,
+                    "no_speech_probability": 0.2,
+                },
+            ]
+        )
+
+        self.assertEqual(len(metrics), 2)
+        self.assertEqual(metrics[0].avg_logprob, -0.2)
+        self.assertEqual(metrics[1].no_speech_prob, 0.2)
 
 
 class TranscriptionFallbackTests(unittest.TestCase):

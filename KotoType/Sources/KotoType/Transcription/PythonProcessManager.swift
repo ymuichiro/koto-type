@@ -142,6 +142,8 @@ final class PythonProcessManager: @unchecked Sendable {
         autoPunctuation: Bool = true,
         qualityPreset: TranscriptionQualityPreset = .medium,
         gpuAccelerationEnabled: Bool = true,
+        mode: RecordingRequestMode = .transcribe,
+        translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
         screenshotContext: String? = nil
     ) -> Bool {
         if text.hasPrefix(Self.healthCheckRequestPrefix) {
@@ -155,6 +157,8 @@ final class PythonProcessManager: @unchecked Sendable {
             "auto_punctuation": autoPunctuation,
             "quality_preset": qualityPreset.rawValue,
             "gpu_acceleration_enabled": gpuAccelerationEnabled,
+            "mode": mode.rawValue,
+            "translation_target_language": translationTargetLanguage,
         ]
         if let screenshotContext {
             payload["screenshot_context"] = screenshotContext
@@ -164,7 +168,7 @@ final class PythonProcessManager: @unchecked Sendable {
             return false
         }
         Logger.shared.log(
-            "Sending input to Python: audioPathLength=\(text.count), language=\(language), qualityPreset=\(qualityPreset.rawValue), gpuEnabled=\(gpuAccelerationEnabled), screenshotContextLength=\(screenshotContext?.count ?? 0)",
+            "Sending input to Python: audioPathLength=\(text.count), language=\(language), mode=\(mode.rawValue), translationTargetLanguage=\(translationTargetLanguage), qualityPreset=\(qualityPreset.rawValue), gpuEnabled=\(gpuAccelerationEnabled), screenshotContextLength=\(screenshotContext?.count ?? 0)",
             level: .debug
         )
         return sendLine(input)

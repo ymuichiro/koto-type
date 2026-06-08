@@ -26,13 +26,12 @@ CONTROL_MESSAGE_PREFIX = "__KOTOTYPE_CONTROL__:"
 DEFAULT_CPU_MODEL_ID = "large-v3-turbo"
 DEFAULT_MLX_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
 DEFAULT_TASK = "transcribe"
+DEFAULT_REQUEST_MODE = "transcribe"
+DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en"
 DEFAULT_CONDITION_ON_PREVIOUS_TEXT = False
 DEFAULT_NO_SPEECH_THRESHOLD = 0.6
 DEFAULT_COMPRESSION_RATIO_THRESHOLD = 2.4
-DEFAULT_AUTO_GAIN_ENABLED = True
-DEFAULT_AUTO_GAIN_WEAK_THRESHOLD_DBFS = -18.0
-DEFAULT_AUTO_GAIN_TARGET_PEAK_DBFS = -10.0
-DEFAULT_AUTO_GAIN_MAX_DB = 18.0
+DEFAULT_LOW_CONFIDENCE_LOGPROB_THRESHOLD = -0.8
 DEFAULT_ACTIVITY_WINDOW_MS = 30
 DEFAULT_ACTIVITY_THRESHOLD_DBFS = -38.0
 DEFAULT_MIN_ACTIVE_AUDIO_SECONDS = 0.18
@@ -40,6 +39,7 @@ DEFAULT_MIN_ACTIVE_AUDIO_RATIO = 0.12
 DEFAULT_MIN_AUDIO_DURATION_FOR_SKIP_SECONDS = 0.8
 DEFAULT_ACTIVE_REGION_PADDING_MS = 150
 DEFAULT_ACTIVE_REGION_MIN_TRIM_SAVED_SECONDS = 0.25
+TRANSLATION_TARGET_LANGUAGE_PATTERN = re.compile(r"^[a-z0-9-]{1,10}$")
 
 
 class MlxCoreModule(Protocol):
@@ -286,50 +286,15 @@ def release_model_load_slot(state_path, lock_path, pid):
     mutate_server_state(state_path, lock_path, mutator)
 
 
-def build_audio_filter_chain(
-    enable_noise_reduction=True,
-    use_nlm_denoise=False,
-    use_fft_denoise=False,
-    use_compressor=False,
-):
-    filters = [
-        "highpass=f=100",
-        "lowpass=f=7800",
+def build_audio_filter_chain():
+    return "highpass=f=120,lowpass=f=6800,afftdn=nf=-28:tn=1"
+
+
+def build_audio_filter_chain_candidates():
+    return [
+        build_audio_filter_chain(),
+        "highpass=f=120,lowpass=f=6800",
     ]
-
-    if enable_noise_reduction:
-        if use_nlm_denoise:
-            # Non-local means denoise (stronger but not always available)
-            filters.append("anlmdn=s=0.08:p=0.003")
-        if use_fft_denoise:
-            # Spectral denoise to suppress stationary noise (air conditioner, fan, etc.)
-            filters.append("afftdn=nf=-26:tn=1")
-
-    filters.append("dynaudnorm=f=90:g=15:p=0.8")
-    if use_compressor:
-        filters.append("acompressor=threshold=-21dB:ratio=2.8:attack=5:release=90")
-    return ",".join(filters)
-
-
-def build_audio_filter_chain_candidates(enable_noise_reduction=True):
-    candidates = [build_audio_filter_chain(enable_noise_reduction=False)]
-    if not enable_noise_reduction:
-        return candidates
-
-    candidates.append(
-        build_audio_filter_chain(
-            enable_noise_reduction=True,
-            use_fft_denoise=True,
-        )
-    )
-    candidates.append(
-        build_audio_filter_chain(
-            enable_noise_reduction=True,
-            use_nlm_denoise=True,
-            use_fft_denoise=True,
-        )
-    )
-    return candidates
 
 
 def format_ffmpeg_error(error):
@@ -352,55 +317,6 @@ def run_preprocess_with_filter(ffmpeg_module, input_path, output_path, filter_ch
         .overwrite_output()
         .run(quiet=True)
     )
-
-
-def apply_gain_to_wav(ffmpeg_module, input_path, output_path, gain_db):
-    gain_filter_chain = f"volume={gain_db:.2f}dB,alimiter=limit=0.98"
-    run_preprocess_with_filter(
-        ffmpeg_module=ffmpeg_module,
-        input_path=input_path,
-        output_path=output_path,
-        filter_chain=gain_filter_chain,
-    )
-
-
-def analyze_wav_peak_dbfs(wav_path):
-    max_peak = 0
-
-    with wave.open(wav_path, "rb") as wav_file:
-        sample_width = wav_file.getsampwidth()
-        channel_count = wav_file.getnchannels()
-
-        if sample_width != 2:
-            raise ValueError(
-                f"Unsupported sample width for peak analysis: {sample_width * 8}-bit"
-            )
-
-        while True:
-            frames = wav_file.readframes(4096)
-            if not frames:
-                break
-
-            frame_count = len(frames) // (sample_width * channel_count)
-            if frame_count <= 0:
-                continue
-
-            for frame_index in range(frame_count):
-                offset = frame_index * sample_width * channel_count
-                sample_bytes = frames[offset : offset + sample_width]
-                sample_value = int.from_bytes(
-                    sample_bytes,
-                    byteorder="little",
-                    signed=True,
-                )
-                abs_sample = abs(sample_value)
-                if abs_sample > max_peak:
-                    max_peak = abs_sample
-
-    if max_peak <= 0:
-        return -inf
-
-    return 20.0 * log10(max_peak / 32767.0)
 
 
 def scan_wav_activity(
@@ -561,12 +477,13 @@ def build_mlx_transcribe_kwargs(
     language,
     profile,
     initial_prompt,
+    whisper_task=DEFAULT_TASK,
     clip_timestamps=None,
 ):
     kwargs = {
         "path_or_hf_repo": model_path,
         "language": language,
-        "task": DEFAULT_TASK,
+        "task": whisper_task,
         "temperature": profile.temperature,
         "word_timestamps": False,
         "condition_on_previous_text": DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
@@ -637,6 +554,98 @@ def transcribe_with_mlx_active_clip_retry(
     return mlx_whisper.transcribe(audio_path, **transcribe_kwargs)
 
 
+def optional_float(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def segment_metric_value(segment, *names):
+    for name in names:
+        if isinstance(segment, dict):
+            value = segment.get(name)
+        else:
+            value = getattr(segment, name, None)
+        parsed = optional_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def collect_segment_metrics(segments):
+    return tuple(
+        TranscriptionSegmentMetrics(
+            avg_logprob=segment_metric_value(segment, "avg_logprob"),
+            compression_ratio=segment_metric_value(segment, "compression_ratio"),
+            no_speech_prob=segment_metric_value(
+                segment,
+                "no_speech_prob",
+                "no_speech_probability",
+            ),
+        )
+        for segment in segments
+    )
+
+
+def normalize_engine_transcription_result(result):
+    if isinstance(result, TranscriptionEngineResult):
+        return result
+    if isinstance(result, tuple) and len(result) >= 2:
+        return TranscriptionEngineResult(
+            text=str(result[0] or "").strip(),
+            detected_language=result[1],
+        )
+    raise TypeError(f"Unsupported transcription result: {type(result).__name__}")
+
+
+def evaluate_transcription_confidence_gate(text, segment_metrics):
+    if not str(text or "").strip():
+        return TranscriptionGateDecision(False)
+
+    if not segment_metrics:
+        return TranscriptionGateDecision(False)
+
+    max_no_speech = max(
+        (metric.no_speech_prob for metric in segment_metrics if metric.no_speech_prob is not None),
+        default=None,
+    )
+    min_avg_logprob = min(
+        (metric.avg_logprob for metric in segment_metrics if metric.avg_logprob is not None),
+        default=None,
+    )
+    max_compression = max(
+        (
+            metric.compression_ratio
+            for metric in segment_metrics
+            if metric.compression_ratio is not None
+        ),
+        default=None,
+    )
+
+    if max_no_speech is not None and max_no_speech >= DEFAULT_NO_SPEECH_THRESHOLD:
+        return TranscriptionGateDecision(
+            True,
+            f"no_speech_prob={max_no_speech:.3f}",
+        )
+    if (
+        min_avg_logprob is not None
+        and min_avg_logprob <= DEFAULT_LOW_CONFIDENCE_LOGPROB_THRESHOLD
+    ):
+        return TranscriptionGateDecision(
+            True,
+            f"avg_logprob={min_avg_logprob:.3f}",
+        )
+    if max_compression is not None and max_compression >= DEFAULT_COMPRESSION_RATIO_THRESHOLD:
+        return TranscriptionGateDecision(
+            True,
+            f"compression_ratio={max_compression:.3f}",
+        )
+    return TranscriptionGateDecision(False)
+
+
 def should_skip_transcription_for_low_activity(
     activity_stats,
     *,
@@ -655,22 +664,6 @@ def should_skip_transcription_for_low_activity(
     if activity_stats.active_ratio >= min_active_audio_ratio:
         return False
     return True
-
-
-def determine_gain_for_weak_audio(
-    peak_dbfs,
-    weak_threshold_dbfs=-18.0,
-    target_peak_dbfs=-10.0,
-    max_gain_db=18.0,
-):
-    if peak_dbfs >= weak_threshold_dbfs:
-        return 0.0
-
-    required_gain = target_peak_dbfs - peak_dbfs
-    if required_gain <= 0:
-        return 0.0
-
-    return min(required_gain, max_gain_db)
 
 
 def build_vad_parameters(vad_threshold):
@@ -765,11 +758,6 @@ def audio_preprocess(
     input_path,
     log,
     ffmpeg_module=None,
-    peak_analyzer=None,
-    auto_gain_enabled=None,
-    auto_gain_weak_threshold_dbfs=None,
-    auto_gain_target_peak_dbfs=None,
-    auto_gain_max_db=None,
 ):
     if parse_bool(
         os.environ.get("KOTOTYPE_SKIP_AUDIO_PREPROCESSING", "0"),
@@ -787,51 +775,13 @@ def audio_preprocess(
             log("ffmpeg-python not available, skipping preprocessing")
             return input_path
 
-    if peak_analyzer is None:
-        peak_analyzer = analyze_wav_peak_dbfs
-
     output_path = None
-    boosted_output_path = None
     try:
         base, _ = os.path.splitext(input_path)
         output_path = f"{base}_processed.wav"
-        boosted_output_path = f"{base}_processed_gain.wav"
-        enable_noise_reduction = parse_bool(
-            os.environ.get("KOTOTYPE_ENABLE_NOISE_REDUCTION", "1"),
-            default=True,
-        )
-        if auto_gain_enabled is None:
-            auto_gain_enabled = parse_bool(
-                os.environ.get("KOTOTYPE_AUTO_GAIN_ENABLED", "1"),
-                default=True,
-            )
-        if auto_gain_weak_threshold_dbfs is None:
-            auto_gain_weak_threshold_dbfs = parse_float(
-                os.environ.get("KOTOTYPE_AUTO_GAIN_WEAK_THRESHOLD_DBFS"),
-                default=-18.0,
-            )
-        if auto_gain_target_peak_dbfs is None:
-            auto_gain_target_peak_dbfs = parse_float(
-                os.environ.get("KOTOTYPE_AUTO_GAIN_TARGET_PEAK_DBFS"),
-                default=-10.0,
-            )
-        if auto_gain_max_db is None:
-            auto_gain_max_db = parse_float(
-                os.environ.get("KOTOTYPE_AUTO_GAIN_MAX_DB"),
-                default=18.0,
-            )
-
-        auto_gain_max_db = max(0.0, auto_gain_max_db)
-        if auto_gain_target_peak_dbfs <= auto_gain_weak_threshold_dbfs:
-            auto_gain_target_peak_dbfs = min(
-                -1.0,
-                auto_gain_weak_threshold_dbfs + 1.0,
-            )
 
         log(f"Preprocessing audio: {input_path} -> {output_path}")
-        filter_candidates = build_audio_filter_chain_candidates(
-            enable_noise_reduction=enable_noise_reduction
-        )
+        filter_candidates = build_audio_filter_chain_candidates()
 
         for index, filter_chain in enumerate(filter_candidates):
             if index == 0:
@@ -846,35 +796,6 @@ def audio_preprocess(
                     filter_chain=filter_chain,
                 )
                 tighten_file_permissions(output_path)
-
-                if auto_gain_enabled:
-                    peak_dbfs = peak_analyzer(output_path)
-                    gain_db = determine_gain_for_weak_audio(
-                        peak_dbfs=peak_dbfs,
-                        weak_threshold_dbfs=auto_gain_weak_threshold_dbfs,
-                        target_peak_dbfs=auto_gain_target_peak_dbfs,
-                        max_gain_db=auto_gain_max_db,
-                    )
-                    log(
-                        f"Auto gain analysis: peak={peak_dbfs:.2f} dBFS, gain={gain_db:.2f} dB"
-                    )
-
-                    if gain_db > 0.0:
-                        apply_gain_to_wav(
-                            ffmpeg_module=ffmpeg_module,
-                            input_path=output_path,
-                            output_path=boosted_output_path,
-                            gain_db=gain_db,
-                        )
-                        tighten_file_permissions(boosted_output_path)
-                        os.replace(boosted_output_path, output_path)
-                        tighten_file_permissions(output_path)
-                        log(
-                            f"Applied automatic gain for weak input: +{gain_db:.2f} dB"
-                        )
-                    else:
-                        log("Auto gain skipped: input level is sufficient")
-
                 log(f"Audio preprocessing completed: {output_path}")
                 return output_path
             except Exception as error:
@@ -883,17 +804,17 @@ def audio_preprocess(
                     f"{format_ffmpeg_error(error)}"
                 )
                 cleanup_temporary_audio_files(
-                    [output_path, boosted_output_path],
+                    [output_path],
                     log,
                 )
 
         log("All preprocessing filter chains failed, using original audio")
-        cleanup_temporary_audio_files([output_path, boosted_output_path], log)
+        cleanup_temporary_audio_files([output_path], log)
         return input_path
 
     except Exception as e:
         log(f"Audio preprocessing failed: {str(e)}")
-        cleanup_temporary_audio_files([output_path, boosted_output_path], log)
+        cleanup_temporary_audio_files([output_path], log)
         return input_path
 
 
@@ -919,16 +840,6 @@ def parse_optional_bool(value):
     if normalized in {"0", "false", "no", "off"}:
         return False
     return None
-
-
-def parse_float(value, default):
-    if value is None:
-        return default
-
-    try:
-        return float(str(value).strip())
-    except (TypeError, ValueError):
-        return default
 
 
 def parse_optional_float(value):
@@ -1117,6 +1028,34 @@ def normalize_quality_preset(value):
     return "medium"
 
 
+def normalize_request_mode(value):
+    normalized = str(value or "").strip().lower()
+    if normalized in {DEFAULT_REQUEST_MODE, "translate"}:
+        return normalized
+    return DEFAULT_REQUEST_MODE
+
+
+def normalize_translation_target_language(value):
+    normalized = str(value or "").strip().lower()
+    if TRANSLATION_TARGET_LANGUAGE_PATTERN.fullmatch(normalized):
+        return normalized
+    return DEFAULT_TRANSLATION_TARGET_LANGUAGE
+
+
+def select_whisper_task(mode, translation_target_language):
+    normalized_mode = normalize_request_mode(mode)
+    normalized_target = normalize_translation_target_language(translation_target_language)
+    if normalized_mode == "translate" and normalized_target == "en":
+        return "translate"
+    return DEFAULT_TASK
+
+
+def select_output_language(mode, translation_target_language, detected_language):
+    if normalize_request_mode(mode) == "translate":
+        return normalize_translation_target_language(translation_target_language)
+    return detected_language
+
+
 @dataclass(frozen=True)
 class TranscriptionRequest:
     audio_path: str
@@ -1125,6 +1064,8 @@ class TranscriptionRequest:
     quality_preset: str
     gpu_acceleration_enabled: bool
     screenshot_context: str | None = None
+    mode: str = DEFAULT_REQUEST_MODE
+    translation_target_language: str = DEFAULT_TRANSLATION_TARGET_LANGUAGE
 
 
 @dataclass(frozen=True)
@@ -1162,6 +1103,38 @@ class WavActivityAnalysis:
     window_duration_seconds: float
     first_active_window_index: int | None = None
     last_active_window_index: int | None = None
+
+
+@dataclass(frozen=True)
+class TranscriptionSegmentMetrics:
+    avg_logprob: float | None = None
+    compression_ratio: float | None = None
+    no_speech_prob: float | None = None
+
+
+@dataclass(frozen=True)
+class TranscriptionEngineResult:
+    text: str
+    detected_language: str | None
+    segment_metrics: tuple[TranscriptionSegmentMetrics, ...] = ()
+
+    def __iter__(self):
+        yield self.text
+        yield self.detected_language
+
+
+@dataclass(frozen=True)
+class BackendTranscriptionResult:
+    text: str
+    detected_language: str | None
+    status: "BackendStatus"
+    segment_metrics: tuple[TranscriptionSegmentMetrics, ...] = ()
+
+
+@dataclass(frozen=True)
+class TranscriptionGateDecision:
+    should_suppress: bool
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1317,6 +1290,10 @@ def parse_request_line(raw_line):
     screenshot_context = payload.get("screenshot_context")
     if screenshot_context is not None:
         screenshot_context = str(screenshot_context)
+    mode = normalize_request_mode(payload.get("mode"))
+    translation_target_language = normalize_translation_target_language(
+        payload.get("translation_target_language")
+    )
 
     return {
         "kind": "transcription",
@@ -1329,6 +1306,8 @@ def parse_request_line(raw_line):
                 payload.get("gpu_acceleration_enabled"), default=True
             ),
             screenshot_context=screenshot_context,
+            mode=mode,
+            translation_target_language=translation_target_language,
         ),
     }
 
@@ -1710,14 +1689,24 @@ class BackendManager:
         self._run_with_model_load_slot(_load)
         self.mlx_model_loaded = True
 
-    def _transcribe_with_cpu(self, audio_path, language, quality_preset, initial_prompt):
+    def _transcribe_with_cpu(
+        self,
+        audio_path,
+        language,
+        quality_preset,
+        initial_prompt,
+        *,
+        request_mode=DEFAULT_REQUEST_MODE,
+        translation_target_language=DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+        whisper_task=DEFAULT_TASK,
+    ):
         model = self._ensure_cpu_model()
         profile = build_cpu_decode_profile(quality_preset)
         vad_parameters = build_vad_parameters(profile.vad_threshold or 0.5)
         transcribe_kwargs = {
             "audio": audio_path,
             "language": language,
-            "task": DEFAULT_TASK,
+            "task": whisper_task,
             "temperature": profile.temperature,
             "beam_size": profile.beam_size,
             "best_of": profile.best_of,
@@ -1728,7 +1717,17 @@ class BackendManager:
             "compression_ratio_threshold": DEFAULT_COMPRESSION_RATIO_THRESHOLD,
         }
         self.log(
-            f"CPU transcription parameters: language={language}, preset={quality_preset}, beam_size={profile.beam_size}, best_of={profile.best_of}, vad_parameters={vad_parameters}, condition_on_previous_text={DEFAULT_CONDITION_ON_PREVIOUS_TEXT}, initial_prompt_present={initial_prompt is not None}"
+            "CPU transcription parameters: "
+            f"language={language}, "
+            f"mode={request_mode}, "
+            f"translation_target_language={translation_target_language}, "
+            f"whisper_task={whisper_task}, "
+            f"preset={quality_preset}, "
+            f"beam_size={profile.beam_size}, "
+            f"best_of={profile.best_of}, "
+            f"vad_parameters={vad_parameters}, "
+            f"condition_on_previous_text={DEFAULT_CONDITION_ON_PREVIOUS_TEXT}, "
+            f"initial_prompt_present={initial_prompt is not None}"
         )
         segments, info = transcribe_with_vad_fallback(
             model=model,
@@ -1738,9 +1737,23 @@ class BackendManager:
         )
         text = " ".join(getattr(segment, "text", "") for segment in segments).strip()
         detected_language = info.language if language is None else language
-        return text, detected_language
+        return TranscriptionEngineResult(
+            text=text,
+            detected_language=detected_language,
+            segment_metrics=collect_segment_metrics(segments),
+        )
 
-    def _transcribe_with_mlx(self, audio_path, language, quality_preset, initial_prompt):
+    def _transcribe_with_mlx(
+        self,
+        audio_path,
+        language,
+        quality_preset,
+        initial_prompt,
+        *,
+        request_mode=DEFAULT_REQUEST_MODE,
+        translation_target_language=DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+        whisper_task=DEFAULT_TASK,
+    ):
         self._ensure_mlx_model()
         profile = build_mlx_decode_profile(quality_preset)
         mlx_whisper = self.mlx_whisper
@@ -1751,10 +1764,14 @@ class BackendManager:
             language=language,
             profile=profile,
             initial_prompt=initial_prompt,
+            whisper_task=whisper_task,
         )
         self.log(
             "MLX transcription parameters: "
             f"language={language}, "
+            f"mode={request_mode}, "
+            f"translation_target_language={translation_target_language}, "
+            f"whisper_task={whisper_task}, "
             f"preset={quality_preset}, "
             f"temperature={profile.temperature}, "
             f"beam_size={profile.beam_size}, "
@@ -1770,53 +1787,113 @@ class BackendManager:
         )
         text = str(result.get("text", "")).strip()
         detected_language = result.get("language") if language is None else language
-        return text, detected_language
+        return TranscriptionEngineResult(
+            text=text,
+            detected_language=detected_language,
+            segment_metrics=collect_segment_metrics(result.get("segments", []) or []),
+        )
 
-    def transcribe(self, request, audio_path, initial_prompt):
+    def transcribe_with_details(self, request, audio_path, initial_prompt):
         status = self._status_for_gpu_request(request.gpu_acceleration_enabled)
+        whisper_task = select_whisper_task(
+            request.mode,
+            request.translation_target_language,
+        )
+        self.log(
+            "Dispatching transcription request: "
+            f"mode={request.mode}, "
+            f"translation_target_language={request.translation_target_language}, "
+            f"whisper_task={whisper_task}, "
+            f"preferred_backend={status.effective_backend}"
+        )
         if status.effective_backend == "cpu" and status.fallback_reason == "gpu_disabled_in_settings":
-            text, detected_language = self._transcribe_with_cpu(
-                audio_path,
-                request.language,
-                request.quality_preset,
-                initial_prompt,
+            engine_result = normalize_engine_transcription_result(
+                self._transcribe_with_cpu(
+                    audio_path,
+                    request.language,
+                    request.quality_preset,
+                    initial_prompt,
+                    request_mode=request.mode,
+                    translation_target_language=request.translation_target_language,
+                    whisper_task=whisper_task,
+                )
             )
-            return text, detected_language, status
+            return BackendTranscriptionResult(
+                text=engine_result.text,
+                detected_language=engine_result.detected_language,
+                status=status,
+                segment_metrics=engine_result.segment_metrics,
+            )
 
         if status.effective_backend == "cpu":
-            text, detected_language = self._transcribe_with_cpu(
-                audio_path,
-                request.language,
-                request.quality_preset,
-                initial_prompt,
+            engine_result = normalize_engine_transcription_result(
+                self._transcribe_with_cpu(
+                    audio_path,
+                    request.language,
+                    request.quality_preset,
+                    initial_prompt,
+                    request_mode=request.mode,
+                    translation_target_language=request.translation_target_language,
+                    whisper_task=whisper_task,
+                )
             )
-            return text, detected_language, status
+            return BackendTranscriptionResult(
+                text=engine_result.text,
+                detected_language=engine_result.detected_language,
+                status=status,
+                segment_metrics=engine_result.segment_metrics,
+            )
 
         try:
-            text, detected_language = self._transcribe_with_mlx(
-                audio_path,
-                request.language,
-                request.quality_preset,
-                initial_prompt,
+            engine_result = normalize_engine_transcription_result(
+                self._transcribe_with_mlx(
+                    audio_path,
+                    request.language,
+                    request.quality_preset,
+                    initial_prompt,
+                    request_mode=request.mode,
+                    translation_target_language=request.translation_target_language,
+                    whisper_task=whisper_task,
+                )
             )
-            return text, detected_language, status
+            return BackendTranscriptionResult(
+                text=engine_result.text,
+                detected_language=engine_result.detected_language,
+                status=status,
+                segment_metrics=engine_result.segment_metrics,
+            )
         except Exception as error:
             fallback_reason = "mlx_model_load_failed"
             if self.mlx_model_loaded:
                 fallback_reason = "mlx_transcription_failed"
             self._disable_mlx_for_session(fallback_reason, error=error)
-            text, detected_language = self._transcribe_with_cpu(
-                audio_path,
-                request.language,
-                request.quality_preset,
-                initial_prompt,
+            engine_result = normalize_engine_transcription_result(
+                self._transcribe_with_cpu(
+                    audio_path,
+                    request.language,
+                    request.quality_preset,
+                    initial_prompt,
+                    request_mode=request.mode,
+                    translation_target_language=request.translation_target_language,
+                    whisper_task=whisper_task,
+                )
             )
-            return text, detected_language, BackendStatus(
+            fallback_status = BackendStatus(
                 effective_backend="cpu",
                 gpu_requested=True,
                 gpu_available=False,
                 fallback_reason=fallback_reason,
             )
+            return BackendTranscriptionResult(
+                text=engine_result.text,
+                detected_language=engine_result.detected_language,
+                status=fallback_status,
+                segment_metrics=engine_result.segment_metrics,
+            )
+
+    def transcribe(self, request, audio_path, initial_prompt):
+        result = self.transcribe_with_details(request, audio_path, initial_prompt)
+        return result.text, result.detected_language, result.status
 
 
 def normalize_user_words(words):
@@ -1872,7 +1949,14 @@ def load_user_dictionary(path=None, log=None):
         return []
 
 
-def generate_initial_prompt(language, use_context=True, user_words=None, screenshot_context=None):
+def generate_initial_prompt(
+    language,
+    use_context=True,
+    user_words=None,
+    screenshot_context=None,
+    mode=DEFAULT_REQUEST_MODE,
+    translation_target_language=DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+):
     language_hint_by_code = {
         "ja": "Japanese",
         "en": "English",
@@ -1882,13 +1966,27 @@ def generate_initial_prompt(language, use_context=True, user_words=None, screens
         "fr": "French",
         "de": "German",
     }
-    prompt_parts = [
-        (
-            "Verbatim transcription. Preserve the original spoken wording and language as much as possible. "
-            "Keep code-switching, proper nouns, acronyms, product names, and technical terms in the form they "
-            "were spoken. Do not translate, summarize, or rewrite into another language."
-        )
-    ]
+    normalized_mode = normalize_request_mode(mode)
+    normalized_target_language = normalize_translation_target_language(
+        translation_target_language
+    )
+    if normalized_mode == "translate":
+        prompt_parts = [
+            (
+                "Translation only. Translate the spoken content into target language code "
+                f"{normalized_target_language}. Output only the translated text in "
+                f"{normalized_target_language}. Do not include the source transcript. "
+                "Do not summarize, explain, add notes, or add formatting."
+            )
+        ]
+    else:
+        prompt_parts = [
+            (
+                "Verbatim transcription. Preserve the original spoken wording and language as much as possible. "
+                "Keep code-switching, proper nouns, acronyms, product names, and technical terms in the form they "
+                "were spoken. Do not translate, summarize, or rewrite into another language."
+            )
+        ]
 
     normalized_language = str(language or "").strip().lower()
     language_hint = language_hint_by_code.get(normalized_language)
@@ -1902,20 +2000,33 @@ def generate_initial_prompt(language, use_context=True, user_words=None, screens
         normalized_words = normalize_user_words(words_for_prompt)
         if normalized_words:
             word_list = ", ".join(normalized_words[:20])
-            prompt_parts.append(
-                "User vocabulary hints: "
-                f"{word_list}. Use these only to improve recognition when they are spoken."
-            )
+            if normalized_mode == "translate":
+                prompt_parts.append(
+                    "User vocabulary hints: "
+                    f"{word_list}. Use these only as vocabulary hints for translating spoken terms."
+                )
+            else:
+                prompt_parts.append(
+                    "User vocabulary hints: "
+                    f"{word_list}. Use these only to improve recognition when they are spoken."
+                )
 
     if screenshot_context:
         normalized_screenshot_context = " ".join(str(screenshot_context).split())
         if normalized_screenshot_context:
             clipped_screenshot_context = normalized_screenshot_context[:250]
-            prompt_parts.append(
-                "Contextual vocabulary hints from the current screen: "
-                f"{clipped_screenshot_context}. Use these only to improve recognition of spoken terms. "
-                "Do not copy unrelated context and do not translate the spoken language."
-            )
+            if normalized_mode == "translate":
+                prompt_parts.append(
+                    "Contextual vocabulary hints from the current screen: "
+                    f"{clipped_screenshot_context}. Use these only as vocabulary hints for translating spoken terms. "
+                    "Do not copy unrelated context. Translate only the spoken content into the target language."
+                )
+            else:
+                prompt_parts.append(
+                    "Contextual vocabulary hints from the current screen: "
+                    f"{clipped_screenshot_context}. Use these only to improve recognition of spoken terms. "
+                    "Do not copy unrelated context and do not translate the spoken language."
+                )
 
     return " ".join(prompt_parts)
 
@@ -2034,6 +2145,7 @@ def main():
             request = request_payload["request"]
             log(
                 f"Received: audio_path_len={len(request.audio_path)}, language={request.language or 'auto'}, "
+                f"mode={request.mode}, translation_target_language={request.translation_target_language}, "
                 f"quality_preset={request.quality_preset}, gpu_acceleration_enabled={request.gpu_acceleration_enabled}, "
                 f"auto_punctuation={request.auto_punctuation}, screenshot_context_len={len(request.screenshot_context) if request.screenshot_context else 0}"
             )
@@ -2051,14 +2163,7 @@ def main():
             log(f"File exists, size: {os.path.getsize(request.audio_path)} bytes")
             transcription_audio_path = request.audio_path
 
-            processed_audio_path = audio_preprocess(
-                request.audio_path,
-                log,
-                auto_gain_enabled=DEFAULT_AUTO_GAIN_ENABLED,
-                auto_gain_weak_threshold_dbfs=DEFAULT_AUTO_GAIN_WEAK_THRESHOLD_DBFS,
-                auto_gain_target_peak_dbfs=DEFAULT_AUTO_GAIN_TARGET_PEAK_DBFS,
-                auto_gain_max_db=DEFAULT_AUTO_GAIN_MAX_DB,
-            )
+            processed_audio_path = audio_preprocess(request.audio_path, log)
 
             try:
                 if (
@@ -2104,25 +2209,63 @@ def main():
                 use_context=True,
                 user_words=user_words,
                 screenshot_context=request.screenshot_context,
+                mode=request.mode,
+                translation_target_language=request.translation_target_language,
+            )
+            whisper_task = select_whisper_task(
+                request.mode,
+                request.translation_target_language,
             )
 
             start_time = time.time()
-            log("Starting transcription with Whisper...")
+            log(
+                "Starting transcription with Whisper... "
+                f"mode={request.mode}, "
+                f"translation_target_language={request.translation_target_language}, "
+                f"whisper_task={whisper_task}"
+            )
             try:
-                transcription, detected_language, backend_status = backend_manager.transcribe(
+                transcription_result = backend_manager.transcribe_with_details(
                     request=request,
                     audio_path=transcription_audio_path,
                     initial_prompt=initial_prompt,
                 )
+                transcription = transcription_result.text
+                detected_language = transcription_result.detected_language
+                backend_status = transcription_result.status
                 elapsed_time = time.time() - start_time
+                output_language = select_output_language(
+                    request.mode,
+                    request.translation_target_language,
+                    detected_language,
+                )
                 log(
-                    f"Transcription completed in {elapsed_time:.2f} seconds (detected language: {detected_language}, backend={backend_status.effective_backend}, fallback_reason={backend_status.fallback_reason})"
+                    "Transcription completed in "
+                    f"{elapsed_time:.2f} seconds "
+                    f"(mode={request.mode}, "
+                    f"translation_target_language={request.translation_target_language}, "
+                    f"whisper_task={whisper_task}, "
+                    f"detected language: {detected_language}, "
+                    f"output_language={output_language}, "
+                    f"backend={backend_status.effective_backend}, "
+                    f"fallback_reason={backend_status.fallback_reason})"
                 )
                 log(f"Transcription length: {len(transcription)} characters")
 
+                gate_decision = evaluate_transcription_confidence_gate(
+                    transcription,
+                    transcription_result.segment_metrics,
+                )
+                if gate_decision.should_suppress:
+                    log(
+                        "Suppressing transcription because confidence gate rejected "
+                        f"the result ({gate_decision.reason})"
+                    )
+                    transcription = ""
+
                 transcription = post_process_text(
                     transcription,
-                    detected_language,
+                    output_language,
                     auto_punctuation=request.auto_punctuation,
                 )
                 log(f"Post-processed transcription length: {len(transcription)} characters")

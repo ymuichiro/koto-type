@@ -126,6 +126,78 @@ final class MultiProcessManagerTests: XCTestCase {
         XCTAssertEqual(sendAttempts.value, 3)
     }
 
+    func testProcessFilePassesTranslateModeAndTargetLanguage() {
+        let completion = expectation(description: "translated segment completes")
+        var created: [MockMultiProcessPythonManager] = []
+        let settings = AppSettings(translationTargetLanguage: "PT-BR")
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            mock.onSend = { instance, _ in
+                instance.outputReceived?("translated text")
+            }
+            created.append(mock)
+            return mock
+        }
+
+        manager.segmentComplete = { index, text in
+            if index == 13 {
+                XCTAssertEqual(text, "translated text")
+                completion.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/translate.wav"),
+            index: 13,
+            settings: settings,
+            mode: .translate,
+            translationTargetLanguage: settings.translationTargetLanguage
+        )
+
+        wait(for: [completion], timeout: 2.0)
+        XCTAssertEqual(created.count, 1)
+        XCTAssertEqual(created[0].receivedModes, [.translate])
+        XCTAssertEqual(created[0].receivedTranslationTargetLanguages, ["pt-br"])
+    }
+
+    func testProcessFileRetryPreservesTranslateModeAndTargetLanguage() {
+        let completion = expectation(description: "translated segment completes empty after retries")
+        var created: [MockMultiProcessPythonManager] = []
+        let settings = AppSettings(translationTargetLanguage: "PT-BR")
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: false)
+            created.append(mock)
+            return mock
+        }
+
+        manager.segmentComplete = { index, text in
+            if index == 14 {
+                XCTAssertEqual(text, "")
+                completion.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/translate-retry.wav"),
+            index: 14,
+            settings: settings,
+            mode: .translate,
+            translationTargetLanguage: settings.translationTargetLanguage
+        )
+
+        wait(for: [completion], timeout: 4.0)
+
+        let modes = created.flatMap(\.receivedModes)
+        let targets = created.flatMap(\.receivedTranslationTargetLanguages)
+        XCTAssertEqual(modes.count, 3)
+        XCTAssertTrue(modes.allSatisfy { $0 == .translate })
+        XCTAssertEqual(targets, Array(repeating: "pt-br", count: 3))
+    }
+
     func testIdleHealthCheckRequestIsSentAndAccepted() {
         let healthCheckSeen = expectation(description: "health check request sent")
         healthCheckSeen.assertForOverFulfill = false
@@ -279,7 +351,7 @@ final class MultiProcessManagerTests: XCTestCase {
 
         let manager = MultiProcessManager {
             let mock = MockMultiProcessPythonManager(sendSucceeds: false)
-            mock.onSendDetailed = { _, _, screenshotContext in
+            mock.onSendDetailed = { _, _, _, _, screenshotContext in
                 capturedContexts.append(screenshotContext)
             }
             return mock
@@ -428,8 +500,10 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
     private let sendSucceeds: Bool
     var onStart: ((MockMultiProcessPythonManager) -> Void)?
     var onSend: ((MockMultiProcessPythonManager, String) -> Void)?
-    var onSendDetailed: ((MockMultiProcessPythonManager, String, String?) -> Void)?
+    var onSendDetailed: ((MockMultiProcessPythonManager, String, RecordingRequestMode, String, String?) -> Void)?
     var onSendBackendProbe: ((MockMultiProcessPythonManager, Bool, Bool) -> Void)?
+    private(set) var receivedModes: [RecordingRequestMode] = []
+    private(set) var receivedTranslationTargetLanguages: [String] = []
 
     init(sendSucceeds: Bool) {
         self.sendSucceeds = sendSucceeds
@@ -447,10 +521,14 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
         autoPunctuation: Bool,
         qualityPreset: TranscriptionQualityPreset,
         gpuAccelerationEnabled: Bool,
+        mode: RecordingRequestMode,
+        translationTargetLanguage: String,
         screenshotContext: String?
     ) -> Bool {
+        receivedModes.append(mode)
+        receivedTranslationTargetLanguages.append(translationTargetLanguage)
         onSend?(self, text)
-        onSendDetailed?(self, text, screenshotContext)
+        onSendDetailed?(self, text, mode, translationTargetLanguage, screenshotContext)
         return sendSucceeds
     }
 
