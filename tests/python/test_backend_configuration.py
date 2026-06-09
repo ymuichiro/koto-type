@@ -64,6 +64,8 @@ class ParseRequestLineTests(unittest.TestCase):
         self.assertEqual(request.quality_preset, "high")
         self.assertTrue(request.gpu_acceleration_enabled)
         self.assertEqual(request.screenshot_context, "menu")
+        self.assertEqual(request.mode, "transcribe")
+        self.assertEqual(request.translation_target_language, "en")
 
     def test_parse_request_line_treats_auto_language_as_none(self):
         payload = whisper_server.parse_request_line(
@@ -71,6 +73,24 @@ class ParseRequestLineTests(unittest.TestCase):
         )
 
         self.assertIsNone(payload["request"].language)
+
+    def test_parse_request_line_normalizes_translate_mode_and_target_language(self):
+        payload = whisper_server.parse_request_line(
+            '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":"ja","mode":" Translate ","translation_target_language":" PT-BR "}'
+        )
+
+        request = payload["request"]
+        self.assertEqual(request.mode, "translate")
+        self.assertEqual(request.translation_target_language, "pt-br")
+
+    def test_parse_request_line_defaults_invalid_translate_fields(self):
+        payload = whisper_server.parse_request_line(
+            '{"type":"transcription_request","audio_path":"/tmp/test.wav","mode":"summarize","translation_target_language":"EN_US"}'
+        )
+
+        request = payload["request"]
+        self.assertEqual(request.mode, "transcribe")
+        self.assertEqual(request.translation_target_language, "en")
 
     def test_parse_request_line_decodes_backend_probe_request(self):
         payload = whisper_server.parse_request_line(
@@ -128,11 +148,31 @@ class FakeBackendManager(whisper_server.BackendManager):
             return False, "mlx_disabled_for_session"
         return self.probe_result
 
-    def _transcribe_with_cpu(self, audio_path, language, quality_preset, initial_prompt):
+    def _transcribe_with_cpu(
+        self,
+        audio_path,
+        language,
+        quality_preset,
+        initial_prompt,
+        *,
+        request_mode="transcribe",
+        translation_target_language="en",
+        whisper_task="transcribe",
+    ):
         self.cpu_calls += 1
         return self.cpu_result
 
-    def _transcribe_with_mlx(self, audio_path, language, quality_preset, initial_prompt):
+    def _transcribe_with_mlx(
+        self,
+        audio_path,
+        language,
+        quality_preset,
+        initial_prompt,
+        *,
+        request_mode="transcribe",
+        translation_target_language="en",
+        whisper_task="transcribe",
+    ):
         self.mlx_calls += 1
         if self.mlx_error is not None:
             raise self.mlx_error
@@ -403,6 +443,121 @@ class ConditionOnPreviousTextTests(unittest.TestCase):
         self.assertEqual(captured_kwargs["temperature"], 0.0)
         self.assertNotIn("beam_size", captured_kwargs)
         self.assertNotIn("best_of", captured_kwargs)
+
+    def test_mlx_transcription_returns_segment_metrics(self):
+        manager = RecordingOptionsBackendManager()
+
+        class RecordingMLXWhisper:
+            def transcribe(self, audio, **kwargs):
+                return {
+                    "text": "mlx text",
+                    "language": "ja",
+                    "segments": [
+                        {
+                            "avg_logprob": -0.25,
+                            "compression_ratio": 1.2,
+                            "no_speech_prob": 0.03,
+                        }
+                    ],
+                }
+
+        manager.mlx_whisper = RecordingMLXWhisper()
+        result = manager._transcribe_with_mlx(
+            "/tmp/test.wav",
+            "ja",
+            "medium",
+            "prompt",
+        )
+
+        text, language = result
+        self.assertEqual(text, "mlx text")
+        self.assertEqual(language, "ja")
+        self.assertEqual(len(result.segment_metrics), 1)
+        self.assertEqual(result.segment_metrics[0].avg_logprob, -0.25)
+
+
+class RequestSpecificTaskSelectionTests(unittest.TestCase):
+    def capture_cpu_kwargs(self, *, target_language):
+        manager = RecordingOptionsBackendManager()
+        captured_kwargs = {}
+        prompt = whisper_server.generate_initial_prompt(
+            "ja",
+            use_context=False,
+            mode="translate",
+            translation_target_language=target_language,
+        )
+
+        def fake_transcribe_with_vad_fallback(*, model, transcribe_kwargs, vad_parameters, log):
+            captured_kwargs.update(transcribe_kwargs)
+            return [], type("Info", (), {"language": "ja"})()
+
+        with patch.object(
+            whisper_server,
+            "transcribe_with_vad_fallback",
+            side_effect=fake_transcribe_with_vad_fallback,
+        ):
+            manager._transcribe_with_cpu(
+                "/tmp/test.wav",
+                "ja",
+                "medium",
+                prompt,
+                request_mode="translate",
+                translation_target_language=target_language,
+                whisper_task=whisper_server.select_whisper_task("translate", target_language),
+            )
+
+        return captured_kwargs, prompt
+
+    def capture_mlx_kwargs(self, *, target_language):
+        manager = RecordingOptionsBackendManager()
+        captured_kwargs = {}
+        prompt = whisper_server.generate_initial_prompt(
+            "ja",
+            use_context=False,
+            mode="translate",
+            translation_target_language=target_language,
+        )
+
+        class RecordingMLXWhisper:
+            def transcribe(self, audio, **kwargs):
+                captured_kwargs.update(kwargs)
+                return {"text": "mlx text", "language": "ja"}
+
+        manager.mlx_whisper = RecordingMLXWhisper()
+        manager._transcribe_with_mlx(
+            "/tmp/test.mp3",
+            "ja",
+            "medium",
+            prompt,
+            request_mode="translate",
+            translation_target_language=target_language,
+            whisper_task=whisper_server.select_whisper_task("translate", target_language),
+        )
+        return captured_kwargs, prompt
+
+    def test_translate_to_english_uses_translate_task_for_cpu_and_mlx(self):
+        cpu_kwargs, cpu_prompt = self.capture_cpu_kwargs(target_language="en")
+        mlx_kwargs, mlx_prompt = self.capture_mlx_kwargs(target_language="en")
+
+        self.assertEqual(cpu_kwargs["task"], "translate")
+        self.assertEqual(mlx_kwargs["task"], "translate")
+        self.assertEqual(cpu_kwargs["initial_prompt"], cpu_prompt)
+        self.assertEqual(mlx_kwargs["initial_prompt"], mlx_prompt)
+        self.assertIn("Output only the translated text in en.", cpu_prompt)
+        self.assertIn("Output only the translated text in en.", mlx_prompt)
+
+    def test_translate_to_non_english_uses_transcribe_task_with_translation_prompt(self):
+        cpu_kwargs, cpu_prompt = self.capture_cpu_kwargs(target_language="de")
+        mlx_kwargs, mlx_prompt = self.capture_mlx_kwargs(target_language="de")
+
+        self.assertEqual(cpu_kwargs["task"], "transcribe")
+        self.assertEqual(mlx_kwargs["task"], "transcribe")
+        self.assertEqual(cpu_kwargs["initial_prompt"], cpu_prompt)
+        self.assertEqual(mlx_kwargs["initial_prompt"], mlx_prompt)
+        self.assertIn("Translation only.", cpu_prompt)
+        self.assertIn("Output only the translated text in de.", cpu_prompt)
+        self.assertIn("Translation only.", mlx_prompt)
+        self.assertIn("Output only the translated text in de.", mlx_prompt)
 
 
 class ActiveClipRetryTests(unittest.TestCase):

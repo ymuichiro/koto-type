@@ -24,6 +24,8 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     private(set) var lastStartFailureReason: RecordingStartFailureReason?
     private(set) var currentInputDeviceName: String?
     private(set) var lastRecordingDuration: TimeInterval = 0
+    private(set) var isAppleVoiceProcessingActive = false
+    private(set) var lastAppleVoiceProcessingErrorDescription: String?
 
     var batchInterval: TimeInterval
     var silenceThreshold: Float
@@ -55,6 +57,9 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             Logger.shared.log("RealtimeRecorder: already recording", level: .warning)
             return true
         }
+
+        isAppleVoiceProcessingActive = false
+        lastAppleVoiceProcessingErrorDescription = nil
         
         audioEngine = AVAudioEngine()
         let inputNode = audioEngine?.inputNode
@@ -81,6 +86,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
 
         currentInputDeviceName = Self.currentDefaultInputDeviceName() ?? Self.unknownInputDeviceName
         reportInputDeviceName(currentInputDeviceName, force: true)
+        configureAppleVoiceProcessing(on: node)
         
         let recordingFormat = node.outputFormat(forBus: 0)
         capturedSampleRate = Self.normalizeSampleRate(recordingFormat.sampleRate)
@@ -107,6 +113,9 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             Logger.shared.log("RealtimeRecorder: failed to start audio engine: \(error)", level: .error)
             lastStartFailureReason = .failedToStartAudioEngine
             currentInputDeviceName = nil
+            isAppleVoiceProcessingActive = false
+            audioEngine?.inputNode.removeTap(onBus: 0)
+            audioEngine = nil
             reportInputDeviceName(nil, force: true)
             return false
         }
@@ -140,6 +149,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         hasRecordedContent = false
         hasReachedMaximumDuration = false
         isRecording = false
+        isAppleVoiceProcessingActive = false
         audioEngine = nil
         onMaximumDurationReached = nil
         currentInputDeviceName = nil
@@ -237,7 +247,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             fileCount += 1
             
             Logger.shared.log(
-                "RealtimeRecorder: created audio file: \(fileURL.path) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(currentFileCount))",
+                "RealtimeRecorder: created audio file: \(fileURL.path) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(currentFileCount), appleVoiceProcessing=\(isAppleVoiceProcessingActive))",
                 level: .info
             )
 
@@ -274,6 +284,12 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
 
     static func hasUsableInputFormat(_ format: AVAudioFormat) -> Bool {
         format.channelCount > 0 && format.sampleRate.isFinite && format.sampleRate > 0
+    }
+
+    static func shouldEnableAppleVoiceProcessing(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        !isTruthyEnvironmentValue(environment["KOTOTYPE_DISABLE_APPLE_VOICE_PROCESSING"])
     }
 
     static func normalizedInputLevel(maxAmplitude: Float, silenceThreshold: Float) -> Float {
@@ -335,6 +351,42 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         let handler = onInputDeviceNameChanged
         DispatchQueue.main.async {
             handler?(name)
+        }
+    }
+
+    private func configureAppleVoiceProcessing(on node: AVAudioInputNode) {
+        guard Self.shouldEnableAppleVoiceProcessing() else {
+            Logger.shared.log(
+                "RealtimeRecorder: Apple voice processing disabled via KOTOTYPE_DISABLE_APPLE_VOICE_PROCESSING",
+                level: .info
+            )
+            return
+        }
+
+        do {
+            try node.setVoiceProcessingEnabled(true)
+            isAppleVoiceProcessingActive = true
+            Logger.shared.log("RealtimeRecorder: Apple voice processing enabled", level: .info)
+        } catch {
+            let description = String(describing: error)
+            lastAppleVoiceProcessingErrorDescription = description
+            Logger.shared.log(
+                "RealtimeRecorder: failed to enable Apple voice processing, continuing without it: \(description)",
+                level: .warning
+            )
+        }
+    }
+
+    private static func isTruthyEnvironmentValue(_ value: String?) -> Bool {
+        guard let value else {
+            return false
+        }
+
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        default:
+            return false
         }
     }
 

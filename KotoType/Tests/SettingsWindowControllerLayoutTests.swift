@@ -51,6 +51,7 @@ final class SettingsWindowControllerLayoutTests: XCTestCase {
         bridge.applyChanges = {
             didApplyChanges = true
             bridge.markSaved(snapshot: bridge.currentSnapshot)
+            return true
         }
 
         let controller = SettingsWindowController(
@@ -81,6 +82,7 @@ final class SettingsWindowControllerLayoutTests: XCTestCase {
         var didApplyChanges = false
         bridge.applyChanges = {
             didApplyChanges = true
+            return true
         }
 
         let controller = SettingsWindowController(
@@ -116,6 +118,37 @@ final class SettingsWindowControllerLayoutTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
 
         XCTAssertFalse(controller.shouldAllowWindowClose(for: window))
+        XCTAssertTrue(bridge.hasUnsavedChanges)
+    }
+
+    func testWindowCloseSaveChoiceKeepsWindowOpenWhenApplyChangesFails() throws {
+        let initialSnapshot = SettingsDraft(
+            settings: AppSettings(language: "auto"),
+            dictionaryWords: ["OpenAI"],
+            voiceShortcuts: []
+        ).snapshot
+        let bridge = SettingsDraftBridge(initialSnapshot: initialSnapshot)
+        bridge.currentSnapshot = SettingsDraft(
+            settings: AppSettings(language: "ja"),
+            dictionaryWords: ["OpenAI"],
+            voiceShortcuts: []
+        ).snapshot
+
+        var didAttemptApply = false
+        bridge.applyChanges = {
+            didAttemptApply = true
+            return false
+        }
+
+        let controller = SettingsWindowController(
+            draftBridge: bridge,
+            unsavedChangesPresenter: { _ in .save },
+            resetDraftBridgeOnViewLoad: false
+        )
+        let window = try XCTUnwrap(controller.window)
+
+        XCTAssertFalse(controller.shouldAllowWindowClose(for: window))
+        XCTAssertTrue(didAttemptApply)
         XCTAssertTrue(bridge.hasUnsavedChanges)
     }
 }

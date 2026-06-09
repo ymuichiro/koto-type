@@ -16,6 +16,25 @@ class UserDictionaryTests(unittest.TestCase):
     def assertPromptUsesNoTranslationGuidance(self, prompt):
         self.assertIsNotNone(prompt)
         self.assertIn("Do not translate, summarize, or rewrite into another language.", prompt)
+        self.assertNotIn("Translation only.", prompt)
+        self.assertNotIn("Output only the translated text in", prompt)
+
+    def assertPromptUsesTranslationGuidance(self, prompt, target_language):
+        self.assertIsNotNone(prompt)
+        self.assertIn("Translation only.", prompt)
+        self.assertIn(
+            f"Translate the spoken content into target language code {target_language}.",
+            prompt,
+        )
+        self.assertIn(f"Output only the translated text in {target_language}.", prompt)
+        self.assertIn(
+            "Do not summarize, explain, add notes, or add formatting.",
+            prompt,
+        )
+        self.assertNotIn(
+            "Do not translate, summarize, or rewrite into another language.",
+            prompt,
+        )
 
     def test_normalize_user_words(self):
         words = whisper_server.normalize_user_words(
@@ -84,22 +103,72 @@ class UserDictionaryTests(unittest.TestCase):
         )
         self.assertNotIn("Please accurately recognize these terms", prompt)
 
+    def test_generate_initial_prompt_does_not_add_default_vocabulary_hints(self):
+        prompt = whisper_server.generate_initial_prompt(
+            "ja",
+            use_context=True,
+            user_words=[],
+        )
+
+        self.assertPromptUsesNoTranslationGuidance(prompt)
+        self.assertNotIn("User vocabulary hints:", prompt)
+        self.assertEqual(prompt.count("User vocabulary hints:"), 0)
+
     def test_generate_initial_prompt_frames_screenshot_context_as_hints_only(self):
         prompt = whisper_server.generate_initial_prompt(
             "auto",
             use_context=False,
-            screenshot_context="GitHub issue pull request README TypeScript FastAPI",
+            screenshot_context="KotoType pull request README TypeScript FastAPI",
         )
 
         self.assertPromptUsesNoTranslationGuidance(prompt)
         self.assertIn("Contextual vocabulary hints from the current screen:", prompt)
-        self.assertIn("GitHub issue pull request README TypeScript FastAPI", prompt)
+        self.assertIn("KotoType pull request README TypeScript FastAPI", prompt)
         self.assertIn(
             "Use these only to improve recognition of spoken terms.",
             prompt,
         )
         self.assertIn(
             "Do not copy unrelated context and do not translate the spoken language.",
+            prompt,
+        )
+
+    def test_generate_initial_prompt_translation_mode_targets_requested_language(self):
+        prompt = whisper_server.generate_initial_prompt(
+            "ja",
+            use_context=False,
+            mode="translate",
+            translation_target_language="de",
+        )
+
+        self.assertPromptUsesTranslationGuidance(prompt, "de")
+        self.assertIn("Expected spoken language hint: Japanese.", prompt)
+        self.assertIn("Preserve any spoken code-switching.", prompt)
+        self.assertNotIn("Verbatim transcription.", prompt)
+
+    def test_generate_initial_prompt_translation_mode_treats_context_as_vocabulary_hints(self):
+        prompt = whisper_server.generate_initial_prompt(
+            "auto",
+            use_context=True,
+            user_words=["OpenAI", "faster-whisper"],
+            screenshot_context="KotoType pull request README TypeScript FastAPI",
+            mode="translate",
+            translation_target_language="es",
+        )
+
+        self.assertPromptUsesTranslationGuidance(prompt, "es")
+        self.assertIn("User vocabulary hints:", prompt)
+        self.assertIn(
+            "Use these only as vocabulary hints for translating spoken terms.",
+            prompt,
+        )
+        self.assertIn("Contextual vocabulary hints from the current screen:", prompt)
+        self.assertIn(
+            "Use these only as vocabulary hints for translating spoken terms.",
+            prompt,
+        )
+        self.assertIn(
+            "Do not copy unrelated context. Translate only the spoken content into the target language.",
             prompt,
         )
 

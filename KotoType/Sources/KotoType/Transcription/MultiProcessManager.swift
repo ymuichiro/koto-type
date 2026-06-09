@@ -118,6 +118,8 @@ final class MultiProcessManager: @unchecked Sendable {
         index: Int,
         settings: AppSettings,
         screenshotContext: String? = nil,
+        mode: RecordingRequestMode = .transcribe,
+        translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
         retryCount: Int = 0,
         queueAttempt: Int = 0,
         processingTimeout: TimeInterval? = nil
@@ -158,6 +160,8 @@ final class MultiProcessManager: @unchecked Sendable {
                     index: index,
                     settings: settings,
                     screenshotContext: nil,
+                    mode: mode,
+                    translationTargetLanguage: translationTargetLanguage,
                     retryCount: retryCount,
                     queueAttempt: queueAttempt + 1,
                     processingTimeout: processingTimeout
@@ -173,6 +177,8 @@ final class MultiProcessManager: @unchecked Sendable {
                 url: url,
                 index: index,
                 settings: settings,
+                mode: mode,
+                translationTargetLanguage: translationTargetLanguage,
                 retryCount: retryCount,
                 processingTimeout: max(0.1, processingTimeout ?? segmentProcessingTimeoutSeconds)
             ),
@@ -214,6 +220,8 @@ final class MultiProcessManager: @unchecked Sendable {
             autoPunctuation: assignedContext.settings.autoPunctuation,
             qualityPreset: assignedContext.settings.transcriptionQualityPreset,
             gpuAccelerationEnabled: assignedContext.settings.gpuAccelerationEnabled,
+            mode: assignedContext.mode,
+            translationTargetLanguage: assignedContext.translationTargetLanguage,
             screenshotContext: screenshotContext
         )
 
@@ -437,6 +445,8 @@ final class MultiProcessManager: @unchecked Sendable {
                     index: context.index,
                     settings: context.settings,
                     screenshotContext: nil,
+                    mode: context.mode,
+                    translationTargetLanguage: context.translationTargetLanguage,
                     retryCount: nextRetry,
                     queueAttempt: 0,
                     processingTimeout: context.processingTimeout
@@ -868,6 +878,8 @@ final class MultiProcessManager: @unchecked Sendable {
             autoPunctuation: false,
             qualityPreset: .medium,
             gpuAccelerationEnabled: false,
+            mode: .transcribe,
+            translationTargetLanguage: AppSettings.defaultTranslationTargetLanguage,
             screenshotContext: nil
         )
     }
@@ -968,6 +980,8 @@ private struct SegmentContext {
     let url: URL
     let index: Int
     let settings: AppSettings
+    let mode: RecordingRequestMode
+    let translationTargetLanguage: String
     let retryCount: Int
     let processingTimeout: TimeInterval
     var assignedAt: Date = .distantPast

@@ -7,14 +7,18 @@ import UniformTypeIdentifiers
 @MainActor
 private final class RecordingSessionContext {
     let id: Int
+    let mode: RecordingRequestMode
+    let translationTargetLanguage: String
     let batchTranscriptionManager: BatchTranscriptionManager
     var liveTranscriptionPolicy: LiveTranscriptionPolicy?
     var finalizationReadyWorkItem: DispatchWorkItem?
     var completionTimeoutWorkItem: DispatchWorkItem?
     private var screenshotContext: String?
 
-    init(id: Int) {
+    init(id: Int, mode: RecordingRequestMode, translationTargetLanguage: String) {
         self.id = id
+        self.mode = mode
+        self.translationTargetLanguage = translationTargetLanguage
         self.batchTranscriptionManager = BatchTranscriptionManager()
     }
 
@@ -55,10 +59,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var initialSetupWindowController: InitialSetupWindowController?
     var isRecording = false
     private var isImportingAudio = false
-    private var isHotkeyPressed = false
     private var isCancelingImportedAudioTranscription = false
     private var didSuspendRealtimeWorkersForImport = false
-    private var pendingRecordingStartAfterBackendReady = false
+    private var pressedRecordingModes: Set<RecordingRequestMode> = []
+    private var pendingRecordingStartMode: RecordingRequestMode?
     private var importedAudioTranscriptionManager: ImportedAudioTranscriptionManager?
     private var serverScriptPath: String = ""
     private var currentSettings: AppSettings = AppSettings()
@@ -318,21 +322,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Loaded settings: \(currentSettings)", level: .info)
         
         hotkeyManager = HotkeyManager()
-        hotkeyManager?.hotkeyKeyDown = { [weak self] in
-            self?.isHotkeyPressed = true
-            self?.startRecording()
+        hotkeyManager?.hotkeyKeyDown = { [weak self] mode in
+            self?.handleRecordingHotkeyPressed(mode)
         }
-        hotkeyManager?.hotkeyKeyUp = { [weak self] in
-            self?.isHotkeyPressed = false
-            self?.stopRecording()
+        hotkeyManager?.hotkeyKeyUp = { [weak self] mode in
+            self?.handleRecordingHotkeyReleased(mode)
         }
         
-        NotificationCenter.default.addObserver(forName: .hotkeyConfigurationChanged, object: nil, queue: .main) { [weak self] notification in
-            let config = notification.object as? HotkeyConfiguration
+        NotificationCenter.default.addObserver(forName: .hotkeySettingsChanged, object: nil, queue: .main) { [weak self] notification in
+            let settings = notification.object as? AppSettings
             Task { @MainActor [weak self] in
                 guard self != nil else { return }
-                if let config = config {
-                    Logger.shared.log("AppDelegate: Received hotkeyConfigurationChanged notification: \(config.description)")
+                if let settings {
+                    Logger.shared.log(
+                        "AppDelegate: Received hotkey settings notification: transcription=\(settings.hotkeyConfig.description), translation=\(settings.translationHotkeyConfig.description), translationTargetLanguage=\(settings.translationTargetLanguage)"
+                    )
                 }
             }
         }
@@ -366,7 +370,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func startRecording() {
+    func startRecording(mode: RecordingRequestMode = .transcribe) {
         guard !isImportingAudio else {
             Logger.shared.log("Recording request ignored because imported audio transcription is running", level: .warning)
             return
@@ -382,10 +386,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 reason: "recording start",
                 preloadModel: true
             )
-            guard !pendingRecordingStartAfterBackendReady else {
+            guard pendingRecordingStartMode == nil else {
                 return
             }
-            pendingRecordingStartAfterBackendReady = true
+            pendingRecordingStartMode = mode
             indicatorPresentation.beginNonLivePresentation()
             recordingIndicatorWindow?.showProcessing(
                 message: Self.backendPreparationIndicatorMessage(
@@ -393,17 +397,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             )
             Logger.shared.log(
-                "Recording request is waiting for backend preparation to complete",
+                "Recording request is waiting for backend preparation to complete: mode=\(mode.rawValue)",
                 level: .info
             )
             return
         }
 
-        beginRecordingSession()
+        beginRecordingSession(mode: mode)
     }
 
-    private func beginRecordingSession() {
-        let session = createRecordingSession()
+    private func beginRecordingSession(mode: RecordingRequestMode) {
+        let session = createRecordingSession(
+            mode: mode,
+            translationTargetLanguage: currentSettings.translationTargetLanguage
+        )
         let sessionID = session.id
         let liveTranscriptionPolicy = LiveTranscriptionPolicy.resolve(
             settings: currentSettings,
@@ -411,12 +418,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         session.liveTranscriptionPolicy = liveTranscriptionPolicy
         pendingLiveRecordingProcessingMessage = nil
-        pendingRecordingStartAfterBackendReady = false
+        pendingRecordingStartMode = nil
         isRecording = true
         activeRecordingSessionID = sessionID
         indicatorPresentation.beginLiveSession(sessionID)
         Logger.shared.log(
-            "Starting audio recording for session \(sessionID)... backendMode=\(liveTranscriptionPolicy.mode.rawValue), reason=\(liveTranscriptionPolicy.logReason), recordingMaxDuration=\(Int(liveTranscriptionPolicy.recordingMaxDuration))s, processingTimeout=\(Int(liveTranscriptionPolicy.processingTimeout))s, finalizationTimeout=\(Int(liveTranscriptionPolicy.finalizationTimeout))s",
+            "Starting audio recording for session \(sessionID)... requestMode=\(session.mode.rawValue), translationTargetLanguage=\(session.translationTargetLanguage), backendMode=\(liveTranscriptionPolicy.mode.rawValue), reason=\(liveTranscriptionPolicy.logReason), recordingMaxDuration=\(Int(liveTranscriptionPolicy.recordingMaxDuration))s, processingTimeout=\(Int(liveTranscriptionPolicy.processingTimeout))s, finalizationTimeout=\(Int(liveTranscriptionPolicy.finalizationTimeout))s",
             level: .info
         )
 
@@ -457,7 +464,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let recordingDuration = self.realtimeRecorder?.lastRecordingDuration ?? 0
             let processingTimeout = currentSession.liveTranscriptionPolicy?.processingTimeout
             Logger.shared.log(
-                "File created: \(url.path), localIndex=\(localIndex), globalIndex=\(globalIndex), session=\(sessionID), backendMode=\(currentSession.liveTranscriptionPolicy?.mode.rawValue ?? "unknown"), recordingDuration=\(String(format: "%.1f", recordingDuration))s, processingTimeout=\(Int(processingTimeout ?? 0))s",
+                "File created: \(url.path), localIndex=\(localIndex), globalIndex=\(globalIndex), session=\(sessionID), requestMode=\(currentSession.mode.rawValue), translationTargetLanguage=\(currentSession.translationTargetLanguage), backendMode=\(currentSession.liveTranscriptionPolicy?.mode.rawValue ?? "unknown"), recordingDuration=\(String(format: "%.1f", recordingDuration))s, processingTimeout=\(Int(processingTimeout ?? 0))s",
                 level: .info
             )
             self.pendingSegmentFiles[globalIndex] = url
@@ -468,6 +475,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 index: globalIndex,
                 settings: self.currentSettings,
                 screenshotContext: screenshotContext,
+                mode: currentSession.mode,
+                translationTargetLanguage: currentSession.translationTargetLanguage,
                 processingTimeout: processingTimeout
             )
         }
@@ -487,6 +496,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isRecording = false
             activeRecordingSessionID = nil
             pendingLiveRecordingProcessingMessage = nil
+            pendingRecordingStartMode = nil
             destroySession(sessionID: sessionID)
             return
         }
@@ -506,12 +516,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.recordingIndicatorWindow?.hide()
         }
     }
+
+    private func handleRecordingHotkeyPressed(_ mode: RecordingRequestMode) {
+        pressedRecordingModes.insert(mode)
+        startRecording(mode: mode)
+    }
+
+    private func handleRecordingHotkeyReleased(_ mode: RecordingRequestMode) {
+        pressedRecordingModes.remove(mode)
+
+        if pendingRecordingStartMode == mode && !isRecording {
+            stopRecording()
+            return
+        }
+
+        guard isRecording,
+              let sessionID = activeRecordingSessionID,
+              let session = sessionByID[sessionID],
+              session.mode == mode else {
+            return
+        }
+
+        stopRecording()
+    }
     
     func stopRecording() {
-        if pendingRecordingStartAfterBackendReady {
-            pendingRecordingStartAfterBackendReady = false
+        if let pendingMode = pendingRecordingStartMode {
+            pendingRecordingStartMode = nil
             Logger.shared.log(
-                "Recording request cancelled while backend preparation was still in progress",
+                "Recording request cancelled while backend preparation was still in progress: mode=\(pendingMode.rawValue)",
                 level: .info
             )
             if !isImportingAudio {
@@ -530,7 +563,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.sessionByID[sessionID]?.clearScreenshotContext()
         }
-        Logger.shared.log("Stopping audio recording for session \(sessionID)...", level: .info)
+        Logger.shared.log(
+            "Stopping audio recording for session \(sessionID)... requestMode=\(session.mode.rawValue), translationTargetLanguage=\(session.translationTargetLanguage)",
+            level: .info
+        )
         realtimeRecorder?.stopRecording()
         realtimeRecorder?.onInputLevelChanged = nil
         realtimeRecorder?.onInputDeviceNameChanged = nil
@@ -538,7 +574,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         realtimeRecorder?.maxRecordingDuration = nil
         recordingIndicatorWindow?.updateRecordingLevel(0)
         recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
-        Logger.shared.log("Recording stopped (session \(sessionID))", level: .info)
+        Logger.shared.log(
+            "Recording stopped (session \(sessionID), requestMode=\(session.mode.rawValue))",
+            level: .info
+        )
         Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
         let processingMessage = pendingLiveRecordingProcessingMessage
         pendingLiveRecordingProcessingMessage = nil
@@ -567,10 +606,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cancelRecording() {
-        if pendingRecordingStartAfterBackendReady && !isRecording {
-            pendingRecordingStartAfterBackendReady = false
-            isHotkeyPressed = false
-            Logger.shared.log("Cancelled pending recording while backend was preparing", level: .info)
+        if let pendingMode = pendingRecordingStartMode, !isRecording {
+            pendingRecordingStartMode = nil
+            Logger.shared.log(
+                "Cancelled pending recording while backend was preparing: mode=\(pendingMode.rawValue)",
+                level: .info
+            )
             recordingIndicatorWindow?.hide()
             return
         }
@@ -629,10 +670,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Cancel request ignored because there is no active recording/transcription task", level: .debug)
     }
 
-    private func createRecordingSession() -> RecordingSessionContext {
+    private func createRecordingSession(
+        mode: RecordingRequestMode,
+        translationTargetLanguage: String
+    ) -> RecordingSessionContext {
         let sessionID = nextRecordingSessionID
         nextRecordingSessionID += 1
-        let session = RecordingSessionContext(id: sessionID)
+        let session = RecordingSessionContext(
+            id: sessionID,
+            mode: mode,
+            translationTargetLanguage: translationTargetLanguage
+        )
         sessionByID[sessionID] = session
         return session
     }
@@ -1302,27 +1350,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resumePendingRecordingIfNeeded() {
-        guard pendingRecordingStartAfterBackendReady else {
+        guard let pendingMode = pendingRecordingStartMode else {
             return
         }
         currentSettings = SettingsManager.shared.load()
         guard currentSettings.keepBackendReadyInBackground else {
-            pendingRecordingStartAfterBackendReady = false
+            pendingRecordingStartMode = nil
             recordingIndicatorWindow?.hide()
             return
         }
-        guard isHotkeyPressed else {
-            pendingRecordingStartAfterBackendReady = false
+        guard pressedRecordingModes.contains(pendingMode) else {
+            pendingRecordingStartMode = nil
             recordingIndicatorWindow?.hide()
             return
         }
 
         Logger.shared.log(
-            "Backend preparation finished while hotkey remained pressed; starting recording now",
+            "Backend preparation finished while hotkey remained pressed; starting recording now in mode=\(pendingMode.rawValue)",
             level: .info
         )
-        pendingRecordingStartAfterBackendReady = false
-        startRecording()
+        pendingRecordingStartMode = nil
+        startRecording(mode: pendingMode)
     }
 
     private func startTemporaryBatchCleanupTimer() {

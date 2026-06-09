@@ -50,6 +50,17 @@ struct HotkeyConfiguration: Codable, Equatable, Hashable {
     var keyCode: UInt32 = 0
 
     static let `default` = HotkeyConfiguration()
+    static let unset = HotkeyConfiguration(
+        useCommand: false,
+        useOption: false,
+        useControl: false,
+        useShift: false,
+        commandSide: .either,
+        optionSide: .either,
+        controlSide: .either,
+        shiftSide: .either,
+        keyCode: 0
+    )
 
     init(
         useCommand: Bool = true,
@@ -109,6 +120,10 @@ struct HotkeyConfiguration: Codable, Equatable, Hashable {
             parts.append(keyCodeToString(keyCode))
         }
         return parts.joined()
+    }
+
+    var isSet: Bool {
+        useCommand || useOption || useControl || useShift || keyCode > 0
     }
 
     var modifiers: NSEvent.ModifierFlags.RawValue {

@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KotoType Issue 72 Implementation Report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #5c6672;
+      --border: #d7dde5;
+      --accent: #0f766e;
+      --accent-soft: #d9f3ef;
+      --danger: #b42318;
+      --danger-soft: #fee4e2;
+      --warn: #9a6700;
+      --warn-soft: #fff3c4;
+      --ok: #067647;
+      --ok-soft: #dcfae6;
+      --code: #111827;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+
+    header {
+      background: #102a43;
+      color: #ffffff;
+      padding: 48px 28px 36px;
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.25;
+      margin: 0 0 14px;
+    }
+
+    h1 {
+      font-size: 34px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 24px;
+      margin-top: 34px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 18px;
+      margin-top: 22px;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #eef2f7;
+      color: var(--code);
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 0.93em;
+    }
+
+    pre {
+      overflow-x: auto;
+      background: #111827;
+      color: #f9fafb;
+      padding: 14px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 24px;
+      background: var(--panel);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+    }
+
+    th {
+      background: #eef2f7;
+      font-weight: 650;
+    }
+
+    ul {
+      padding-left: 22px;
+      margin: 0 0 18px;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: #dbe7f3;
+      font-size: 17px;
+      margin-top: 12px;
+    }
+
+    .meta {
+      color: #b8c8d9;
+      font-size: 14px;
+      margin-top: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      margin: 18px 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 28px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .ok {
+      color: var(--ok);
+      background: var(--ok-soft);
+    }
+
+    .warn {
+      color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .fail {
+      color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 14px 16px;
+      border-radius: 6px;
+      margin: 18px 0;
+    }
+
+    .callout.warning {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .callout.danger {
+      border-left-color: var(--danger);
+      background: var(--danger-soft);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>KotoType Issue 72 実装報告</h1>
+    <p class="lead">ノイズ環境向け音声前処理の評価結果に基づき、最も精度改善に寄与した <code>ffmpeg_office_gate</code> パターンを標準実装へ反映した内容、削除した旧経路、差分、検証結果をまとめます。</p>
+    <p class="meta">作成日: 2026-05-31 / 対象リポジトリ: <code>/Users/you/github/ymuichiro/koto-type</code></p>
+  </header>
+
+  <main>
+    <section>
+      <h2>結論</h2>
+      <div class="callout">
+        <p><strong>採用した標準処理:</strong> <code>ffmpeg_office_gate</code></p>
+        <p>標準 FFmpeg 前処理を office 向けの固定パイプラインに変更し、既存の低活動スキップに加えて Whisper segment metrics を使った低信頼 gate を入れました。動的正規化と auto gain は背景話者を持ち上げるため runtime から削除しています。</p>
+      </div>
+
+      <div class="grid">
+        <div class="metric">
+          <strong>20%</strong>
+          <span>speech なしケースの false insertion rate。旧系統は 100% でした。</span>
+        </div>
+        <div class="metric">
+          <strong>0.000</strong>
+          <span>合成評価セットでの mean CER。</span>
+        </div>
+        <div class="metric">
+          <strong>0%</strong>
+          <span>dropped utterance rate。</span>
+        </div>
+        <div class="metric">
+          <strong>0.59s</strong>
+          <span>評価 CLI 最新実行での p95 latency。</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>実装の根拠</h2>
+      <p>issue #72 の目的は、騒がしいオフィス環境で背景話者の発話を誤って貼り付ける false insertion を減らし、静かな環境で大きく悪化せず、ユーザー向け設定を増やさない単一の標準パイプラインを決めることでした。</p>
+      <p>評価 CLI の最新実行結果は以下です。</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>strategy</th>
+            <th>mean CER</th>
+            <th>false insertion</th>
+            <th>dropped utterance</th>
+            <th>p50 latency</th>
+            <th>p95 latency</th>
+            <th>mean RTF</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ffmpeg_office_gate</code></td>
+            <td>0.000</td>
+            <td>20%</td>
+            <td>0%</td>
+            <td>0.56s</td>
+            <td>0.59s</td>
+            <td>0.162</td>
+          </tr>
+          <tr>
+            <td><code>ffmpeg_current_gate</code></td>
+            <td>0.000</td>
+            <td>80%</td>
+            <td>0%</td>
+            <td>0.56s</td>
+            <td>0.59s</td>
+            <td>0.162</td>
+          </tr>
+          <tr>
+            <td><code>none</code></td>
+            <td>0.000</td>
+            <td>100%</td>
+            <td>0%</td>
+            <td>0.55s</td>
+            <td>0.56s</td>
+            <td>0.156</td>
+          </tr>
+          <tr>
+            <td><code>ffmpeg_office</code></td>
+            <td>0.000</td>
+            <td>100%</td>
+            <td>0%</td>
+            <td>0.56s</td>
+            <td>0.59s</td>
+            <td>0.162</td>
+          </tr>
+          <tr>
+            <td><code>ffmpeg_current</code></td>
+            <td>0.000</td>
+            <td>100%</td>
+            <td>0%</td>
+            <td>0.56s</td>
+            <td>0.59s</td>
+            <td>0.163</td>
+          </tr>
+          <tr>
+            <td><code>ffmpeg_current_no_gain</code></td>
+            <td>0.000</td>
+            <td>100%</td>
+            <td>0%</td>
+            <td>0.56s</td>
+            <td>0.60s</td>
+            <td>0.161</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="note">最新出力: <code>artifacts/evaluations/noise_preprocess_issue_72/runs/20260609_012439/results.json</code></p>
+    </section>
+
+    <section>
+      <h2>実装内容</h2>
+
+      <h3>1. 標準 FFmpeg 前処理を固定 office preset へ変更</h3>
+      <p><code>python/whisper_server.py</code> の runtime filter chain を以下に固定しました。</p>
+      <pre><code>highpass=f=120,lowpass=f=6800,afftdn=nf=-28:tn=1</code></pre>
+      <p>この構成は、背景話者や非人声音ノイズを持ち上げる <code>dynaudnorm</code> と auto gain を避け、軽い帯域制限と stationary denoise のみを標準処理として適用します。<code>afftdn</code> が使えない環境では <code>highpass=f=120,lowpass=f=6800</code> にフォールバックします。</p>
+
+      <h3>2. 低活動 gate と低信頼 gate の二段構成</h3>
+      <p>既存の audio activity analysis による低活動スキップを維持し、その後段に Whisper segment metrics の gate を追加しました。</p>
+      <ul>
+        <li><code>no_speech_prob &gt;= 0.6</code> を抑制</li>
+        <li><code>avg_logprob &lt;= -0.8</code> を抑制</li>
+        <li><code>compression_ratio &gt;= 2.4</code> を抑制</li>
+      </ul>
+      <p>CPU faster-whisper と MLX Whisper の両方から segment metrics を収集できるようにし、既存の <code>BackendManager.transcribe(...)</code> 互換 API は残しつつ、新しく <code>transcribe_with_details(...)</code> で metrics 付き結果を扱う構成にしています。</p>
+
+      <h3>3. Apple Voice Processing をライブ録音入口で標準有効化</h3>
+      <p><code>KotoType/Sources/KotoType/Audio/RealtimeRecorder.swift</code> の input tap 設置前に <code>setVoiceProcessingEnabled(true)</code> を試行するようにしました。ユーザー設定は増やさず、macOS や入力デバイスの都合で有効化に失敗した場合は録音を止めずに従来の raw input tap へフォールバックします。</p>
+      <p>互換性調査のため <code>KOTOTYPE_DISABLE_APPLE_VOICE_PROCESSING=1</code> のみを残し、batch 音声作成ログには <code>appleVoiceProcessing=true/false</code> を出します。</p>
+
+      <h3>4. 評価 CLI は比較用に維持</h3>
+      <p><code>tools/evaluate_noise_strategies.py</code> は、今回の判断根拠を再実行できるように残しています。ただし legacy current strategy は評価 CLI 内で self-contained に再現し、runtime の実装には戻さない構造です。</p>
+
+    </section>
+
+    <section>
+      <h2>実録データ評価</h2>
+      <p>ユーザー提供の <code>静かな環境.m4a</code> と <code>後ろで BGM がうるさい.m4a</code> で追加評価しました。ただし 2 本は同一発話ではなく、正解文字起こしもないため、ノイズ改善の定量評価には使えませんでした。</p>
+      <p>FFmpeg filter の追加調整として no preprocessing、legacy current、current office preset、band limit、stronger <code>afftdn</code>、<code>dialoguenhance</code> を比較しましたが、BGM 録音の主要 transcript はほぼ変わりませんでした。</p>
+      <p class="note">詳細: <code>docs/testing/real-recordings-issue-72.md</code>、探索出力: <code>artifacts/evaluations/real_recordings_issue_72/runs/20260602_092619/results.json</code></p>
+    </section>
+
+    <section>
+      <h2>削除した機能・経路</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>削除対象</th>
+            <th>理由</th>
+            <th>現在の扱い</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>dynaudnorm</code> runtime path</td>
+            <td>遠い背景話者や非人声音ノイズの activity を持ち上げ、gate の効きを弱めるため。</td>
+            <td>評価 CLI の legacy current 比較にのみ残置。</td>
+          </tr>
+          <tr>
+            <td>compressor option</td>
+            <td>標準採用候補から外れ、runtime で設定分岐を持つ必要がなくなったため。</td>
+            <td>削除。</td>
+          </tr>
+          <tr>
+            <td><code>KOTOTYPE_ENABLE_NOISE_REDUCTION</code></td>
+            <td>ユーザー向け/運用向けモード切替を増やさない issue 方針に反するため。</td>
+            <td>削除。互換デバッグは <code>KOTOTYPE_SKIP_AUDIO_PREPROCESSING</code> のみ。</td>
+          </tr>
+          <tr>
+            <td><code>KOTOTYPE_AUTO_GAIN_ENABLED</code> と <code>KOTOTYPE_AUTO_GAIN_*</code></td>
+            <td>auto gain は背景話者を増幅し得るため、標準処理として不採用。</td>
+            <td>削除。</td>
+          </tr>
+          <tr>
+            <td><code>determine_gain_for_weak_audio</code>, <code>apply_gain_to_wav</code>, <code>analyze_wav_peak_dbfs</code></td>
+            <td>auto gain runtime path の削除により不要。</td>
+            <td>削除。評価 CLI は独自 helper で legacy 比較を再現。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>主要差分</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ファイル</th>
+            <th>変更内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>python/whisper_server.py</code></td>
+            <td>固定 office preset、segment metrics collection、confidence gate、details付き transcription result、auto gain/動的正規化経路削除。</td>
+          </tr>
+          <tr>
+            <td><code>tests/python/test_audio_preprocess.py</code></td>
+            <td>office preset、fallback、低信頼 gate、segment metrics collection のテストへ更新。auto gain テストは削除。</td>
+          </tr>
+          <tr>
+            <td><code>tests/python/test_backend_configuration.py</code></td>
+            <td>MLX transcription が segment metrics を返すことを検証。</td>
+          </tr>
+          <tr>
+            <td><code>KotoType/Sources/KotoType/Audio/RealtimeRecorder.swift</code></td>
+            <td>ライブ録音の input tap 前に Apple Voice Processing を標準有効化。失敗時は従来録音へフォールバックし、適用状態をログへ出力。</td>
+          </tr>
+          <tr>
+            <td><code>KotoType/Tests/RealtimeRecorderTests.swift</code></td>
+            <td>Apple Voice Processing が既定で有効であること、互換性デバッグ用 disable flag の解釈、診断状態の初期値を検証。</td>
+          </tr>
+          <tr>
+            <td><code>tools/evaluate_noise_strategies.py</code></td>
+            <td>runtime 実装に合わせた office preset と共通 gate を使用。legacy current は CLI 内に隔離。</td>
+          </tr>
+          <tr>
+            <td><code>tests/python/test_noise_strategy_eval.py</code></td>
+            <td>評価 CLI の normalize/CER/summary ordering を検証する新規テスト。</td>
+          </tr>
+          <tr>
+            <td><code>README.md</code></td>
+            <td>削除した noise reduction / auto gain 環境変数の案内を除去し、Apple Voice Processing と固定 preprocessing を説明。</td>
+          </tr>
+          <tr>
+            <td><code>docs/testing/noise-preprocess-eval-issue-72.md</code></td>
+            <td>評価結果、採用判断、2026-05-31 の実装反映内容、2026-06-02 の Apple Voice Processing 反映内容を記録。</td>
+          </tr>
+          <tr>
+            <td><code>docs/testing/real-recordings-issue-72.md</code></td>
+            <td>ユーザー提供実録データでの filter 比較と、今回のデータではノイズ改善の定量判断に不足する理由を記録。</td>
+          </tr>
+          <tr>
+            <td><code>.gitignore</code>, <code>Makefile</code></td>
+            <td>評価 artifacts を ignore。ノイズ評価 CLI テストを通常 Python test-all に追加。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>テスト結果</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>コマンド</th>
+            <th>結果</th>
+            <th>詳細</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>make test-all</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>Python unit tests 65 件: audio preprocess 18、backend config 26、noise strategy eval 3、user dictionary 18。</td>
+          </tr>
+          <tr>
+            <td><code>.venv/bin/ruff check python tests/python tools/evaluate_noise_strategies.py</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>All checks passed。</td>
+          </tr>
+          <tr>
+            <td><code>.venv/bin/ty check python/</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>All checks passed。</td>
+          </tr>
+          <tr>
+            <td><code>cd KotoType &amp;&amp; swift build</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>Build complete。</td>
+          </tr>
+          <tr>
+            <td><code>cd KotoType &amp;&amp; swift test --filter RealtimeRecorderTests</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>19 tests 実行。Apple Voice Processing の既定有効、disable flag、録音開始ログでの有効化を確認。</td>
+          </tr>
+          <tr>
+            <td><code>PYTHONPATH=. .venv/bin/python tools/evaluate_noise_strategies.py</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>最新 run: <code>artifacts/evaluations/noise_preprocess_issue_72/runs/20260609_012439</code>。採用 strategy の優位性を再確認。</td>
+          </tr>
+          <tr>
+            <td><code>make test-smoke-server</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>bundled <code>dist/whisper_server</code> に speech sample を投入し、非空 transcription を確認。</td>
+          </tr>
+          <tr>
+            <td><code>cd KotoType &amp;&amp; swift test</code></td>
+            <td><span class="badge ok">PASS</span></td>
+            <td>251 tests 実行、0 failures。実機マイク/実 Python worker 起動に依存していた <code>IntegrationTests</code> は mock process fixture へ寄せ、CI で安定して検証できる形に整理。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>残るリスクと次の確認</h2>
+      <ul>
+        <li>近距離の背景話者のみ音声は、Python 側 gate だけでは完全には抑制できません。Apple Voice Processing は実装済みですが、実オフィス環境、Mac 内蔵マイク、口元マイクでの dogfooding が必要です。</li>
+        <li>評価データは再現可能な合成データ中心です。Apple Voice Processing は入力デバイス依存のため、同一環境での raw 相当比較と実録評価が残ります。</li>
+        <li>Swift <code>IntegrationTests</code> は実機マイクや実 Python worker 起動へ依存しない fixture に整理済みです。実オフィス環境での最終 dogfooding は別途必要です。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

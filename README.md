@@ -380,28 +380,20 @@ make view-log
 tail -100 ~/Library/Application\ Support/koto-type/server.log
 ```
 
-### Noise Reduction Toggle
+### Noise Preprocessing
 
-Noise reduction is enabled by default in audio preprocessing. To disable it for compatibility reasons:
+Live recording enables Apple Voice Processing before writing batch audio, then the Python backend applies a fixed office-oriented pipeline: light high-pass / low-pass filtering plus stationary denoise. Dynamic normalization and auto gain are intentionally not part of the standard path because they can amplify distant background speech.
+
+For compatibility debugging only, preprocessing can be bypassed:
 
 ```bash
-export KOTOTYPE_ENABLE_NOISE_REDUCTION=0
+export KOTOTYPE_SKIP_AUDIO_PREPROCESSING=1
 ```
 
-### Auto Gain for Quiet Speech
-
-Enabled by default. Automatically amplifies quiet audio before transcription.
+If Apple Voice Processing causes device-specific capture issues, disable only that capture-stage processing:
 
 ```bash
-export KOTOTYPE_AUTO_GAIN_ENABLED=1
-```
-
-Adjust threshold and amplification limits as needed:
-
-```bash
-export KOTOTYPE_AUTO_GAIN_WEAK_THRESHOLD_DBFS=-18
-export KOTOTYPE_AUTO_GAIN_TARGET_PEAK_DBFS=-10
-export KOTOTYPE_AUTO_GAIN_MAX_DB=18
+export KOTOTYPE_DISABLE_APPLE_VOICE_PROCESSING=1
 ```
 
 ### VAD Intensity for Noisy Environments

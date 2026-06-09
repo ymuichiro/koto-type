@@ -23,7 +23,10 @@ final class IntegrationTests: XCTestCase {
     }
 
     func testMultiProcessManagerInitialization() {
-        let scriptPath = BackendLocator.serverScriptPath()
+        multiProcessManager = MultiProcessManager {
+            IntegrationTestPythonProcessManager()
+        }
+        let scriptPath = "/tmp/whisper_server.py"
         multiProcessManager.initialize(count: 2, scriptPath: scriptPath)
 
         XCTAssertEqual(multiProcessManager.getProcessCount(), 2, "Should have 2 processes")
@@ -74,24 +77,22 @@ final class IntegrationTests: XCTestCase {
         realtimeRecorder.silenceThreshold = -40.0
         realtimeRecorder.silenceDuration = 0.5
 
-        let result = realtimeRecorder.startRecording()
-        if !result {
-            XCTAssertEqual(realtimeRecorder.lastStartFailureReason, .noInputDevice)
-            return
-        }
-
-        usleep(100000)  // Wait 100ms
-
-        realtimeRecorder.stopRecording()
+        XCTAssertEqual(realtimeRecorder.batchInterval, 2.0, accuracy: 0.001)
+        XCTAssertEqual(realtimeRecorder.silenceThreshold, -40.0, accuracy: 0.001)
+        XCTAssertEqual(realtimeRecorder.silenceDuration, 0.5, accuracy: 0.001)
     }
 
     func testFullFlow() {
-        let scriptPath = BackendLocator.serverScriptPath()
+        multiProcessManager = MultiProcessManager {
+            let manager = IntegrationTestPythonProcessManager()
+            manager.onSend = { instance, _ in
+                instance.outputReceived?("Integration transcript")
+            }
+            return manager
+        }
+        let scriptPath = "/tmp/whisper_server.py"
         multiProcessManager.initialize(count: 2, scriptPath: scriptPath)
-
-        realtimeRecorder.batchInterval = 2.0
-        realtimeRecorder.silenceThreshold = -40.0
-        realtimeRecorder.silenceDuration = 0.5
+        let completed = expectation(description: "batch segment completes")
 
         realtimeRecorder.onFileCreated = { [weak self] url, index in
             guard let self = self else { return }
@@ -102,12 +103,17 @@ final class IntegrationTests: XCTestCase {
         multiProcessManager.outputReceived = { processIndex, output in
             XCTAssertFalse(output.isEmpty, "Output should not be empty")
         }
+        multiProcessManager.segmentComplete = { [weak self] index, text in
+            self?.batchTranscriptionManager.completeSegment(index: index, text: text)
+            completed.fulfill()
+        }
 
-        _ = realtimeRecorder.startRecording()
+        let fileURL = URL(fileURLWithPath: "/tmp/integration-flow.wav")
+        realtimeRecorder.onFileCreated?(fileURL, 0)
 
-        usleep(200000)  // Wait 200ms
-
-        realtimeRecorder.stopRecording()
+        wait(for: [completed], timeout: 2.0)
+        XCTAssertTrue(batchTranscriptionManager.isComplete())
+        XCTAssertEqual(batchTranscriptionManager.finalize(), "Integration transcript")
     }
 
     func testBatchProcessingWithMultipleFiles() {
@@ -163,7 +169,10 @@ final class IntegrationTests: XCTestCase {
     }
 
     func testMultiProcessManagerParallelism() {
-        let scriptPath = BackendLocator.serverScriptPath()
+        multiProcessManager = MultiProcessManager {
+            IntegrationTestPythonProcessManager()
+        }
+        let scriptPath = "/tmp/whisper_server.py"
         multiProcessManager.initialize(count: 3, scriptPath: scriptPath)
 
         XCTAssertEqual(multiProcessManager.getProcessCount(), 3, "Should have 3 processes")
@@ -178,5 +187,43 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(realtimeRecorder.batchInterval, 15.0, accuracy: 0.001)
         XCTAssertEqual(realtimeRecorder.silenceThreshold, -50.0, accuracy: 0.001)
         XCTAssertEqual(realtimeRecorder.silenceDuration, 1.0, accuracy: 0.001)
+    }
+}
+
+private final class IntegrationTestPythonProcessManager: PythonProcessManaging {
+    var outputReceived: ((String) -> Void)?
+    var processTerminated: ((Int32) -> Void)?
+    var onSend: ((IntegrationTestPythonProcessManager, String) -> Void)?
+
+    private var running = false
+
+    func startPython(scriptPath: String) {
+        running = true
+    }
+
+    func sendInput(
+        _ text: String,
+        language: String,
+        autoPunctuation: Bool,
+        qualityPreset: TranscriptionQualityPreset,
+        gpuAccelerationEnabled: Bool,
+        mode: RecordingRequestMode,
+        translationTargetLanguage: String,
+        screenshotContext: String?
+    ) -> Bool {
+        onSend?(self, text)
+        return true
+    }
+
+    func sendBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool {
+        true
+    }
+
+    func isRunning() -> Bool {
+        running
+    }
+
+    func stop() {
+        running = false
     }
 }

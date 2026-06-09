@@ -16,10 +16,11 @@ final class ImportedAudioTranscriptionManagerTests: XCTestCase {
         let mock = MockPythonProcessManager()
         let manager = ImportedAudioTranscriptionManager(processManager: mock)
         manager.configure(scriptPath: "/tmp/whisper_server.py")
+        let settings = AppSettings(translationTargetLanguage: "ja")
 
         let completionExpectation = expectation(description: "transcription completion")
 
-        manager.transcribe(fileURL: URL(fileURLWithPath: "/tmp/audio.wav"), settings: AppSettings()) { result in
+        manager.transcribe(fileURL: URL(fileURLWithPath: "/tmp/audio.wav"), settings: settings) { result in
             if case let .success(text) = result {
                 XCTAssertEqual(text, "こんにちは")
             } else {
@@ -34,6 +35,11 @@ final class ImportedAudioTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(mock.lastAutoPunctuation ?? false)
         XCTAssertEqual(mock.lastQualityPreset, .high)
         XCTAssertTrue(mock.lastGPUAccelerationEnabled ?? false)
+        XCTAssertEqual(mock.lastMode, .transcribe)
+        XCTAssertEqual(
+            mock.lastTranslationTargetLanguage,
+            AppSettings.defaultTranslationTargetLanguage
+        )
 
         mock.emitOutput("こんにちは")
 
@@ -152,6 +158,8 @@ private final class MockPythonProcessManager: PythonProcessManaging {
     private(set) var lastAutoPunctuation: Bool?
     private(set) var lastQualityPreset: TranscriptionQualityPreset?
     private(set) var lastGPUAccelerationEnabled: Bool?
+    private(set) var lastMode: RecordingRequestMode?
+    private(set) var lastTranslationTargetLanguage: String?
     private(set) var lastScreenshotContext: String?
     private(set) var lastProbeGPUAccelerationEnabled: Bool?
     private(set) var lastProbePreloadModel: Bool?
@@ -169,6 +177,8 @@ private final class MockPythonProcessManager: PythonProcessManaging {
         autoPunctuation: Bool,
         qualityPreset: TranscriptionQualityPreset,
         gpuAccelerationEnabled: Bool,
+        mode: RecordingRequestMode,
+        translationTargetLanguage: String,
         screenshotContext: String?
     ) -> Bool {
         sendInputCallCount += 1
@@ -177,6 +187,8 @@ private final class MockPythonProcessManager: PythonProcessManaging {
         lastAutoPunctuation = autoPunctuation
         lastQualityPreset = qualityPreset
         lastGPUAccelerationEnabled = gpuAccelerationEnabled
+        lastMode = mode
+        lastTranslationTargetLanguage = translationTargetLanguage
         lastScreenshotContext = screenshotContext
         return true
     }

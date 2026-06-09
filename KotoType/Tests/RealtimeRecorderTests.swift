@@ -23,6 +23,8 @@ final class RealtimeRecorderTests: XCTestCase {
         XCTAssertEqual(recorder.batchInterval, 2.0, accuracy: 0.001)
         XCTAssertEqual(recorder.silenceThreshold, -40.0, accuracy: 0.001)
         XCTAssertEqual(recorder.silenceDuration, 0.5, accuracy: 0.001)
+        XCTAssertFalse(recorder.isAppleVoiceProcessingActive)
+        XCTAssertNil(recorder.lastAppleVoiceProcessingErrorDescription)
     }
 
     func testStartRecording() {
@@ -125,6 +127,32 @@ final class RealtimeRecorderTests: XCTestCase {
         XCTAssertNotNil(format)
         if let format {
             XCTAssertTrue(RealtimeRecorder.hasUsableInputFormat(format))
+        }
+    }
+
+    func testAppleVoiceProcessingIsEnabledByDefault() {
+        XCTAssertTrue(RealtimeRecorder.shouldEnableAppleVoiceProcessing(environment: [:]))
+    }
+
+    func testAppleVoiceProcessingCanBeDisabledForCompatibilityDebugging() {
+        for value in ["1", "true", "TRUE", "yes", "on", " On "] {
+            XCTAssertFalse(
+                RealtimeRecorder.shouldEnableAppleVoiceProcessing(
+                    environment: ["KOTOTYPE_DISABLE_APPLE_VOICE_PROCESSING": value]
+                ),
+                "Expected \(value) to disable Apple voice processing"
+            )
+        }
+    }
+
+    func testAppleVoiceProcessingStaysEnabledForFalsyOrUnknownDisableValues() {
+        for value in ["0", "false", "no", "off", "unexpected"] {
+            XCTAssertTrue(
+                RealtimeRecorder.shouldEnableAppleVoiceProcessing(
+                    environment: ["KOTOTYPE_DISABLE_APPLE_VOICE_PROCESSING": value]
+                ),
+                "Expected \(value) to leave Apple voice processing enabled"
+            )
         }
     }
 

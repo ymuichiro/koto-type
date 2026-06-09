@@ -195,6 +195,7 @@ features/*/tests/
 test_*.py
 !tests/python/test_audio_preprocess.py
 !tests/python/test_backend_configuration.py
+!tests/python/test_noise_strategy_eval.py
 !tests/python/test_user_dictionary.py
 
 # End of https://www.toptal.com/developers/gitignore/api/python
@@ -214,6 +215,7 @@ test_*.py
 
 # Runtime artifact bundles
 artifacts/runtime/
+artifacts/evaluations/
 
 # Sparkle / release artifacts
 appcast.xml
