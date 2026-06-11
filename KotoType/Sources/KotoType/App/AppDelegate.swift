@@ -46,6 +46,11 @@ private final class RecordingSessionContext {
     }
 }
 
+private enum DeferredRecordingStartupAction {
+    case stop
+    case cancel
+}
+
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var menuBarController: MenuBarController?
@@ -84,6 +89,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingWorkerReconfigure = false
     private var pendingWorkerReconfigurePreloadModel = false
     private var pendingLiveRecordingProcessingMessage: String?
+    private var startingRecordingSessionID: Int?
+    private var deferredRecordingStartupAction: DeferredRecordingStartupAction?
     private let staleBatchFileMaxAge: TimeInterval = 6 * 60 * 60
     private let temporaryBatchCleanupInterval: TimeInterval = 10 * 60
     private let backendPreparationRetryDelay: TimeInterval = 0.25
@@ -448,6 +455,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         recordingIndicatorWindow?.updateRecordingLevel(0)
         recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
+        startingRecordingSessionID = sessionID
+        deferredRecordingStartupAction = nil
+        recordingIndicatorWindow?.showStartingRecording()
 
         realtimeRecorder?.onFileCreated = { [weak self] url, localIndex in
             guard let self = self else { return }
@@ -481,28 +491,98 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
-        guard realtimeRecorder?.startRecording() == true else {
-            Logger.shared.log("Failed to start recording", level: .error)
-            if realtimeRecorder?.lastStartFailureReason == .noInputDevice {
-                Logger.shared.log("Recording aborted: microphone input device is unavailable", level: .warning)
-                showTransientRecordingAttention("Microphone not detected")
-            }
-            realtimeRecorder?.onInputLevelChanged = nil
-            realtimeRecorder?.onInputDeviceNameChanged = nil
-            realtimeRecorder?.onMaximumDurationReached = nil
-            realtimeRecorder?.maxRecordingDuration = nil
-            recordingIndicatorWindow?.updateRecordingLevel(0)
-            recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
-            isRecording = false
-            activeRecordingSessionID = nil
-            pendingLiveRecordingProcessingMessage = nil
-            pendingRecordingStartMode = nil
-            destroySession(sessionID: sessionID)
+        startAudioRecordingAsync(sessionID: sessionID)
+    }
+
+    private func startAudioRecordingAsync(sessionID: Int) {
+        guard let recorder = realtimeRecorder else {
+            handleRecordingStartupFinished(
+                sessionID: sessionID,
+                didStart: false,
+                failureReason: nil,
+                inputDeviceName: nil
+            )
             return
         }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, weak recorder] in
+            let didStart = recorder?.startRecording() == true
+            let failureReason = recorder?.lastStartFailureReason
+            let inputDeviceName = recorder?.currentInputDeviceName
+
+            Task { @MainActor [weak self] in
+                self?.handleRecordingStartupFinished(
+                    sessionID: sessionID,
+                    didStart: didStart,
+                    failureReason: failureReason,
+                    inputDeviceName: inputDeviceName
+                )
+            }
+        }
+    }
+
+    private func handleRecordingStartupFinished(
+        sessionID: Int,
+        didStart: Bool,
+        failureReason: RecordingStartFailureReason?,
+        inputDeviceName: String?
+    ) {
+        guard startingRecordingSessionID == sessionID else {
+            if didStart {
+                realtimeRecorder?.stopRecording(discardPendingAudio: true)
+            }
+            return
+        }
+
+        startingRecordingSessionID = nil
+        let deferredAction = deferredRecordingStartupAction
+        deferredRecordingStartupAction = nil
+
+        guard isRecording, activeRecordingSessionID == sessionID, sessionByID[sessionID] != nil else {
+            if didStart {
+                realtimeRecorder?.stopRecording(discardPendingAudio: true)
+            }
+            return
+        }
+
+        guard didStart else {
+            handleRecordingStartupFailure(sessionID: sessionID, failureReason: failureReason)
+            return
+        }
+
         Logger.shared.log("Recording started (session \(sessionID))", level: .info)
-        recordingIndicatorWindow?.updateRecordingInputDeviceName(realtimeRecorder?.currentInputDeviceName)
-        recordingIndicatorWindow?.show()
+        recordingIndicatorWindow?.updateRecordingInputDeviceName(inputDeviceName)
+
+        switch deferredAction {
+        case .stop:
+            stopRecording()
+        case .cancel:
+            cancelRecording()
+        case nil:
+            recordingIndicatorWindow?.show()
+        }
+    }
+
+    private func handleRecordingStartupFailure(
+        sessionID: Int,
+        failureReason: RecordingStartFailureReason?
+    ) {
+        Logger.shared.log("Failed to start recording", level: .error)
+        if failureReason == .noInputDevice {
+            Logger.shared.log("Recording aborted: microphone input device is unavailable", level: .warning)
+            showTransientRecordingAttention("Microphone not detected")
+        }
+        realtimeRecorder?.onInputLevelChanged = nil
+        realtimeRecorder?.onInputDeviceNameChanged = nil
+        realtimeRecorder?.onMaximumDurationReached = nil
+        realtimeRecorder?.maxRecordingDuration = nil
+        recordingIndicatorWindow?.updateRecordingLevel(0)
+        recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
+        isRecording = false
+        activeRecordingSessionID = nil
+        pendingLiveRecordingProcessingMessage = nil
+        pendingRecordingStartMode = nil
+        destroySession(sessionID: sessionID)
     }
 
     private func showTransientRecordingAttention(_ message: String) {
@@ -557,6 +637,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if startingRecordingSessionID == sessionID {
+            deferredRecordingStartupAction = .stop
+            Logger.shared.log(
+                "Recording stop deferred until microphone startup completes (session \(sessionID))",
+                level: .info
+            )
+            return
+        }
+
         isRecording = false
         activeRecordingSessionID = nil
         session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
@@ -606,6 +695,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cancelRecording() {
+        if isRecording,
+           let sessionID = activeRecordingSessionID,
+           startingRecordingSessionID == sessionID {
+            deferredRecordingStartupAction = .cancel
+            Logger.shared.log(
+                "Recording cancel deferred until microphone startup completes (session \(sessionID))",
+                level: .info
+            )
+            return
+        }
+
         if let pendingMode = pendingRecordingStartMode, !isRecording {
             pendingRecordingStartMode = nil
             Logger.shared.log(
