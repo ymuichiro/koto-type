@@ -1,7 +1,7 @@
 import AVFoundation
 import CoreAudio
 
-enum RecordingStartFailureReason: Equatable {
+enum RecordingStartFailureReason: Equatable, Sendable {
     case noInputDevice
     case failedToGetInputNode
     case failedToStartAudioEngine

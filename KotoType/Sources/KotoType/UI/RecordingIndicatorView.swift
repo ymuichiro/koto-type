@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum IndicatorState {
+    case starting
     case recording
     case processing
     case completed
@@ -49,11 +50,11 @@ struct RecordingIndicatorView: View {
             return CGSize(width: 280, height: 68)
         }
 
-        if state == .recording {
+        if state == .starting || state == .recording {
             return CGSize(width: 368, height: 84)
         }
 
-        let width: CGFloat = (state == .recording || state == .processing) ? 368 : 124
+        let width: CGFloat = state == .processing ? 368 : 124
         return CGSize(width: width, height: 68)
     }
 
@@ -100,6 +101,11 @@ struct RecordingIndicatorView: View {
     @ViewBuilder
     private var stateContent: some View {
         switch state {
+        case .starting:
+            StartingContent(onCancelTapped: onCancelTapped)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
         case .recording:
             RecordingContent(
                 level: recordingLevel,
@@ -160,6 +166,8 @@ private struct IndicatorBackground: View {
 
     private var accentColor: Color {
         switch state {
+        case .starting:
+            return .red
         case .recording:
             return .red
         case .processing:
@@ -168,6 +176,54 @@ private struct IndicatorBackground: View {
             return .green
         case .attention:
             return .orange
+        }
+    }
+}
+
+private struct StartingContent: View {
+    let onCancelTapped: () -> Void
+    @State private var rotating = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                HStack(spacing: 8) {
+                    ProcessingSpinner(rotating: rotating, color: .red)
+
+                    Text("Starting microphone...")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.9))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button(action: onCancelTapped) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            Circle()
+                                .fill(Color.black.opacity(0.45))
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Cancel recording")
+            }
+
+            ProcessingDots(color: .red)
+                .frame(maxWidth: .infinity, minHeight: 39, maxHeight: 39, alignment: .center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .onAppear {
+            withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                rotating = true
+            }
         }
     }
 }
@@ -355,7 +411,7 @@ private struct ProcessingContent: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             HStack(spacing: 10) {
-                ProcessingSpinner(rotating: rotating)
+                ProcessingSpinner(rotating: rotating, color: .blue)
 
                 if let message, !message.isEmpty {
                     Text(message)
@@ -364,7 +420,7 @@ private struct ProcessingContent: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 } else {
-                    ProcessingDots()
+                    ProcessingDots(color: .blue)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -398,18 +454,19 @@ private struct ProcessingContent: View {
 
 private struct ProcessingSpinner: View {
     let rotating: Bool
+    let color: Color
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.blue.opacity(0.22), lineWidth: 2.5)
+                .stroke(color.opacity(0.22), lineWidth: 2.5)
                 .frame(width: 20, height: 20)
 
             Circle()
                 .trim(from: 0.1, to: 0.78)
                 .stroke(
                     AngularGradient(
-                        colors: [Color.blue.opacity(0.2), Color.blue.opacity(0.95)],
+                        colors: [color.opacity(0.2), color.opacity(0.95)],
                         center: .center
                     ),
                     style: StrokeStyle(lineWidth: 2.8, lineCap: .round)
@@ -421,6 +478,8 @@ private struct ProcessingSpinner: View {
 }
 
 private struct ProcessingDots: View {
+    let color: Color
+
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 18.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
@@ -428,7 +487,7 @@ private struct ProcessingDots: View {
                 ForEach(0..<3, id: \.self) { index in
                     let phase = max(0.2, (sin((t * 7.0) + (Double(index) * 1.1)) + 1) / 2)
                     Circle()
-                        .fill(Color.blue.opacity(0.95))
+                        .fill(color.opacity(0.95))
                         .frame(width: 4, height: 4)
                         .opacity(phase)
                         .scaleEffect(0.8 + (phase * 0.35))

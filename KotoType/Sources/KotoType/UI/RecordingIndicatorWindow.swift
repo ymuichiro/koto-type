@@ -146,6 +146,29 @@ class RecordingIndicatorWindow: NSPanel {
             }
         }
     }
+
+    func showStartingRecording() {
+        if Thread.isMainThread {
+            renderStartingRecording()
+        } else {
+            DispatchQueue.main.async {
+                self.renderStartingRecording()
+            }
+        }
+    }
+
+    private func renderStartingRecording() {
+        let shouldAnimate = !isVisible || alphaValue < 0.99
+        render(state: .starting, attentionMessage: nil, processingMessage: nil, ensureVisible: true)
+
+        if shouldAnimate {
+            alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                animator().alphaValue = 1.0
+            }
+        }
+    }
     
     func showProcessing(message: String? = nil) {
         DispatchQueue.main.async {
