@@ -484,6 +484,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 url: url,
                 index: globalIndex,
                 settings: self.currentSettings,
+                sessionID: sessionID,
                 screenshotContext: screenshotContext,
                 mode: currentSession.mode,
                 translationTargetLanguage: currentSession.translationTargetLanguage,
@@ -789,6 +790,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let session = sessionByID.removeValue(forKey: sessionID) else {
             return
         }
+        multiProcessManager?.cancel(sessionID: sessionID)
         session.cancelFinalizationReadyWorkItem()
         session.cancelCompletionTimeout()
         cleanupPendingSegmentFiles(forSessionID: sessionID)

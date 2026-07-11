@@ -189,6 +189,25 @@ final class RealtimeRecorderTests: XCTestCase {
         XCTAssertFalse(shouldSplit)
     }
 
+    func testChunkSplitTimingResetsForNextChunk() {
+        XCTAssertTrue(
+            RealtimeRecorder.shouldSplitChunk(
+                elapsedTime: 10.0,
+                timeSinceLastSound: 0.5,
+                batchInterval: 10.0,
+                silenceDuration: 0.5
+            )
+        )
+        XCTAssertFalse(
+            RealtimeRecorder.shouldSplitChunk(
+                elapsedTime: 0.1,
+                timeSinceLastSound: 0.1,
+                batchInterval: 10.0,
+                silenceDuration: 0.5
+            )
+        )
+    }
+
     func testShouldAutoStopRecordingWhenElapsedTimeReachesMaximumDuration() {
         XCTAssertTrue(
             RealtimeRecorder.shouldAutoStopRecording(

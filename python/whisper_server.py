@@ -16,6 +16,7 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from math import inf, log10, sqrt
 from typing import Protocol, cast
 import wave
@@ -324,6 +325,26 @@ def scan_wav_activity(
     window_ms=DEFAULT_ACTIVITY_WINDOW_MS,
     activity_threshold_dbfs=DEFAULT_ACTIVITY_THRESHOLD_DBFS,
 ):
+    stat = os.stat(wav_path)
+    return _scan_wav_activity_cached(
+        str(wav_path),
+        window_ms,
+        activity_threshold_dbfs,
+        stat.st_size,
+        stat.st_mtime_ns,
+    )
+
+
+@lru_cache(maxsize=32)
+def _scan_wav_activity_cached(
+    wav_path,
+    window_ms=DEFAULT_ACTIVITY_WINDOW_MS,
+    activity_threshold_dbfs=DEFAULT_ACTIVITY_THRESHOLD_DBFS,
+    _file_size=None,
+    _modified_at_ns=None,
+):
+    import numpy as np
+
     max_peak = 0
     active_windows = 0
     total_windows = 0
@@ -354,21 +375,10 @@ def scan_wav_activity(
 
             total_windows += 1
             total_samples += frame_count
-            squared_sum = 0.0
-            window_peak = 0
-
-            for frame_index in range(frame_count):
-                offset = frame_index * sample_width * channel_count
-                sample_bytes = frames[offset : offset + sample_width]
-                sample_value = int.from_bytes(
-                    sample_bytes,
-                    byteorder="little",
-                    signed=True,
-                )
-                abs_sample = abs(sample_value)
-                if abs_sample > window_peak:
-                    window_peak = abs_sample
-                squared_sum += float(sample_value * sample_value)
+            samples = np.frombuffer(frames, dtype="<i2").reshape(-1, channel_count)[:, 0]
+            samples64 = samples.astype(np.float64)
+            window_peak = int(np.max(np.abs(samples64)))
+            squared_sum = float(np.dot(samples64, samples64))
 
             if window_peak > max_peak:
                 max_peak = window_peak

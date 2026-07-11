@@ -8,8 +8,8 @@ struct LiveTranscriptionPolicy: Equatable {
 
     static let cpuSafeRecordingMaxDuration: TimeInterval = 60
     static let mlxRecordingMaxDuration: TimeInterval = 600
-    static let cpuSafeProcessingTimeout: TimeInterval = 600
-    static let mlxProcessingTimeout: TimeInterval = 3_600
+    static let cpuSafeProcessingTimeout: TimeInterval = 120
+    static let mlxProcessingTimeout: TimeInterval = 300
 
     let mode: Mode
     let recordingMaxDuration: TimeInterval

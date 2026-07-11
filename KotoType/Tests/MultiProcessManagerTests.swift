@@ -85,7 +85,7 @@ final class MultiProcessManagerTests: XCTestCase {
         )
 
         wait(for: [completion], timeout: 4.0)
-        XCTAssertEqual(sendAttempts.value, 3)
+        XCTAssertEqual(sendAttempts.value, 1)
     }
 
     func testProcessFileUsesPerRequestTimeoutOverride() {
@@ -123,7 +123,7 @@ final class MultiProcessManagerTests: XCTestCase {
         )
 
         wait(for: [completion], timeout: 4.0)
-        XCTAssertEqual(sendAttempts.value, 3)
+        XCTAssertEqual(sendAttempts.value, 1)
     }
 
     func testProcessFilePassesTranslateModeAndTargetLanguage() {
@@ -160,6 +160,110 @@ final class MultiProcessManagerTests: XCTestCase {
         XCTAssertEqual(created.count, 1)
         XCTAssertEqual(created[0].receivedModes, [.translate])
         XCTAssertEqual(created[0].receivedTranslationTargetLanguages, ["pt-br"])
+    }
+
+    func testPendingSegmentsAreAssignedInFIFOOrderWithoutPolling() {
+        let completed = expectation(description: "all queued segments complete")
+        completed.expectedFulfillmentCount = 3
+        let sendOrder = LockedStringArray()
+        var worker: MockMultiProcessPythonManager!
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            mock.onSend = { instance, path in
+                sendOrder.append(path)
+                if path != "/tmp/first.wav" {
+                    instance.outputReceived?(path)
+                }
+            }
+            worker = mock
+            return mock
+        }
+        manager.segmentComplete = { _, _ in completed.fulfill() }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+
+        for (index, name) in ["first", "second", "third"].enumerated() {
+            manager.processFile(
+                url: URL(fileURLWithPath: "/tmp/\(name).wav"),
+                index: index,
+                settings: AppSettings()
+            )
+        }
+
+        XCTAssertEqual(manager.getPendingSegmentCount(), 2)
+        worker.outputReceived?("first")
+        wait(for: [completed], timeout: 2.0)
+        XCTAssertEqual(
+            sendOrder.value,
+            ["/tmp/first.wav", "/tmp/second.wav", "/tmp/third.wav"]
+        )
+        XCTAssertEqual(manager.getPendingSegmentCount(), 0)
+    }
+
+    func testOneHundredSegmentsEnqueueWithoutMainQueuePolling() {
+        let manager = MultiProcessManager {
+            MockMultiProcessPythonManager(sendSucceeds: true)
+        }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/held.wav"),
+            index: 0,
+            settings: AppSettings(),
+            sessionID: 901
+        )
+
+        let startedAt = Date()
+        for index in 1..<100 {
+            manager.processFile(
+                url: URL(fileURLWithPath: "/tmp/queued-\(index).wav"),
+                index: index,
+                settings: AppSettings(),
+                sessionID: 901
+            )
+        }
+
+        XCTAssertEqual(manager.getPendingSegmentCount(), 99)
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 1)
+        manager.cancel(sessionID: 901)
+        XCTAssertEqual(manager.getPendingSegmentCount(), 0)
+    }
+
+    func testCancelRemovesQueuedWorkAndRestartsRunningWorker() {
+        let unexpectedCompletion = expectation(description: "cancelled segment must not complete")
+        unexpectedCompletion.isInverted = true
+        var created: [MockMultiProcessPythonManager] = []
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            created.append(mock)
+            return mock
+        }
+        manager.segmentComplete = { index, _ in
+            if index == 50 || index == 51 {
+                unexpectedCompletion.fulfill()
+            }
+        }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/running.wav"),
+            index: 50,
+            settings: AppSettings(),
+            sessionID: 900
+        )
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/queued.wav"),
+            index: 51,
+            settings: AppSettings(),
+            sessionID: 900
+        )
+
+        XCTAssertEqual(manager.getPendingSegmentCount(), 1)
+        manager.cancel(sessionID: 900)
+        XCTAssertEqual(manager.getPendingSegmentCount(), 0)
+        XCTAssertEqual(created.count, 2)
+        XCTAssertEqual(created[0].stopCallCount, 1)
+        created[0].outputReceived?("late")
+        wait(for: [unexpectedCompletion], timeout: 0.2)
     }
 
     func testProcessFileRetryPreservesTranslateModeAndTargetLanguage() {

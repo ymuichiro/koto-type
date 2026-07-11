@@ -34,6 +34,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     
     private var lastSoundTime: TimeInterval = 0
     private var recordingStartTime: TimeInterval = 0
+    private var chunkStartTime: TimeInterval = 0
     private var hasRecordedContent = false
     private var lastReportedInputLevel: Float = 0
     private var lastReportedInputDeviceName: String?
@@ -94,7 +95,8 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         audioBuffer.removeAll()
         fileCount = 0
         lastSoundTime = Date().timeIntervalSince1970
-        recordingStartTime = Date().timeIntervalSince1970
+        recordingStartTime = lastSoundTime
+        chunkStartTime = lastSoundTime
         hasRecordedContent = false
         hasReachedMaximumDuration = false
         lastRecordingDuration = 0
@@ -177,6 +179,19 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             hasRecordedContent = true
         }
 
+        if hasRecordedContent,
+           Self.shouldSplitChunk(
+               elapsedTime: currentTime - chunkStartTime,
+               timeSinceLastSound: currentTime - lastSoundTime,
+               batchInterval: batchInterval,
+               silenceDuration: silenceDuration
+           ),
+           createAudioFile() {
+            chunkStartTime = currentTime
+            lastSoundTime = currentTime
+            hasRecordedContent = false
+        }
+
         if let maxRecordingDuration,
            !hasReachedMaximumDuration,
            Self.shouldAutoStopRecording(
@@ -195,10 +210,11 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         }
     }
     
-    private func createAudioFile(force: Bool = false) {
+    @discardableResult
+    private func createAudioFile(force: Bool = false) -> Bool {
         guard force || audioBuffer.count >= 4096 else {
             Logger.shared.log("RealtimeRecorder: not enough audio data to create file", level: .debug)
-            return
+            return false
         }
         
         let sampleRate = Self.normalizeSampleRate(capturedSampleRate)
@@ -221,7 +237,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
                 "RealtimeRecorder: failed to create temporary batch directory \(tempBatchDirectory.path): \(error)",
                 level: .error
             )
-            return
+            return false
         }
 
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
@@ -258,8 +274,10 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             }
             
             audioBuffer.removeAll()
+            return true
         } catch {
             Logger.shared.log("RealtimeRecorder: failed to create audio file: \(error)", level: .error)
+            return false
         }
     }
 

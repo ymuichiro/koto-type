@@ -4,6 +4,8 @@ final class MultiProcessManager: @unchecked Sendable {
     private var processes: [Int: any PythonProcessManaging] = [:]
     private var idleProcesses: Set<Int> = []
     private var segmentContextByProcess: [Int: SegmentContext] = [:]
+    private var pendingSegments: [PendingSegment] = []
+    private var cancelledSessionIDs: Set<Int> = []
     private var healthCheckContextByProcess: [Int: HealthCheckContext] = [:]
     private var backendProbeContextByProcess: [Int: BackendProbeContext] = [:]
     private var lastHealthCheckAtByProcess: [Int: Date] = [:]
@@ -27,7 +29,7 @@ final class MultiProcessManager: @unchecked Sendable {
     private let startFailureWindowSeconds: TimeInterval = 30
     private let startFailureCooldownSeconds: TimeInterval = 300
     private let startFailureBaseDelaySeconds: TimeInterval = 0.5
-    private let maxNoIdleQueueAttempts = 200
+    private let maxPendingSegments = 200
     private let segmentProcessingTimeoutSeconds: TimeInterval
     private let watchdogIntervalSeconds: TimeInterval
     private let healthCheckIntervalSeconds: TimeInterval
@@ -84,6 +86,8 @@ final class MultiProcessManager: @unchecked Sendable {
         self.processes.removeAll()
         self.idleProcesses.removeAll()
         self.segmentContextByProcess.removeAll()
+        self.pendingSegments.removeAll()
+        self.cancelledSessionIDs.removeAll()
         self.healthCheckContextByProcess.removeAll()
         self.backendProbeContextByProcess.removeAll()
         self.lastHealthCheckAtByProcess.removeAll()
@@ -117,28 +121,53 @@ final class MultiProcessManager: @unchecked Sendable {
         url: URL,
         index: Int,
         settings: AppSettings,
+        sessionID: Int? = nil,
         screenshotContext: String? = nil,
         mode: RecordingRequestMode = .transcribe,
         translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
         retryCount: Int = 0,
-        queueAttempt: Int = 0,
         processingTimeout: TimeInterval? = nil
     ) {
         Logger.shared.log("MultiProcessManager: processFile called - url=\(url.path), index=\(index)", level: .info)
         processLock.lock()
+        if let sessionID, cancelledSessionIDs.contains(sessionID) {
+            processLock.unlock()
+            Logger.shared.log(
+                "MultiProcessManager: ignoring segment \(index) for cancelled session \(sessionID)",
+                level: .info
+            )
+            return
+        }
         if isStopping {
             processLock.unlock()
             Logger.shared.log("MultiProcessManager: ignoring processFile because manager is stopping", level: .warning)
             return
         }
-        let availableProcess = preferredIdleProcessIndex()
-        let processCount = processes.count
+        let context = SegmentContext(
+            url: url,
+            index: index,
+            settings: settings,
+            mode: mode,
+            translationTargetLanguage: translationTargetLanguage,
+            retryCount: retryCount,
+            sessionID: sessionID,
+            processingTimeout: max(0.1, processingTimeout ?? segmentProcessingTimeoutSeconds)
+        )
+        let availableProcess = preferredIdleProcessIndexLocked()
+        var didEnqueue = false
+        if let availableProcess {
+            idleProcesses.remove(availableProcess)
+        } else if pendingSegments.count < maxPendingSegments {
+            pendingSegments.append(PendingSegment(context: context, enqueuedAt: Date()))
+            didEnqueue = true
+        }
+        let queueDepth = pendingSegments.count
         processLock.unlock()
         
         guard let processIndex = availableProcess else {
-            if processCount == 0 && queueAttempt >= maxNoIdleQueueAttempts {
+            if !didEnqueue {
                 Logger.shared.log(
-                    "MultiProcessManager: no workers available for segment \(index) after \(queueAttempt) attempts; completing with empty result",
+                    "MultiProcessManager: pending queue is full for segment \(index); completing with empty result",
                     level: .error
                 )
                 DispatchQueue.main.async { [weak self] in
@@ -147,24 +176,14 @@ final class MultiProcessManager: @unchecked Sendable {
                 return
             }
 
-            Logger.shared.log("MultiProcessManager: no idle process available, queuing file: \(url.path)", level: .warning)
+            Logger.shared.log(
+                "MultiProcessManager: queued segment \(index) (depth=\(queueDepth))",
+                level: .info
+            )
             if screenshotContext != nil {
                 Logger.shared.log(
                     "MultiProcessManager: dropping queued screenshot context for segment \(index) to avoid retaining OCR text in memory",
                     level: .warning
-                )
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.processFile(
-                    url: url,
-                    index: index,
-                    settings: settings,
-                    screenshotContext: nil,
-                    mode: mode,
-                    translationTargetLanguage: translationTargetLanguage,
-                    retryCount: retryCount,
-                    queueAttempt: queueAttempt + 1,
-                    processingTimeout: processingTimeout
                 )
             }
             return
@@ -173,15 +192,7 @@ final class MultiProcessManager: @unchecked Sendable {
         Logger.shared.log("MultiProcessManager: assigning file to process \(processIndex)", level: .debug)
         assignProcess(
             processIndex: processIndex,
-            context: SegmentContext(
-                url: url,
-                index: index,
-                settings: settings,
-                mode: mode,
-                translationTargetLanguage: translationTargetLanguage,
-                retryCount: retryCount,
-                processingTimeout: max(0.1, processingTimeout ?? segmentProcessingTimeoutSeconds)
-            ),
+            context: context,
             screenshotContext: screenshotContext
         )
     }
@@ -247,6 +258,7 @@ final class MultiProcessManager: @unchecked Sendable {
                 lastHealthCheckAtByProcess[processIndex] = now
                 processLock.unlock()
                 Logger.shared.log("MultiProcessManager: health check passed for process \(processIndex)", level: .debug)
+                drainPendingSegments()
                 return
             }
             processLock.unlock()
@@ -290,6 +302,7 @@ final class MultiProcessManager: @unchecked Sendable {
                 "MultiProcessManager: backend probe completed for process \(processIndex): backend=\(status.effectiveBackend.rawValue), gpuRequested=\(status.gpuRequested), gpuAvailable=\(status.gpuAvailable), fallbackReason=\(status.fallbackReason ?? "none")",
                 level: .debug
             )
+            drainPendingSegments()
             return
         }
 
@@ -327,6 +340,7 @@ final class MultiProcessManager: @unchecked Sendable {
             self?.outputReceived?(processIndex, output)
             self?.segmentComplete?(context.index, output)
         }
+        drainPendingSegments()
     }
 
     private func handleProcessTermination(processIndex: Int, status: Int32) {
@@ -381,7 +395,7 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.unlock()
 
         recoverProcess(processIndex: processIndex)
-        retryOrCompleteWithEmpty(context: context)
+        retryOrCompleteWithEmpty(context: context, reason: reason)
     }
 
     private func handleFatalTermination(processIndex: Int, status: Int32, context: SegmentContext?) {
@@ -421,7 +435,17 @@ final class MultiProcessManager: @unchecked Sendable {
         scheduleRecovery(processIndex: processIndex, delay: fatalIdleTerminationCooldownSeconds)
     }
 
-    private func retryOrCompleteWithEmpty(context: SegmentContext) {
+    private func retryOrCompleteWithEmpty(context: SegmentContext, reason: String) {
+        if reason == "segment_timeout" {
+            Logger.shared.log(
+                "MultiProcessManager: segment \(context.index) timed out; completing without repeating the same expensive inference",
+                level: .error
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.segmentComplete?(context.index, "")
+            }
+            return
+        }
         guard context.retryCount < maxRetryCount else {
             Logger.shared.log(
                 "MultiProcessManager: max retry reached for segment \(context.index), completing with empty result",
@@ -444,11 +468,11 @@ final class MultiProcessManager: @unchecked Sendable {
                     url: context.url,
                     index: context.index,
                     settings: context.settings,
+                    sessionID: context.sessionID,
                     screenshotContext: nil,
                     mode: context.mode,
                     translationTargetLanguage: context.translationTargetLanguage,
                     retryCount: nextRetry,
-                    queueAttempt: 0,
                     processingTimeout: context.processingTimeout
                 )
             }
@@ -526,6 +550,7 @@ final class MultiProcessManager: @unchecked Sendable {
             lastHealthCheckAtByProcess[processIndex] = now
             processLock.unlock()
             Logger.shared.log("MultiProcessManager: process \(processIndex) initialized", level: .debug)
+            drainPendingSegments()
             return
         }
 
@@ -737,11 +762,20 @@ final class MultiProcessManager: @unchecked Sendable {
         var timedOutBackendProbes: [(Int, BackendProbeContext)] = []
         var stoppedProcessesWithoutContext: [Int] = []
         var healthChecksToSend: [(Int, String)] = []
+        var expiredPendingSegments: [SegmentContext] = []
 
         processLock.lock()
         guard !isStopping else {
             processLock.unlock()
             return
+        }
+
+        pendingSegments.removeAll { pending in
+            guard now.timeIntervalSince(pending.enqueuedAt) >= pending.context.processingTimeout else {
+                return false
+            }
+            expiredPendingSegments.append(pending.context)
+            return true
         }
 
         for processIndex in Array(segmentContextByProcess.keys) {
@@ -807,6 +841,16 @@ final class MultiProcessManager: @unchecked Sendable {
             healthChecksToSend.append((processIndex, token))
         }
         processLock.unlock()
+
+        for context in expiredPendingSegments {
+            Logger.shared.log(
+                "MultiProcessManager: queued segment \(context.index) expired before assignment",
+                level: .error
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.segmentComplete?(context.index, "")
+            }
+        }
 
         for (processIndex, context) in timedOutSegments {
             Logger.shared.log(
@@ -894,6 +938,8 @@ final class MultiProcessManager: @unchecked Sendable {
         processes.removeAll()
         idleProcesses.removeAll()
         segmentContextByProcess.removeAll()
+        pendingSegments.removeAll()
+        cancelledSessionIDs.removeAll()
         healthCheckContextByProcess.removeAll()
         backendProbeContextByProcess.removeAll()
         lastHealthCheckAtByProcess.removeAll()
@@ -923,6 +969,39 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.lock()
         defer { processLock.unlock() }
         return idleProcesses.count
+    }
+
+    func getPendingSegmentCount() -> Int {
+        processLock.lock()
+        defer { processLock.unlock() }
+        return pendingSegments.count
+    }
+
+    func cancel(sessionID: Int) {
+        var processIndexesToRecover: [Int] = []
+        processLock.lock()
+        cancelledSessionIDs.insert(sessionID)
+        let pendingBefore = pendingSegments.count
+        pendingSegments.removeAll { $0.context.sessionID == sessionID }
+        let removedPendingCount = pendingBefore - pendingSegments.count
+        for (processIndex, context) in segmentContextByProcess where context.sessionID == sessionID {
+            processIndexesToRecover.append(processIndex)
+        }
+        processLock.unlock()
+
+        Logger.shared.log(
+            "MultiProcessManager: cancelled session \(sessionID) (queued=\(removedPendingCount), running=\(processIndexesToRecover.count))",
+            level: .info
+        )
+        for processIndex in processIndexesToRecover {
+            recoverProcess(processIndex: processIndex)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            self.processLock.lock()
+            self.cancelledSessionIDs.remove(sessionID)
+            self.processLock.unlock()
+        }
     }
 
     @discardableResult
@@ -974,6 +1053,28 @@ final class MultiProcessManager: @unchecked Sendable {
     private func preferredIdleProcessIndexLocked() -> Int? {
         idleProcesses.min()
     }
+
+    private func drainPendingSegments() {
+        while true {
+            processLock.lock()
+            guard !isStopping,
+                  let processIndex = preferredIdleProcessIndexLocked(),
+                  !pendingSegments.isEmpty else {
+                processLock.unlock()
+                return
+            }
+            idleProcesses.remove(processIndex)
+            let pending = pendingSegments.removeFirst()
+            let remainingDepth = pendingSegments.count
+            processLock.unlock()
+
+            Logger.shared.log(
+                "MultiProcessManager: dequeued segment \(pending.context.index) after \(String(format: "%.3f", Date().timeIntervalSince(pending.enqueuedAt)))s (remaining=\(remainingDepth))",
+                level: .info
+            )
+            assignProcess(processIndex: processIndex, context: pending.context, screenshotContext: nil)
+        }
+    }
 }
 
 private struct SegmentContext {
@@ -983,8 +1084,14 @@ private struct SegmentContext {
     let mode: RecordingRequestMode
     let translationTargetLanguage: String
     let retryCount: Int
+    let sessionID: Int?
     let processingTimeout: TimeInterval
     var assignedAt: Date = .distantPast
+}
+
+private struct PendingSegment {
+    let context: SegmentContext
+    let enqueuedAt: Date
 }
 
 private struct HealthCheckContext {
