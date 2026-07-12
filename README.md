@@ -144,7 +144,8 @@ make help
 - `make test-transcription` - Run audio preprocessing and transcription-related unit tests
 - `make test-user-dictionary` - Run user dictionary unit tests
 - `make test-smoke-server` - Run packaged server smoke tests
-- `make test-benchmark` - Legacy alias for `make test-smoke-server`
+- `make test-benchmark` - Run the reproducible MLX accuracy/latency benchmark (5 measured runs after warmup)
+- `make check-benchmark BASELINE=... CANDIDATE=...` - Reject accuracy or speed regressions
 - `make test-all` - Run all tests
 
 #### Build Commands
@@ -350,8 +351,11 @@ make test-transcription
 # Packaged server smoke tests
 make test-smoke-server
 
-# Compatibility alias for the packaged server smoke test
+# Reproducible accuracy and latency benchmark
 make test-benchmark
+
+# Compare two benchmark result files; exits non-zero on any regression
+make check-benchmark BASELINE=path/to/baseline.json CANDIDATE=path/to/candidate.json
 
 # Run all tests
 make test-all

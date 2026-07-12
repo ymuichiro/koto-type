@@ -31,6 +31,33 @@ class AudioPreprocessTests(unittest.TestCase):
         self.assertNotIn("afftdn", candidates[1])
         self.assertNotIn("dynaudnorm", candidates[1])
 
+    def test_build_audio_filter_chain_candidates_can_skip_denoise(self):
+        candidates = whisper_server.build_audio_filter_chain_candidates(skip_denoise=True)
+
+        self.assertEqual(candidates, ["highpass=f=120,lowpass=f=6800"])
+
+    def test_audio_preprocess_fast_path_skips_resampling_and_denoise(self):
+        fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=True)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "clear.wav"
+            write_mono_pcm16_wav(input_path, [(1.0, 9000)])
+
+            logs = []
+            output_path = whisper_server.audio_preprocess(
+                str(input_path),
+                logs.append,
+                ffmpeg_module=fake_ffmpeg,
+            )
+
+            self.assertTrue(output_path.endswith("_processed.wav"))
+            self.assertEqual(fake_ffmpeg.run_call_count, 1)
+            self.assertEqual(
+                fake_ffmpeg.output_history[0],
+                {"af": "highpass=f=120,lowpass=f=6800"},
+            )
+            self.assertTrue(any("skipping denoise filter" in line for line in logs))
+
     def test_audio_preprocess_retries_without_denoise_filter(self):
         fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=True)
 
@@ -197,6 +224,21 @@ class AudioPreprocessTests(unittest.TestCase):
             self.assertFalse(
                 whisper_server.should_skip_transcription_for_low_activity(stats)
             )
+
+    def test_activity_scan_is_reused_for_mlx_active_clip(self):
+        whisper_server._scan_wav_activity_cached.cache_clear()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            wav_path = Path(temp_dir) / "speech.wav"
+            write_mono_pcm16_wav(wav_path, [(0.3, 0), (0.5, 9000), (0.3, 0)])
+
+            whisper_server.analyze_wav_activity(str(wav_path))
+            before = whisper_server._scan_wav_activity_cached.cache_info()
+            whisper_server.build_active_clip_timestamps(str(wav_path))
+            after = whisper_server._scan_wav_activity_cached.cache_info()
+
+            self.assertEqual(before.misses, 1)
+            self.assertEqual(after.misses, 1)
+            self.assertEqual(after.hits, 1)
 
     def test_confidence_gate_suppresses_low_logprob_hallucination(self):
         decision = whisper_server.evaluate_transcription_confidence_gate(
@@ -393,6 +435,7 @@ class FakeFFmpegModule:
         self.fail_on_denoise = fail_on_denoise
         self.fail_after_write = fail_after_write
         self.filter_history = []
+        self.output_history = []
         self.run_call_count = 0
 
     def input(self, input_path):
@@ -405,10 +448,11 @@ class FakeFFmpegPipeline:
         self.filter_chain = ""
         self.output_path = None
 
-    def output(self, output_path, acodec, ac, ar, af):
-        self.filter_chain = af
+    def output(self, output_path, **options):
+        self.filter_chain = options["af"]
         self.output_path = output_path
-        self.module.filter_history.append(af)
+        self.module.filter_history.append(self.filter_chain)
+        self.module.output_history.append(options)
         return self
 
     def overwrite_output(self):

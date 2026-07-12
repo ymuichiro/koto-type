@@ -1,0 +1,31 @@
+name: Transcription Benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run unit tests
+        run: make test-all
+      - name: Run benchmark
+        env:
+          KOTOTYPE_BENCHMARK_POWER_SOURCE: github-hosted
+        run: make test-benchmark
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v6
+        with:
+          name: transcription-benchmark-${{ github.sha }}
+          path: artifacts/evaluations/noise_preprocess_issue_72/runs/

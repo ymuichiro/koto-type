@@ -67,7 +67,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isCancelingImportedAudioTranscription = false
     private var didSuspendRealtimeWorkersForImport = false
     private var pressedRecordingModes: Set<RecordingRequestMode> = []
-    private var pendingRecordingStartMode: RecordingRequestMode?
     private var importedAudioTranscriptionManager: ImportedAudioTranscriptionManager?
     private var serverScriptPath: String = ""
     private var currentSettings: AppSettings = AppSettings()
@@ -85,7 +84,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var temporaryBatchCleanupTimer: DispatchSourceTimer?
     private var adaptiveWorkerCap: Int?
     private var currentRealtimeWorkerCount = 0
-    private var isAwaitingPreparedRealtimeBackend = false
     private var pendingWorkerReconfigure = false
     private var pendingWorkerReconfigurePreloadModel = false
     private var pendingLiveRecordingProcessingMessage: String?
@@ -119,26 +117,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             bundlePath: bundlePath
         )
         return (max(1, workerCount), 1)
-    }
-
-    nonisolated static func shouldWaitForWarmRealtimeBackend(
-        keepBackendReadyInBackground: Bool,
-        currentBackendStatus: TranscriptionBackendStatus?,
-        isAwaitingPreparedRealtimeBackend: Bool,
-        hasExpectedRealtimeWorkers: Bool
-    ) -> Bool {
-        keepBackendReadyInBackground
-            && (
-                currentBackendStatus == nil
-                    || isAwaitingPreparedRealtimeBackend
-                    || !hasExpectedRealtimeWorkers
-            )
-    }
-
-    nonisolated static func backendPreparationIndicatorMessage(
-        progress: BackendPreparationProgress?
-    ) -> String {
-        progress?.displayTitle ?? "Preparing backend..."
     }
 
     // Dispatch source handlers run on their configured queue, so create a nonisolated
@@ -388,28 +366,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         currentSettings = SettingsManager.shared.load()
-        if shouldDelayRecordingUntilBackendReady() {
-            ensureRealtimeWorkersInitialized(
-                reason: "recording start",
-                preloadModel: true
-            )
-            guard pendingRecordingStartMode == nil else {
-                return
-            }
-            pendingRecordingStartMode = mode
-            indicatorPresentation.beginNonLivePresentation()
-            recordingIndicatorWindow?.showProcessing(
-                message: Self.backendPreparationIndicatorMessage(
-                    progress: BackendPreparationProgressStore.shared.currentProgress
-                )
-            )
-            Logger.shared.log(
-                "Recording request is waiting for backend preparation to complete: mode=\(mode.rawValue)",
-                level: .info
-            )
-            return
-        }
-
         beginRecordingSession(mode: mode)
     }
 
@@ -425,7 +381,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         session.liveTranscriptionPolicy = liveTranscriptionPolicy
         pendingLiveRecordingProcessingMessage = nil
-        pendingRecordingStartMode = nil
         isRecording = true
         activeRecordingSessionID = sessionID
         indicatorPresentation.beginLiveSession(sessionID)
@@ -434,10 +389,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             level: .info
         )
 
-        ensureRealtimeWorkersInitialized(
-            reason: "recording start",
-            preloadModel: true
-        )
+        // Configure the manager callback before recording; the live recording is
+        // intentionally submitted as one file after stop (Issue #65).
+        ensureMultiProcessManagerCreatedIfNeeded()
         realtimeRecorder?.maxRecordingDuration = liveTranscriptionPolicy.recordingMaxDuration
         realtimeRecorder?.onInputLevelChanged = { [weak self] level in
             self?.recordingIndicatorWindow?.updateRecordingLevel(CGFloat(level))
@@ -484,6 +438,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 url: url,
                 index: globalIndex,
                 settings: self.currentSettings,
+                sessionID: sessionID,
                 screenshotContext: screenshotContext,
                 mode: currentSession.mode,
                 translationTargetLanguage: currentSession.translationTargetLanguage,
@@ -491,7 +446,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
+        // Start workers before the recorder so the completed recording can be
+        // submitted immediately; model preparation remains asynchronous.
+        ensureRealtimeWorkersInitialized(
+            reason: "recording worker startup",
+            preloadModel: false
+        )
         startAudioRecordingAsync(sessionID: sessionID)
+        // Model/backend preparation remains asynchronous and must not gate the hotkey.
+        scheduleBackendPreparation(
+            reason: "recording start",
+            preloadModel: true
+        )
     }
 
     private func startAudioRecordingAsync(sessionID: Int) {
@@ -581,7 +547,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         isRecording = false
         activeRecordingSessionID = nil
         pendingLiveRecordingProcessingMessage = nil
-        pendingRecordingStartMode = nil
         destroySession(sessionID: sessionID)
     }
 
@@ -605,11 +570,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleRecordingHotkeyReleased(_ mode: RecordingRequestMode) {
         pressedRecordingModes.remove(mode)
 
-        if pendingRecordingStartMode == mode && !isRecording {
-            stopRecording()
-            return
-        }
-
         guard isRecording,
               let sessionID = activeRecordingSessionID,
               let session = sessionByID[sessionID],
@@ -621,18 +581,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func stopRecording() {
-        if let pendingMode = pendingRecordingStartMode {
-            pendingRecordingStartMode = nil
-            Logger.shared.log(
-                "Recording request cancelled while backend preparation was still in progress: mode=\(pendingMode.rawValue)",
-                level: .info
-            )
-            if !isImportingAudio {
-                recordingIndicatorWindow?.hide()
-            }
-            return
-        }
-
         guard isRecording, let sessionID = activeRecordingSessionID, let session = sessionByID[sessionID] else {
             return
         }
@@ -703,16 +651,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 "Recording cancel deferred until microphone startup completes (session \(sessionID))",
                 level: .info
             )
-            return
-        }
-
-        if let pendingMode = pendingRecordingStartMode, !isRecording {
-            pendingRecordingStartMode = nil
-            Logger.shared.log(
-                "Cancelled pending recording while backend was preparing: mode=\(pendingMode.rawValue)",
-                level: .info
-            )
-            recordingIndicatorWindow?.hide()
             return
         }
 
@@ -789,6 +727,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let session = sessionByID.removeValue(forKey: sessionID) else {
             return
         }
+        multiProcessManager?.cancel(sessionID: sessionID)
         session.cancelFinalizationReadyWorkItem()
         session.cancelCompletionTimeout()
         cleanupPendingSegmentFiles(forSessionID: sessionID)
@@ -1130,12 +1069,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         multiProcessManager.initialize(count: effectiveWorkerCount, scriptPath: serverScriptPath)
         currentRealtimeWorkerCount = effectiveWorkerCount
-        isAwaitingPreparedRealtimeBackend = preloadModel
         Logger.shared.log(
             "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason)); backend=\(preferredRealtimeBackend().rawValue), backend limits activeServers=\(backendLimits.maxActiveServers), parallelModelLoads=\(backendLimits.maxParallelModelLoads)",
             level: .info
         )
-        scheduleBackendPreparation(reason: reason, preloadModel: preloadModel)
+        if preloadModel || !isRecording {
+            scheduleBackendPreparation(reason: reason, preloadModel: preloadModel)
+        }
     }
 
     private func scheduleBackendPreparation(
@@ -1146,7 +1086,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let multiProcessManager else { return }
         guard !serverScriptPath.isEmpty else { return }
 
-        if isRecording || isImportingAudio || didSuspendRealtimeWorkersForImport {
+        if isImportingAudio || didSuspendRealtimeWorkersForImport {
             guard retryCount < maxBackendPreparationRetries else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + backendPreparationRetryDelay) { [weak self] in
                 self?.scheduleBackendPreparation(
@@ -1159,9 +1099,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         currentSettings = SettingsManager.shared.load()
-        if preloadModel {
-            isAwaitingPreparedRealtimeBackend = true
-        }
         let sent = multiProcessManager.requestBackendProbe(
             gpuAccelerationEnabled: currentSettings.gpuAccelerationEnabled,
             preloadModel: preloadModel
@@ -1175,9 +1112,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard retryCount < maxBackendPreparationRetries else {
-            if preloadModel {
-                isAwaitingPreparedRealtimeBackend = false
-            }
             Logger.shared.log(
                 "Backend preparation could not acquire an idle worker after \(maxBackendPreparationRetries) retries (\(reason))",
                 level: .warning
@@ -1206,7 +1140,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleBackendStatusChanged(_ status: TranscriptionBackendStatus) {
-        isAwaitingPreparedRealtimeBackend = false
         Logger.shared.log(
             "AppDelegate: backend status changed - backend=\(status.effectiveBackend.rawValue), gpuRequested=\(status.gpuRequested), gpuAvailable=\(status.gpuAvailable), fallbackReason=\(status.fallbackReason ?? "none")",
             level: .info
@@ -1219,7 +1152,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             applyPendingWorkerReconfigureIfPossible()
         }
 
-        resumePendingRecordingIfNeeded()
     }
 
     private func setupMemoryPressureMonitoring() {
@@ -1400,19 +1332,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopRealtimeWorkers(reason: String) {
         guard let multiProcessManager else {
             currentRealtimeWorkerCount = 0
-            isAwaitingPreparedRealtimeBackend = false
             return
         }
         guard multiProcessManager.getProcessCount() > 0 else {
             currentRealtimeWorkerCount = 0
-            isAwaitingPreparedRealtimeBackend = false
             return
         }
 
         Logger.shared.log("Stopping realtime transcription workers (\(reason))", level: .info)
         multiProcessManager.stop()
         currentRealtimeWorkerCount = 0
-        isAwaitingPreparedRealtimeBackend = false
     }
 
     private func stopRealtimeWorkersIfNeededForOnDemand(reason: String) {
@@ -1434,43 +1363,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         stopRealtimeWorkers(reason: reason)
-    }
-
-    private func shouldDelayRecordingUntilBackendReady() -> Bool {
-        let expectedWorkerCount = effectiveRealtimeWorkerCount(
-            requested: preferredRealtimeWorkerCount()
-        )
-        let activeProcessCount = multiProcessManager?.getProcessCount() ?? 0
-        return Self.shouldWaitForWarmRealtimeBackend(
-            keepBackendReadyInBackground: currentSettings.keepBackendReadyInBackground,
-            currentBackendStatus: TranscriptionBackendStatusStore.shared.currentStatus,
-            isAwaitingPreparedRealtimeBackend: isAwaitingPreparedRealtimeBackend,
-            hasExpectedRealtimeWorkers: activeProcessCount == expectedWorkerCount
-        )
-    }
-
-    private func resumePendingRecordingIfNeeded() {
-        guard let pendingMode = pendingRecordingStartMode else {
-            return
-        }
-        currentSettings = SettingsManager.shared.load()
-        guard currentSettings.keepBackendReadyInBackground else {
-            pendingRecordingStartMode = nil
-            recordingIndicatorWindow?.hide()
-            return
-        }
-        guard pressedRecordingModes.contains(pendingMode) else {
-            pendingRecordingStartMode = nil
-            recordingIndicatorWindow?.hide()
-            return
-        }
-
-        Logger.shared.log(
-            "Backend preparation finished while hotkey remained pressed; starting recording now in mode=\(pendingMode.rawValue)",
-            level: .info
-        )
-        pendingRecordingStartMode = nil
-        startRecording(mode: pendingMode)
     }
 
     private func startTemporaryBatchCleanupTimer() {
@@ -1637,9 +1529,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         stopTemporaryBatchCleanupTimer()
         memoryPressureSource?.cancel()
         memoryPressureSource = nil
+        let sessionIDs = Array(sessionByID.keys)
         for session in sessionByID.values {
             session.cancelFinalizationReadyWorkItem()
             session.cancelCompletionTimeout()
+        }
+        for sessionID in sessionIDs {
+            multiProcessManager?.cancel(sessionID: sessionID, recoverRunningWorker: false)
         }
         sessionByID.removeAll()
         finalizationQueue.reset()

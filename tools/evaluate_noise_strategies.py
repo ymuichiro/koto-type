@@ -3,6 +3,9 @@
 
 import argparse
 import json
+import os
+import platform
+import resource
 import statistics
 import subprocess
 import sys
@@ -52,6 +55,7 @@ class SegmentMetrics:
 
 @dataclass(frozen=True)
 class EvalResult:
+    run_index: int
     case_id: str
     noise_condition: str
     strategy: str
@@ -213,7 +217,9 @@ def scale_to_peak_dbfs(audio: np.ndarray, peak_dbfs: float) -> np.ndarray:
     return audio * (target_peak / peak)
 
 
-def synthetic_office_noise(duration_seconds: float, sample_rate: int = 16000) -> np.ndarray:
+def synthetic_office_noise(
+    duration_seconds: float, sample_rate: int = 16000
+) -> np.ndarray:
     rng = np.random.default_rng(seed=72)
     sample_count = int(duration_seconds * sample_rate)
     white = rng.normal(0.0, 0.018, sample_count).astype(np.float32)
@@ -224,7 +230,9 @@ def synthetic_office_noise(duration_seconds: float, sample_rate: int = 16000) ->
         if click_len <= 0:
             continue
         envelope = np.linspace(1.0, 0.0, click_len, dtype=np.float32)
-        keyboard[start : start + click_len] += rng.normal(0.0, 0.18, click_len) * envelope
+        keyboard[start : start + click_len] += (
+            rng.normal(0.0, 0.18, click_len) * envelope
+        )
     noise = white + hum + keyboard
     peak = float(np.max(np.abs(noise))) if noise.size else 0.0
     return noise if peak <= 0.98 else noise * (0.98 / peak)
@@ -239,16 +247,22 @@ def ensure_dataset(work_dir: Path) -> list[EvalCase]:
     background_en_path = source_dir / "background_en.wav"
 
     target_text = "本日の議事録を以下にまとめます"
-    long_target_text = "ただし今回は例外として扱います。設定を保存してから、もう一度確認します"
+    long_target_text = (
+        "ただし今回は例外として扱います。設定を保存してから、もう一度確認します"
+    )
     background_jp_text = "来週の予定について、あとで田中さんに確認してください"
-    background_en_text = "Please review the design document before the afternoon meeting"
+    background_en_text = (
+        "Please review the design document before the afternoon meeting"
+    )
 
     if not target_path.exists():
         synthesize_speech(target_text, "Kyoko", target_path)
     if not long_target_path.exists():
         synthesize_speech(long_target_text, "Kyoko", long_target_path)
     if not background_jp_path.exists():
-        synthesize_speech(background_jp_text, "Eddy (日本語（日本）)", background_jp_path)
+        synthesize_speech(
+            background_jp_text, "Eddy (日本語（日本）)", background_jp_path
+        )
     if not background_en_path.exists():
         synthesize_speech(background_en_text, "Samantha", background_en_path)
 
@@ -272,9 +286,17 @@ def ensure_dataset(work_dir: Path) -> list[EvalCase]:
         cases.append(EvalCase(case_id, condition, reference, path, notes))
 
     add_case("clean_short", "clean", target_text, target_audio, "target speech only")
-    add_case("clean_long", "clean", long_target_text, long_target_audio, "longer target speech only")
+    add_case(
+        "clean_long",
+        "clean",
+        long_target_text,
+        long_target_audio,
+        "longer target speech only",
+    )
 
-    office_noise = synthetic_office_noise(audio_duration_seconds(target_path), sample_rate)
+    office_noise = synthetic_office_noise(
+        audio_duration_seconds(target_path), sample_rate
+    )
     add_case(
         "office_mid",
         "officeMid",
@@ -335,7 +357,13 @@ def ensure_dataset(work_dir: Path) -> list[EvalCase]:
         scale_to_peak_dbfs(keyboard_only, -18.0),
         "keyboard and air-conditioner style non-speech noise only",
     )
-    add_case("silence", "clean", "", np.zeros(sample_rate * 3, dtype=np.float32), "silence only")
+    add_case(
+        "silence",
+        "clean",
+        "",
+        np.zeros(sample_rate * 3, dtype=np.float32),
+        "silence only",
+    )
 
     manifest_path = dataset_dir / "manifest.json"
     manifest_path.write_text(
@@ -411,7 +439,9 @@ def analyze_peak_dbfs(wav_path: Path) -> float:
     return float(20.0 * np.log10(peak))
 
 
-def apply_strategy(case: EvalCase, strategy: str, output_dir: Path) -> tuple[Path, float]:
+def apply_strategy(
+    case: EvalCase, strategy: str, output_dir: Path
+) -> tuple[Path, float]:
     if strategy == "none":
         return case.audio_path, 0.0
 
@@ -523,60 +553,94 @@ def evaluate(
     strategies: list[str],
     model: str,
     output_dir: Path,
+    repetitions: int = 1,
 ) -> list[EvalResult]:
     processed_dir = output_dir / "processed"
     results = []
     warm_model(model)
 
-    for case in cases:
-        for strategy in strategies:
-            processed_audio_path, preprocess_seconds = apply_strategy(
-                case,
-                strategy,
-                processed_dir,
-            )
-            result, transcribe_seconds = transcribe_audio(processed_audio_path, model)
-            hypothesis = str(result.get("text", "")).strip()
-            metrics = collect_segment_metrics(result)
-            activity = whisper_server.analyze_wav_activity(str(processed_audio_path))
-            gate_reason = None
-            if strategy.endswith("_gate"):
-                hypothesis, gate_reason = gate_hypothesis(hypothesis, metrics, activity)
-
-            normalized_reference = normalize_text(case.reference_text)
-            normalized_hypothesis = normalize_text(hypothesis)
-            cer = character_error_rate(normalized_reference, normalized_hypothesis)
-            duration_seconds = audio_duration_seconds(processed_audio_path)
-            total_seconds = preprocess_seconds + transcribe_seconds
-
-            results.append(
-                EvalResult(
-                    case_id=case.case_id,
-                    noise_condition=case.noise_condition,
-                    strategy=strategy,
-                    reference_text=case.reference_text,
-                    hypothesis_text=hypothesis,
-                    normalized_reference=normalized_reference,
-                    normalized_hypothesis=normalized_hypothesis,
-                    cer=cer,
-                    false_insertion=not normalized_reference
-                    and bool(normalized_hypothesis),
-                    dropped_utterance=bool(normalized_reference)
-                    and not normalized_hypothesis,
-                    preprocess_seconds=preprocess_seconds,
-                    transcribe_seconds=transcribe_seconds,
-                    total_seconds=total_seconds,
-                    audio_duration_seconds=duration_seconds,
-                    realtime_factor=total_seconds / duration_seconds
-                    if duration_seconds > 0
-                    else 0.0,
-                    processed_audio_path=str(processed_audio_path),
-                    gate_reason=gate_reason,
-                    segment_metrics=metrics,
-                    activity=activity,
+    for run_index in range(repetitions):
+        for case in cases:
+            for strategy in strategies:
+                processed_audio_path, preprocess_seconds = apply_strategy(
+                    case,
+                    strategy,
+                    processed_dir,
                 )
-            )
+                result, transcribe_seconds = transcribe_audio(
+                    processed_audio_path, model
+                )
+                hypothesis = str(result.get("text", "")).strip()
+                metrics = collect_segment_metrics(result)
+                activity = whisper_server.analyze_wav_activity(
+                    str(processed_audio_path)
+                )
+                gate_reason = None
+                if strategy.endswith("_gate"):
+                    hypothesis, gate_reason = gate_hypothesis(
+                        hypothesis, metrics, activity
+                    )
+
+                normalized_reference = normalize_text(case.reference_text)
+                normalized_hypothesis = normalize_text(hypothesis)
+                cer = character_error_rate(normalized_reference, normalized_hypothesis)
+                duration_seconds = audio_duration_seconds(processed_audio_path)
+                total_seconds = preprocess_seconds + transcribe_seconds
+
+                results.append(
+                    EvalResult(
+                        run_index=run_index,
+                        case_id=case.case_id,
+                        noise_condition=case.noise_condition,
+                        strategy=strategy,
+                        reference_text=case.reference_text,
+                        hypothesis_text=hypothesis,
+                        normalized_reference=normalized_reference,
+                        normalized_hypothesis=normalized_hypothesis,
+                        cer=cer,
+                        false_insertion=not normalized_reference
+                        and bool(normalized_hypothesis),
+                        dropped_utterance=bool(normalized_reference)
+                        and not normalized_hypothesis,
+                        preprocess_seconds=preprocess_seconds,
+                        transcribe_seconds=transcribe_seconds,
+                        total_seconds=total_seconds,
+                        audio_duration_seconds=duration_seconds,
+                        realtime_factor=total_seconds / duration_seconds
+                        if duration_seconds > 0
+                        else 0.0,
+                        processed_audio_path=str(processed_audio_path),
+                        gate_reason=gate_reason,
+                        segment_metrics=metrics,
+                        activity=activity,
+                    )
+                )
     return results
+
+
+def benchmark_metadata(model: str, repetitions: int) -> dict:
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return {
+        "commit": commit,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "hostname": platform.node(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "python": platform.python_version(),
+        "backend": "mlx",
+        "model": model,
+        "quality_preset": "temperature-0",
+        "repetitions": repetitions,
+        "warmup_runs": 1,
+        "max_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "power_source": os.environ.get("KOTOTYPE_BENCHMARK_POWER_SOURCE", "unrecorded"),
+    }
 
 
 def percentile(values: list[float], percent: float) -> float:
@@ -597,9 +661,15 @@ def summarize(results: list[EvalResult]) -> list[dict]:
     strategies = sorted({result.strategy for result in results})
     for strategy in strategies:
         strategy_results = [result for result in results if result.strategy == strategy]
-        cer_values = [result.cer for result in strategy_results if result.cer is not None]
-        false_cases = [result for result in strategy_results if not result.normalized_reference]
-        speech_cases = [result for result in strategy_results if result.normalized_reference]
+        cer_values = [
+            result.cer for result in strategy_results if result.cer is not None
+        ]
+        false_cases = [
+            result for result in strategy_results if not result.normalized_reference
+        ]
+        speech_cases = [
+            result for result in strategy_results if result.normalized_reference
+        ]
         latencies = [result.total_seconds for result in strategy_results]
         rows.append(
             {
@@ -704,6 +774,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument(
         "--strategies",
         default=",".join(DEFAULT_STRATEGIES),
@@ -714,16 +785,20 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    strategies = [strategy.strip() for strategy in args.strategies.split(",") if strategy.strip()]
+    strategies = [
+        strategy.strip() for strategy in args.strategies.split(",") if strategy.strip()
+    ]
     cases = ensure_dataset(args.work_dir)
     output_dir = args.work_dir / "runs" / datetime.now().strftime("%Y%m%d_%H%M%S")
-    results = evaluate(cases, strategies, args.model, output_dir)
+    repetitions = max(1, args.repetitions)
+    results = evaluate(cases, strategies, args.model, output_dir, repetitions)
     summary_rows = summarize(results)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "results.json").write_text(
         json.dumps(
             {
+                "metadata": benchmark_metadata(args.model, repetitions),
                 "model": args.model,
                 "strategies": strategies,
                 "summary": summary_rows,
@@ -741,7 +816,13 @@ def main() -> None:
         model=args.model,
     )
 
-    print(json.dumps({"output_dir": str(output_dir), "summary": summary_rows}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"output_dir": str(output_dir), "summary": summary_rows},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

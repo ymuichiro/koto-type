@@ -7,11 +7,7 @@ final class RealtimeRecorderTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        recorder = RealtimeRecorder(
-            batchInterval: 2.0,
-            silenceThreshold: -40.0,
-            silenceDuration: 0.5
-        )
+        recorder = RealtimeRecorder(silenceThreshold: -40.0)
     }
 
     override func tearDown() {
@@ -20,9 +16,7 @@ final class RealtimeRecorderTests: XCTestCase {
     }
 
     func testInitialization() {
-        XCTAssertEqual(recorder.batchInterval, 2.0, accuracy: 0.001)
         XCTAssertEqual(recorder.silenceThreshold, -40.0, accuracy: 0.001)
-        XCTAssertEqual(recorder.silenceDuration, 0.5, accuracy: 0.001)
         XCTAssertFalse(recorder.isAppleVoiceProcessingActive)
         XCTAssertNil(recorder.lastAppleVoiceProcessingErrorDescription)
     }
@@ -76,13 +70,9 @@ final class RealtimeRecorderTests: XCTestCase {
     }
 
     func testParameterUpdate() {
-        recorder.batchInterval = 15.0
         recorder.silenceThreshold = -50.0
-        recorder.silenceDuration = 1.0
 
-        XCTAssertEqual(recorder.batchInterval, 15.0, accuracy: 0.001)
         XCTAssertEqual(recorder.silenceThreshold, -50.0, accuracy: 0.001)
-        XCTAssertEqual(recorder.silenceDuration, 1.0, accuracy: 0.001)
     }
 
     func testAppendSamplesPreservesWaveformSign() {
@@ -154,39 +144,6 @@ final class RealtimeRecorderTests: XCTestCase {
                 "Expected \(value) to leave Apple voice processing enabled"
             )
         }
-    }
-
-    func testShouldSplitChunkBySilenceAfterBatchInterval() {
-        let shouldSplit = RealtimeRecorder.shouldSplitChunk(
-            elapsedTime: 10.0,
-            timeSinceLastSound: 0.6,
-            batchInterval: 10.0,
-            silenceDuration: 0.5
-        )
-
-        XCTAssertTrue(shouldSplit)
-    }
-
-    func testShouldNotSplitChunkWithoutSilenceAfterBatchInterval() {
-        let shouldSplit = RealtimeRecorder.shouldSplitChunk(
-            elapsedTime: 12.0,
-            timeSinceLastSound: 0.05,
-            batchInterval: 10.0,
-            silenceDuration: 0.5
-        )
-
-        XCTAssertFalse(shouldSplit)
-    }
-
-    func testShouldNotSplitChunkBeforeBatchIntervalOrSilenceThreshold() {
-        let shouldSplit = RealtimeRecorder.shouldSplitChunk(
-            elapsedTime: 1.4,
-            timeSinceLastSound: 0.05,
-            batchInterval: 10.0,
-            silenceDuration: 0.5
-        )
-
-        XCTAssertFalse(shouldSplit)
     }
 
     func testShouldAutoStopRecordingWhenElapsedTimeReachesMaximumDuration() {

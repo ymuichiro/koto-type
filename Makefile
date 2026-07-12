@@ -20,7 +20,7 @@ help:
 	@echo "  make test-backend-config - backend 選択/プリセット関連ユニットテスト"
 	@echo "  make test-noise-eval - ノイズ戦略評価 CLI のユニットテスト"
 	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
-	@echo "  make test-benchmark - test-smoke-server の互換エイリアス"
+	@echo "  make test-benchmark - 固定音声で精度・速度ベンチマークを実行"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
 	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
@@ -57,7 +57,12 @@ test-noise-eval:
 	@echo "ノイズ戦略評価 CLI のユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_noise_strategy_eval.py
 
-test-benchmark: test-smoke-server
+test-benchmark:
+	$(PYTHON) -m tools.evaluate_noise_strategies --strategies ffmpeg_office_gate --repetitions 5
+
+check-benchmark:
+	@test -n "$(BASELINE)" -a -n "$(CANDIDATE)" || (echo "BASELINE and CANDIDATE are required" && exit 2)
+	$(PYTHON) -m tools.check_benchmark_regression "$(BASELINE)" "$(CANDIDATE)"
 
 test-smoke-server:
 	@echo "whisper_server バイナリのスモークテストを実行中..."

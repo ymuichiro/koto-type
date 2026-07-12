@@ -1,6 +1,7 @@
 import unittest
 
 from tools import evaluate_noise_strategies
+from tools import check_benchmark_regression
 
 
 class NoiseStrategyEvalTests(unittest.TestCase):
@@ -30,6 +31,7 @@ class NoiseStrategyEvalTests(unittest.TestCase):
         )
         results = [
             evaluate_noise_strategies.EvalResult(
+                run_index=0,
                 case_id="speech",
                 noise_condition="clean",
                 strategy="fast_but_false",
@@ -51,6 +53,7 @@ class NoiseStrategyEvalTests(unittest.TestCase):
                 activity=activity,
             ),
             evaluate_noise_strategies.EvalResult(
+                run_index=0,
                 case_id="silent",
                 noise_condition="clean",
                 strategy="fast_but_false",
@@ -72,6 +75,7 @@ class NoiseStrategyEvalTests(unittest.TestCase):
                 activity=activity,
             ),
             evaluate_noise_strategies.EvalResult(
+                run_index=0,
                 case_id="speech",
                 noise_condition="clean",
                 strategy="slow_clean",
@@ -93,6 +97,7 @@ class NoiseStrategyEvalTests(unittest.TestCase):
                 activity=activity,
             ),
             evaluate_noise_strategies.EvalResult(
+                run_index=0,
                 case_id="silent",
                 noise_condition="clean",
                 strategy="slow_clean",
@@ -119,6 +124,22 @@ class NoiseStrategyEvalTests(unittest.TestCase):
 
         self.assertEqual(summary[0]["strategy"], "slow_clean")
         self.assertEqual(summary[1]["strategy"], "fast_but_false")
+
+    def test_benchmark_gate_rejects_accuracy_or_speed_regression(self):
+        baseline = {
+            "current": {
+                "mean_cer": 0.1,
+                "false_insertion_rate": 0.0,
+                "dropped_utterance_rate": 0.0,
+                "p95_latency_seconds": 1.0,
+                "mean_realtime_factor": 0.5,
+            }
+        }
+        candidate = {"current": dict(baseline["current"], p95_latency_seconds=1.01)}
+        self.assertEqual(
+            check_benchmark_regression.regressions(baseline, candidate),
+            ["current.p95_latency_seconds: 1.000000 -> 1.010000"],
+        )
 
 
 if __name__ == "__main__":
