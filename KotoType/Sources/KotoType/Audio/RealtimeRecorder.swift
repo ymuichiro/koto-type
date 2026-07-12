@@ -27,25 +27,19 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     private(set) var isAppleVoiceProcessingActive = false
     private(set) var lastAppleVoiceProcessingErrorDescription: String?
 
-    var batchInterval: TimeInterval
     var silenceThreshold: Float
-    var silenceDuration: TimeInterval
     var maxRecordingDuration: TimeInterval?
     
-    private var lastSoundTime: TimeInterval = 0
     private var recordingStartTime: TimeInterval = 0
-    private var chunkStartTime: TimeInterval = 0
     private var hasRecordedContent = false
     private var lastReportedInputLevel: Float = 0
     private var lastReportedInputDeviceName: String?
     private var hasReachedMaximumDuration = false
     
-    init(batchInterval: TimeInterval = 10.0, silenceThreshold: Float = -40.0, silenceDuration: TimeInterval = 0.5) {
-        self.batchInterval = batchInterval
+    init(silenceThreshold: Float = -40.0) {
         self.silenceThreshold = silenceThreshold
-        self.silenceDuration = silenceDuration
         super.init()
-        Logger.shared.log("RealtimeRecorder: initialized with batchInterval=\(batchInterval), silenceThreshold=\(silenceThreshold)dB, silenceDuration=\(silenceDuration)s", level: .info)
+        Logger.shared.log("RealtimeRecorder: initialized with silenceThreshold=\(silenceThreshold)dB", level: .info)
     }
     
     func startRecording() -> Bool {
@@ -94,9 +88,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         
         audioBuffer.removeAll()
         fileCount = 0
-        lastSoundTime = Date().timeIntervalSince1970
-        recordingStartTime = lastSoundTime
-        chunkStartTime = lastSoundTime
+        recordingStartTime = Date().timeIntervalSince1970
         hasRecordedContent = false
         hasReachedMaximumDuration = false
         lastRecordingDuration = 0
@@ -160,6 +152,10 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         Logger.shared.log("RealtimeRecorder: recording stopped", level: .info)
     }
     
+    // Live recording intentionally stays as one audio file. Earlier app-side
+    // chunking was removed in Issue #65 because it added boundary/context and
+    // per-chunk processing costs. Reintroduce it only with long-form quality
+    // and latency evidence; do not call createAudioFile() from this callback.
     private func processAudio(buffer: AVAudioPCMBuffer) {
         lock.lock()
         defer { lock.unlock() }
@@ -171,25 +167,10 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         
         let amplitudeInDb = 20 * log10(max(maxAmplitude, 1e-10))
         reportInputLevel(Self.normalizedInputLevel(maxAmplitude: maxAmplitude, silenceThreshold: silenceThreshold))
-        let currentTime = Date().timeIntervalSince1970
-        let elapsedTime = currentTime - recordingStartTime
+        let elapsedTime = Date().timeIntervalSince1970 - recordingStartTime
         
         if amplitudeInDb > silenceThreshold {
-            lastSoundTime = currentTime
             hasRecordedContent = true
-        }
-
-        if hasRecordedContent,
-           Self.shouldSplitChunk(
-               elapsedTime: currentTime - chunkStartTime,
-               timeSinceLastSound: currentTime - lastSoundTime,
-               batchInterval: batchInterval,
-               silenceDuration: silenceDuration
-           ),
-           createAudioFile() {
-            chunkStartTime = currentTime
-            lastSoundTime = currentTime
-            hasRecordedContent = false
         }
 
         if let maxRecordingDuration,
@@ -210,11 +191,10 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         }
     }
     
-    @discardableResult
-    private func createAudioFile(force: Bool = false) -> Bool {
+    private func createAudioFile(force: Bool = false) {
         guard force || audioBuffer.count >= 4096 else {
             Logger.shared.log("RealtimeRecorder: not enough audio data to create file", level: .debug)
-            return false
+            return
         }
         
         let sampleRate = Self.normalizeSampleRate(capturedSampleRate)
@@ -237,7 +217,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
                 "RealtimeRecorder: failed to create temporary batch directory \(tempBatchDirectory.path): \(error)",
                 level: .error
             )
-            return false
+            return
         }
 
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
@@ -274,10 +254,8 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             }
             
             audioBuffer.removeAll()
-            return true
         } catch {
             Logger.shared.log("RealtimeRecorder: failed to create audio file: \(error)", level: .error)
-            return false
         }
     }
 
@@ -320,21 +298,6 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         let floorDb = min(-1, silenceThreshold)
         let normalized = (amplitudeDb - floorDb) / -floorDb
         return max(0, min(normalized, 1))
-    }
-
-    static func shouldSplitChunk(
-        elapsedTime: TimeInterval,
-        timeSinceLastSound: TimeInterval,
-        batchInterval: TimeInterval,
-        silenceDuration: TimeInterval
-    ) -> Bool {
-        let normalizedElapsed = max(0, elapsedTime)
-        let normalizedSilence = max(0, timeSinceLastSound)
-        let normalizedBatchInterval = max(0.1, batchInterval)
-        let normalizedSilenceDuration = max(0, silenceDuration)
-
-        return normalizedElapsed >= normalizedBatchInterval &&
-            normalizedSilence >= normalizedSilenceDuration
     }
 
     static func shouldAutoStopRecording(

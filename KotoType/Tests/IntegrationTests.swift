@@ -72,16 +72,6 @@ final class IntegrationTests: XCTestCase {
         XCTAssertTrue(batchTranscriptionManager.isComplete(), "Manager should be complete")
     }
 
-    func testRealtimeRecorderIntegration() {
-        realtimeRecorder.batchInterval = 2.0
-        realtimeRecorder.silenceThreshold = -40.0
-        realtimeRecorder.silenceDuration = 0.5
-
-        XCTAssertEqual(realtimeRecorder.batchInterval, 2.0, accuracy: 0.001)
-        XCTAssertEqual(realtimeRecorder.silenceThreshold, -40.0, accuracy: 0.001)
-        XCTAssertEqual(realtimeRecorder.silenceDuration, 0.5, accuracy: 0.001)
-    }
-
     func testFullFlow() {
         multiProcessManager = MultiProcessManager {
             let manager = IntegrationTestPythonProcessManager()
@@ -179,15 +169,6 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqual(multiProcessManager.getIdleProcessCount(), 3, "All processes should be idle initially")
     }
 
-    func testRealtimeRecorderParameterUpdate() {
-        realtimeRecorder.batchInterval = 15.0
-        realtimeRecorder.silenceThreshold = -50.0
-        realtimeRecorder.silenceDuration = 1.0
-
-        XCTAssertEqual(realtimeRecorder.batchInterval, 15.0, accuracy: 0.001)
-        XCTAssertEqual(realtimeRecorder.silenceThreshold, -50.0, accuracy: 0.001)
-        XCTAssertEqual(realtimeRecorder.silenceDuration, 1.0, accuracy: 0.001)
-    }
 }
 
 private final class IntegrationTestPythonProcessManager: PythonProcessManaging {

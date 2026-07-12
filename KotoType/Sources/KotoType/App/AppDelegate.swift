@@ -389,8 +389,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             level: .info
         )
 
-        // The recorder callback needs a manager immediately so early chunks can queue
-        // while workers are still starting or loading the model.
+        // Configure the manager callback before recording; the live recording is
+        // intentionally submitted as one file after stop (Issue #65).
         ensureMultiProcessManagerCreatedIfNeeded()
         realtimeRecorder?.maxRecordingDuration = liveTranscriptionPolicy.recordingMaxDuration
         realtimeRecorder?.onInputLevelChanged = { [weak self] level in
@@ -446,8 +446,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
-        // Start worker processes before the recorder so initialization cannot erase
-        // a segment queued in the short window between these operations.
+        // Start workers before the recorder so the completed recording can be
+        // submitted immediately; model preparation remains asynchronous.
         ensureRealtimeWorkersInitialized(
             reason: "recording worker startup",
             preloadModel: false
