@@ -40,6 +40,9 @@ DEFAULT_MIN_ACTIVE_AUDIO_RATIO = 0.12
 DEFAULT_MIN_AUDIO_DURATION_FOR_SKIP_SECONDS = 0.8
 DEFAULT_ACTIVE_REGION_PADDING_MS = 150
 DEFAULT_ACTIVE_REGION_MIN_TRIM_SAVED_SECONDS = 0.25
+DEFAULT_FAST_AUDIO_MAX_DURATION_SECONDS = 3.0
+DEFAULT_FAST_AUDIO_MIN_ACTIVE_RATIO = 0.65
+DEFAULT_FAST_AUDIO_MIN_PEAK_DBFS = -18.0
 TRANSLATION_TARGET_LANGUAGE_PATTERN = re.compile(r"^[a-z0-9-]{1,10}$")
 
 
@@ -291,11 +294,44 @@ def build_audio_filter_chain():
     return "highpass=f=120,lowpass=f=6800,afftdn=nf=-28:tn=1"
 
 
-def build_audio_filter_chain_candidates():
+def build_audio_filter_chain_candidates(skip_denoise=False):
+    if skip_denoise:
+        return ["highpass=f=120,lowpass=f=6800"]
     return [
         build_audio_filter_chain(),
         "highpass=f=120,lowpass=f=6800",
     ]
+
+
+def is_standard_pcm16_mono_wav(input_path):
+    try:
+        with wave.open(input_path, "rb") as wav_file:
+            return (
+                wav_file.getframerate() == 16_000
+                and wav_file.getnchannels() == 1
+                and wav_file.getsampwidth() == 2
+            )
+    except (EOFError, OSError, wave.Error):
+        return False
+
+
+def should_skip_denoise(input_path):
+    if not is_standard_pcm16_mono_wav(input_path):
+        return False
+
+    try:
+        with wave.open(input_path, "rb") as wav_file:
+            duration_seconds = wav_file.getnframes() / wav_file.getframerate()
+        if duration_seconds > DEFAULT_FAST_AUDIO_MAX_DURATION_SECONDS:
+            return False
+
+        activity = analyze_wav_activity(input_path)
+        return (
+            activity.active_ratio >= DEFAULT_FAST_AUDIO_MIN_ACTIVE_RATIO
+            and activity.peak_dbfs >= DEFAULT_FAST_AUDIO_MIN_PEAK_DBFS
+        )
+    except (EOFError, OSError, ValueError, wave.Error):
+        return False
 
 
 def format_ffmpeg_error(error):
@@ -305,16 +341,19 @@ def format_ffmpeg_error(error):
     return str(error)
 
 
-def run_preprocess_with_filter(ffmpeg_module, input_path, output_path, filter_chain):
+def run_preprocess_with_filter(
+    ffmpeg_module,
+    input_path,
+    output_path,
+    filter_chain,
+    preserve_input_format=False,
+):
+    output_options = {"af": filter_chain}
+    if not preserve_input_format:
+        output_options.update(acodec="pcm_s16le", ac=1, ar="16000")
     (
         ffmpeg_module.input(input_path)
-        .output(
-            output_path,
-            acodec="pcm_s16le",
-            ac=1,
-            ar="16000",
-            af=filter_chain,
-        )
+        .output(output_path, **output_options)
         .overwrite_output()
         .run(quiet=True)
     )
@@ -791,7 +830,13 @@ def audio_preprocess(
         output_path = f"{base}_processed.wav"
 
         log(f"Preprocessing audio: {input_path} -> {output_path}")
-        filter_candidates = build_audio_filter_chain_candidates()
+        preserve_input_format = is_standard_pcm16_mono_wav(input_path)
+        skip_denoise = should_skip_denoise(input_path)
+        if preserve_input_format:
+            log("Input is already 16kHz mono PCM16; skipping resampling and channel conversion")
+        if skip_denoise:
+            log("Short clear audio detected; skipping denoise filter")
+        filter_candidates = build_audio_filter_chain_candidates(skip_denoise=skip_denoise)
 
         for index, filter_chain in enumerate(filter_candidates):
             if index == 0:
@@ -804,6 +849,7 @@ def audio_preprocess(
                     input_path=input_path,
                     output_path=output_path,
                     filter_chain=filter_chain,
+                    preserve_input_format=preserve_input_format,
                 )
                 tighten_file_permissions(output_path)
                 log(f"Audio preprocessing completed: {output_path}")

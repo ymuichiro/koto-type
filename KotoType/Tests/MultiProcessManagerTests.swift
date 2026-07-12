@@ -266,6 +266,28 @@ final class MultiProcessManagerTests: XCTestCase {
         wait(for: [unexpectedCompletion], timeout: 0.2)
     }
 
+    func testShutdownCancellationDoesNotRestartRunningWorker() {
+        var created: [MockMultiProcessPythonManager] = []
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            created.append(mock)
+            return mock
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/shutdown.wav"),
+            index: 52,
+            settings: AppSettings(),
+            sessionID: 902
+        )
+
+        manager.cancel(sessionID: 902, recoverRunningWorker: false)
+        XCTAssertEqual(created.count, 1)
+        manager.stop()
+        XCTAssertEqual(created[0].stopCallCount, 1)
+    }
+
     func testProcessFileRetryPreservesTranslateModeAndTargetLanguage() {
         let completion = expectation(description: "translated segment completes empty after retries")
         var created: [MockMultiProcessPythonManager] = []

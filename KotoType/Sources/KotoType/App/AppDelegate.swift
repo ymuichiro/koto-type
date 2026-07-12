@@ -84,7 +84,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var temporaryBatchCleanupTimer: DispatchSourceTimer?
     private var adaptiveWorkerCap: Int?
     private var currentRealtimeWorkerCount = 0
-    private var isAwaitingPreparedRealtimeBackend = false
     private var pendingWorkerReconfigure = false
     private var pendingWorkerReconfigurePreloadModel = false
     private var pendingLiveRecordingProcessingMessage: String?
@@ -118,12 +117,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             bundlePath: bundlePath
         )
         return (max(1, workerCount), 1)
-    }
-
-    nonisolated static func backendPreparationIndicatorMessage(
-        progress: BackendPreparationProgress?
-    ) -> String {
-        progress?.displayTitle ?? "Preparing backend..."
     }
 
     // Dispatch source handlers run on their configured queue, so create a nonisolated
@@ -453,10 +446,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
-        // Dispatch microphone startup before worker/model preparation so backend warm-up
-        // cannot add a visible delay after the hotkey is pressed.
-        startAudioRecordingAsync(sessionID: sessionID)
+        // Start worker processes before the recorder so initialization cannot erase
+        // a segment queued in the short window between these operations.
         ensureRealtimeWorkersInitialized(
+            reason: "recording worker startup",
+            preloadModel: false
+        )
+        startAudioRecordingAsync(sessionID: sessionID)
+        // Model/backend preparation remains asynchronous and must not gate the hotkey.
+        scheduleBackendPreparation(
             reason: "recording start",
             preloadModel: true
         )
@@ -1071,12 +1069,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         multiProcessManager.initialize(count: effectiveWorkerCount, scriptPath: serverScriptPath)
         currentRealtimeWorkerCount = effectiveWorkerCount
-        isAwaitingPreparedRealtimeBackend = preloadModel
         Logger.shared.log(
             "MultiProcessManager initialized with \(effectiveWorkerCount) processes (\(reason)); backend=\(preferredRealtimeBackend().rawValue), backend limits activeServers=\(backendLimits.maxActiveServers), parallelModelLoads=\(backendLimits.maxParallelModelLoads)",
             level: .info
         )
-        scheduleBackendPreparation(reason: reason, preloadModel: preloadModel)
+        if preloadModel || !isRecording {
+            scheduleBackendPreparation(reason: reason, preloadModel: preloadModel)
+        }
     }
 
     private func scheduleBackendPreparation(
@@ -1100,9 +1099,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         currentSettings = SettingsManager.shared.load()
-        if preloadModel {
-            isAwaitingPreparedRealtimeBackend = true
-        }
         let sent = multiProcessManager.requestBackendProbe(
             gpuAccelerationEnabled: currentSettings.gpuAccelerationEnabled,
             preloadModel: preloadModel
@@ -1116,9 +1112,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard retryCount < maxBackendPreparationRetries else {
-            if preloadModel {
-                isAwaitingPreparedRealtimeBackend = false
-            }
             Logger.shared.log(
                 "Backend preparation could not acquire an idle worker after \(maxBackendPreparationRetries) retries (\(reason))",
                 level: .warning
@@ -1147,7 +1140,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleBackendStatusChanged(_ status: TranscriptionBackendStatus) {
-        isAwaitingPreparedRealtimeBackend = false
         Logger.shared.log(
             "AppDelegate: backend status changed - backend=\(status.effectiveBackend.rawValue), gpuRequested=\(status.gpuRequested), gpuAvailable=\(status.gpuAvailable), fallbackReason=\(status.fallbackReason ?? "none")",
             level: .info
@@ -1340,19 +1332,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopRealtimeWorkers(reason: String) {
         guard let multiProcessManager else {
             currentRealtimeWorkerCount = 0
-            isAwaitingPreparedRealtimeBackend = false
             return
         }
         guard multiProcessManager.getProcessCount() > 0 else {
             currentRealtimeWorkerCount = 0
-            isAwaitingPreparedRealtimeBackend = false
             return
         }
 
         Logger.shared.log("Stopping realtime transcription workers (\(reason))", level: .info)
         multiProcessManager.stop()
         currentRealtimeWorkerCount = 0
-        isAwaitingPreparedRealtimeBackend = false
     }
 
     private func stopRealtimeWorkersIfNeededForOnDemand(reason: String) {
@@ -1540,9 +1529,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         stopTemporaryBatchCleanupTimer()
         memoryPressureSource?.cancel()
         memoryPressureSource = nil
+        let sessionIDs = Array(sessionByID.keys)
         for session in sessionByID.values {
             session.cancelFinalizationReadyWorkItem()
             session.cancelCompletionTimeout()
+        }
+        for sessionID in sessionIDs {
+            multiProcessManager?.cancel(sessionID: sessionID, recoverRunningWorker: false)
         }
         sessionByID.removeAll()
         finalizationQueue.reset()

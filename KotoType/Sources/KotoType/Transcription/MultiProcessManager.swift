@@ -977,7 +977,7 @@ final class MultiProcessManager: @unchecked Sendable {
         return pendingSegments.count
     }
 
-    func cancel(sessionID: Int) {
+    func cancel(sessionID: Int, recoverRunningWorker: Bool = true) {
         var processIndexesToRecover: [Int] = []
         processLock.lock()
         cancelledSessionIDs.insert(sessionID)
@@ -990,11 +990,13 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.unlock()
 
         Logger.shared.log(
-            "MultiProcessManager: cancelled session \(sessionID) (queued=\(removedPendingCount), running=\(processIndexesToRecover.count))",
+            "MultiProcessManager: cancelled session \(sessionID) (queued=\(removedPendingCount), running=\(processIndexesToRecover.count), recoverRunningWorker=\(recoverRunningWorker))",
             level: .info
         )
-        for processIndex in processIndexesToRecover {
-            recoverProcess(processIndex: processIndex)
+        if recoverRunningWorker {
+            for processIndex in processIndexesToRecover {
+                recoverProcess(processIndex: processIndex)
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
