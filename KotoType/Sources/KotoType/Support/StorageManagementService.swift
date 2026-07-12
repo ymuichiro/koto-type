@@ -32,7 +32,7 @@ final class StorageManagementService: @unchecked Sendable {
     private let historyManager: TranscriptionHistoryManager
     private let modelService: TranscriptionModelManagementService
     private let fileManager: FileManager
-    private let scriptPathProvider: () -> String
+    private let scriptPath: String
     private let temporaryCacheURL: URL?
     private let managedDownloadCacheURL: URL?
     private let managedModelsRootURL: URL?
@@ -41,7 +41,7 @@ final class StorageManagementService: @unchecked Sendable {
         historyManager: TranscriptionHistoryManager = .shared,
         modelService: TranscriptionModelManagementService = TranscriptionModelManagementService(),
         fileManager: FileManager = .default,
-        scriptPathProvider: @escaping () -> String = { BackendLocator.serverScriptPath() },
+        scriptPath: String? = nil,
         temporaryCacheURL: URL? = nil,
         managedDownloadCacheURL: URL? = nil,
         managedModelsRootURL: URL? = nil
@@ -49,14 +49,14 @@ final class StorageManagementService: @unchecked Sendable {
         self.historyManager = historyManager
         self.modelService = modelService
         self.fileManager = fileManager
-        self.scriptPathProvider = scriptPathProvider
+        self.scriptPath = scriptPath ?? Self.serverScriptPath()
         self.temporaryCacheURL = temporaryCacheURL
         self.managedDownloadCacheURL = managedDownloadCacheURL
         self.managedModelsRootURL = managedModelsRootURL
     }
 
     func snapshot() async -> StorageManagementSnapshot {
-        modelService.configure(scriptPath: scriptPathProvider())
+        modelService.configure(scriptPath: scriptPath)
 
         let historyEntries = historyManager.loadEntries()
         let historyPath = historyManager.storageURL.path
@@ -94,12 +94,12 @@ final class StorageManagementService: @unchecked Sendable {
     }
 
     func downloadModel(_ kind: ManagedTranscriptionModelKind) async -> ManagedTranscriptionModelStatus? {
-        modelService.configure(scriptPath: scriptPathProvider())
+        modelService.configure(scriptPath: scriptPath)
         return await modelService.downloadModel(kind)
     }
 
     func deleteModel(_ kind: ManagedTranscriptionModelKind) async -> ManagedTranscriptionModelStatus? {
-        modelService.configure(scriptPath: scriptPathProvider())
+        modelService.configure(scriptPath: scriptPath)
         return await modelService.deleteModel(kind)
     }
 
@@ -125,6 +125,13 @@ final class StorageManagementService: @unchecked Sendable {
     private func resolvedManagedModelDirectory(for kind: ManagedTranscriptionModelKind) -> URL {
         (managedModelsRootURL ?? KotoTypeStoragePaths.managedModelsRoot(fileManager: fileManager))
             .appendingPathComponent(kind.storageDirectoryName, isDirectory: true)
+    }
+
+    private static func serverScriptPath(currentPath: String = FileManager.default.currentDirectoryPath) -> String {
+        let root = currentPath.range(of: "/KotoType").map {
+            String(currentPath[..<$0.lowerBound])
+        } ?? currentPath
+        return "\(root)/python/whisper_server.py"
     }
 
     private func fileSize(at url: URL) -> Int64 {

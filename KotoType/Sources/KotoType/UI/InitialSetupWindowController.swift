@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import SwiftUI
 
 final class InitialSetupWindowController: NSWindowController {
@@ -550,7 +551,36 @@ struct InitialSetupView: View {
     }
 
     private static func loadBannerImage() -> NSImage? {
-        AppImageLoader.loadPNG(named: "koto-tyoe_banner_transparent")
+        loadPNG(named: "koto-tyoe_banner_transparent")
+    }
+
+    private static func loadPNG(named name: String) -> NSImage? {
+        if let url = Bundle.main.url(forResource: name, withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+
+        if let resourcePath = Bundle.main.resourcePath {
+            let filePath = URL(fileURLWithPath: resourcePath)
+                .appendingPathComponent("\(name).png")
+                .path
+            if let image = NSImage(contentsOfFile: filePath) {
+                return image
+            }
+        }
+
+        let cwd = FileManager.default.currentDirectoryPath
+        for path in [
+            "\(cwd)/Sources/KotoType/Resources/\(name).png",
+            "\(cwd)/.build/arm64-apple-macosx/debug/KotoType_KotoType.bundle/\(name).png",
+            "\(cwd)/.build/arm64-apple-macosx/release/KotoType_KotoType.bundle/\(name).png",
+        ] {
+            if let image = NSImage(contentsOfFile: path) {
+                return image
+            }
+        }
+
+        return nil
     }
 }
 

@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import os.log
 
 @MainActor
@@ -87,13 +88,40 @@ class MenuBarController: NSObject {
     
     private func loadMenuBarIconImage() -> NSImage? {
         let imageName = isDarkMode ? "koto-type_logo_mini_light" : "koto-type_logo_mini_dark"
-        guard let image = AppImageLoader.loadPNG(named: imageName) else {
-            return nil
-        }
+        guard let image = loadPNG(named: imageName) else { return nil }
 
         image.size = NSSize(width: 18, height: 18)
         image.isTemplate = false
         return image
+    }
+
+    private func loadPNG(named name: String) -> NSImage? {
+        if let url = Bundle.main.url(forResource: name, withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+
+        if let resourcePath = Bundle.main.resourcePath {
+            let filePath = URL(fileURLWithPath: resourcePath)
+                .appendingPathComponent("\(name).png")
+                .path
+            if let image = NSImage(contentsOfFile: filePath) {
+                return image
+            }
+        }
+
+        let cwd = FileManager.default.currentDirectoryPath
+        for path in [
+            "\(cwd)/Sources/KotoType/Resources/\(name).png",
+            "\(cwd)/.build/arm64-apple-macosx/debug/KotoType_KotoType.bundle/\(name).png",
+            "\(cwd)/.build/arm64-apple-macosx/release/KotoType_KotoType.bundle/\(name).png",
+        ] {
+            if let image = NSImage(contentsOfFile: path) {
+                return image
+            }
+        }
+
+        return nil
     }
 
     private var isDarkMode: Bool {

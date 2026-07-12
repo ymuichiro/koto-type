@@ -119,7 +119,7 @@ struct PermissionView: View {
     }
     
     private func checkPermission() {
-        permissionStatus = PermissionChecker.shared.checkAccessibilityPermission()
+        permissionStatus = PermissionChecker.checkAccessibilityPermission()
     }
     
     private func restartApp() {

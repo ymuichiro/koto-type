@@ -4,10 +4,9 @@ import XCTest
 final class PermissionResetServiceTests: XCTestCase {
     func testResetPermissionsIfNeededRunsBundleWideResetWhenPermissionIsMissing() {
         let defaults = UserDefaults(suiteName: "PermissionResetServiceTests-\(UUID().uuidString)")!
-        let stateManager = PermissionResetStateManager(defaults: defaults)
         let commandRecorder = CommandRecorder()
         let service = makeService(
-            stateManager: stateManager,
+            defaults: defaults,
             commandRecorder: commandRecorder
         )
 
@@ -20,18 +19,14 @@ final class PermissionResetServiceTests: XCTestCase {
             commandRecorder.commands,
             [PermissionResetService.makeResetCommand(bundleIdentifier: "com.ymuichiro.kototype")]
         )
-        XCTAssertEqual(
-            stateManager.lastResetCommand,
-            "/usr/bin/tccutil reset All com.ymuichiro.kototype"
-        )
+        XCTAssertEqual(service.lastResetCommand, "/usr/bin/tccutil reset All com.ymuichiro.kototype")
     }
 
     func testResetPermissionsIfNeededSkipsWhenOnlyFFmpegIsMissing() {
         let defaults = UserDefaults(suiteName: "PermissionResetServiceTests-\(UUID().uuidString)")!
-        let stateManager = PermissionResetStateManager(defaults: defaults)
         let commandRecorder = CommandRecorder()
         let service = makeService(
-            stateManager: stateManager,
+            defaults: defaults,
             commandRecorder: commandRecorder
         )
 
@@ -41,15 +36,14 @@ final class PermissionResetServiceTests: XCTestCase {
 
         XCTAssertFalse(didReset)
         XCTAssertTrue(commandRecorder.commands.isEmpty)
-        XCTAssertNil(stateManager.lastResetCommand)
+        XCTAssertNil(service.lastResetCommand)
     }
 
     func testResetPermissionsIfNeededRunsOnlyOncePerInstallationToken() {
         let defaults = UserDefaults(suiteName: "PermissionResetServiceTests-\(UUID().uuidString)")!
-        let stateManager = PermissionResetStateManager(defaults: defaults)
         let commandRecorder = CommandRecorder()
         let service = makeService(
-            stateManager: stateManager,
+            defaults: defaults,
             commandRecorder: commandRecorder
         )
         let report = makeReport(accessibility: .failed)
@@ -61,14 +55,14 @@ final class PermissionResetServiceTests: XCTestCase {
 
     func testResetPermissionsIfNeededClearsPreviousAttemptWhenPermissionsAreHealthy() {
         let defaults = UserDefaults(suiteName: "PermissionResetServiceTests-\(UUID().uuidString)")!
-        let stateManager = PermissionResetStateManager(defaults: defaults)
-        stateManager.markResetAttempt(
-            for: "installation-token",
-            command: "/usr/bin/tccutil reset All com.ymuichiro.kototype"
+        defaults.set("installation-token", forKey: "automaticPermissionResetAttemptedInstallationToken")
+        defaults.set(
+            "/usr/bin/tccutil reset All com.ymuichiro.kototype",
+            forKey: "automaticPermissionResetCommand"
         )
         let commandRecorder = CommandRecorder()
         let service = makeService(
-            stateManager: stateManager,
+            defaults: defaults,
             commandRecorder: commandRecorder
         )
 
@@ -78,7 +72,8 @@ final class PermissionResetServiceTests: XCTestCase {
 
         XCTAssertFalse(didReset)
         XCTAssertTrue(commandRecorder.commands.isEmpty)
-        XCTAssertNil(stateManager.lastResetCommand)
+        XCTAssertNil(service.lastResetCommand)
+        XCTAssertFalse(service.hasAttemptedReset(for: "installation-token"))
     }
 
     func testInstallationTokenChangesWhenBundleModificationDateChanges() {
@@ -99,7 +94,7 @@ final class PermissionResetServiceTests: XCTestCase {
     }
 
     private func makeService(
-        stateManager: PermissionResetStateManager,
+        defaults: UserDefaults,
         commandRecorder: CommandRecorder
     ) -> PermissionResetService {
         PermissionResetService(
@@ -113,7 +108,7 @@ final class PermissionResetServiceTests: XCTestCase {
                     return PermissionResetService.CommandResult(exitCode: 0, standardError: "")
                 }
             ),
-            stateManager: stateManager
+            defaults: defaults
         )
     }
 

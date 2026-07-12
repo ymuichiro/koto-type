@@ -37,15 +37,15 @@ enum ThirdPartyNoticesLoader {
 
     static func resourceBundle(
         bundleName: String = resourceBundleName,
-        candidateBundles: [Bundle] = defaultCandidateBundles()
+        candidateBundles: [Bundle] = [Bundle.main]
     ) -> Bundle? {
         let bundleFileName = "\(bundleName).bundle"
 
-        for bundle in candidateBundles where bundle.bundleURL.lastPathComponent == bundleFileName {
-            return bundle
-        }
-
         for bundle in candidateBundles {
+            if bundle.bundleURL.lastPathComponent == bundleFileName {
+                return bundle
+            }
+
             for baseURL in [bundle.resourceURL, bundle.bundleURL].compactMap({ $0 }) {
                 let candidateURL = baseURL.appendingPathComponent(bundleFileName)
                 if let resolvedBundle = Bundle(url: candidateURL) {
@@ -73,15 +73,4 @@ enum ThirdPartyNoticesLoader {
         return resolvedBundle
     }
 
-    private static func defaultCandidateBundles() -> [Bundle] {
-        var uniqueBundles: [Bundle] = []
-        var seenPaths = Set<String>()
-        for bundle in [Bundle.main] + Bundle.allBundles + Bundle.allFrameworks {
-            let path = bundle.bundleURL.resolvingSymlinksInPath().path
-            if seenPaths.insert(path).inserted {
-                uniqueBundles.append(bundle)
-            }
-        }
-        return uniqueBundles
-    }
 }
