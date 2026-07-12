@@ -3,27 +3,17 @@ import XCTest
 import Foundation
 
 final class PermissionCheckerTests: XCTestCase {
-    func testSharedInstance() throws {
-        let checker1 = PermissionChecker.shared
-        let checker2 = PermissionChecker.shared
-        
-        XCTAssertTrue(checker1 === checker2, "PermissionChecker.shared should return the same instance")
-    }
-
     func testCheckAccessibilityPermission() throws {
-        let checker = PermissionChecker.shared
-        let status = checker.checkAccessibilityPermission()
+        let status = PermissionChecker.checkAccessibilityPermission()
         
         XCTAssertTrue(status == .granted || status == .denied, "Permission status should be either granted or denied")
     }
 
     func testRequestAccessibilityPermission() throws {
-        let checker = PermissionChecker.shared
-        
         let expectation = XCTestExpectation(description: "Request permission should complete")
         
         DispatchQueue.main.async {
-            checker.requestAccessibilityPermission()
+            PermissionChecker.requestAccessibilityPermission()
             expectation.fulfill()
         }
         
@@ -31,8 +21,7 @@ final class PermissionCheckerTests: XCTestCase {
     }
 
     func testCheckMicrophonePermission() throws {
-        let checker = PermissionChecker.shared
-        let status = checker.checkMicrophonePermission()
+        let status = PermissionChecker.checkMicrophonePermission()
 
         XCTAssertTrue(
             status == .granted || status == .denied || status == .unknown,
@@ -41,8 +30,7 @@ final class PermissionCheckerTests: XCTestCase {
     }
 
     func testCheckScreenRecordingPermission() throws {
-        let checker = PermissionChecker.shared
-        let status = checker.checkScreenRecordingPermission()
+        let status = PermissionChecker.checkScreenRecordingPermission()
 
         XCTAssertTrue(
             status == .granted || status == .denied,
@@ -65,11 +53,9 @@ final class PermissionCheckerTests: XCTestCase {
     }
 
     func testMultiplePermissionChecks() throws {
-        let checker = PermissionChecker.shared
-        
-        let status1 = checker.checkAccessibilityPermission()
-        let status2 = checker.checkAccessibilityPermission()
-        let status3 = checker.checkAccessibilityPermission()
+        let status1 = PermissionChecker.checkAccessibilityPermission()
+        let status2 = PermissionChecker.checkAccessibilityPermission()
+        let status3 = PermissionChecker.checkAccessibilityPermission()
         
         XCTAssertEqual(status1, status2, "Multiple permission checks should return the same result")
         XCTAssertEqual(status2, status3, "Multiple permission checks should return the same result")

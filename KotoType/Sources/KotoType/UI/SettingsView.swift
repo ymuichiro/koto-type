@@ -777,7 +777,7 @@ struct SettingsView: View {
         Logger.shared.log(
             "SettingsView.applySettings called: transcriptionHotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), translationTargetLanguage=\(settings.translationTargetLanguage)"
         )
-        _ = LaunchAtLoginManager.shared.setEnabled(draft.launchAtLogin)
+        _ = LaunchAtLoginManager.setEnabled(draft.launchAtLogin)
         SettingsManager.shared.save(settings)
         UserDictionaryManager.shared.saveWords(draft.dictionaryWords)
         VoiceShortcutManager.shared.saveShortcuts(draft.voiceShortcuts)

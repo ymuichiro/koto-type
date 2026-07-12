@@ -150,15 +150,15 @@ final class InitialSetupDiagnosticsService: @unchecked Sendable {
 extension InitialSetupDiagnosticsService.Runtime {
     static func live() -> InitialSetupDiagnosticsService.Runtime {
         InitialSetupDiagnosticsService.Runtime(
-            checkAccessibilityPermission: { PermissionChecker.shared.checkAccessibilityPermission() },
-            checkMicrophonePermission: { PermissionChecker.shared.checkMicrophonePermission() },
-            checkScreenRecordingPermission: { PermissionChecker.shared.checkScreenRecordingPermission() },
-            requestAccessibilityPermission: { PermissionChecker.shared.requestAccessibilityPermission() },
+            checkAccessibilityPermission: { PermissionChecker.checkAccessibilityPermission() },
+            checkMicrophonePermission: { PermissionChecker.checkMicrophonePermission() },
+            checkScreenRecordingPermission: { PermissionChecker.checkScreenRecordingPermission() },
+            requestAccessibilityPermission: { PermissionChecker.requestAccessibilityPermission() },
             requestMicrophonePermission: { completion in
-                PermissionChecker.shared.requestMicrophonePermission(completion: completion)
+                PermissionChecker.requestMicrophonePermission(completion: completion)
             },
             requestScreenRecordingPermission: { completion in
-                PermissionChecker.shared.requestScreenRecordingPermission(completion: completion)
+                PermissionChecker.requestScreenRecordingPermission(completion: completion)
             },
             findExecutable: { name in
                 InitialSetupDiagnosticsService.findExecutable(named: name)

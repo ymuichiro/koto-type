@@ -32,7 +32,7 @@ enum AccessibilityDiagnostics {
         bundlePath: String = Bundle.main.bundlePath,
         resourcePath: String? = Bundle.main.resourcePath,
         axIsProcessTrusted: Bool = AXIsProcessTrusted(),
-        permissionStatus: PermissionChecker.PermissionStatus = PermissionChecker.shared.checkAccessibilityPermission()
+        permissionStatus: PermissionChecker.PermissionStatus = PermissionChecker.checkAccessibilityPermission()
     ) -> AccessibilityDiagnosticsSnapshot {
         AccessibilityDiagnosticsSnapshot(
             executablePath: executablePath,

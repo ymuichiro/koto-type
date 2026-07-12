@@ -2,11 +2,12 @@ import Foundation
 
 enum AppRelauncher {
     static func appBundlePath(fromResourcePath resourcePath: String?) -> String? {
-        guard let resourcePath else { return nil }
-        return URL(fileURLWithPath: resourcePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .path
+        resourcePath.map {
+            URL(fileURLWithPath: $0)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+        }
     }
 
     static func relaunchTaskArguments(appPath: String, currentProcessID: Int32) -> [String] {

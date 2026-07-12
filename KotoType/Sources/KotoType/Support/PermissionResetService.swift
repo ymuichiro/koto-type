@@ -1,6 +1,9 @@
 import Foundation
 
 final class PermissionResetService: @unchecked Sendable {
+    private static let attemptedInstallationTokenKey = "automaticPermissionResetAttemptedInstallationToken"
+    private static let lastResetCommandKey = "automaticPermissionResetCommand"
+
     struct Command: Equatable {
         let executablePath: String
         let arguments: [String]
@@ -24,20 +27,20 @@ final class PermissionResetService: @unchecked Sendable {
     }
 
     private let runtime: Runtime
-    private let stateManager: PermissionResetStateManager
+    private let defaults: UserDefaults
 
     init(
         runtime: Runtime = .live(),
-        stateManager: PermissionResetStateManager = .shared
+        defaults: UserDefaults = .standard
     ) {
         self.runtime = runtime
-        self.stateManager = stateManager
+        self.defaults = defaults
     }
 
     @discardableResult
     func resetPermissionsIfNeeded(for report: InitialSetupReport) -> Bool {
         guard report.hasFailingRequiredPermissions else {
-            stateManager.clearResetAttempt()
+            clearResetAttempt()
             return false
         }
 
@@ -48,7 +51,7 @@ final class PermissionResetService: @unchecked Sendable {
             modificationDate: runtime.modificationDateForPath(bundlePath)
         )
 
-        guard !stateManager.hasAttemptedReset(for: installationToken) else {
+        guard !hasAttemptedReset(for: installationToken) else {
             Logger.shared.log(
                 "PermissionResetService: automatic permission reset already attempted for installation token \(installationToken)",
                 level: .debug
@@ -75,12 +78,25 @@ final class PermissionResetService: @unchecked Sendable {
             return false
         }
 
-        stateManager.markResetAttempt(for: installationToken, command: command.rendered)
+        markResetAttempt(for: installationToken, command: command.rendered)
         Logger.shared.log(
             "PermissionResetService: reset all TCC permissions with command: \(command.rendered)",
             level: .info
         )
         return true
+    }
+
+    func clearResetAttempt() {
+        defaults.removeObject(forKey: Self.attemptedInstallationTokenKey)
+        defaults.removeObject(forKey: Self.lastResetCommandKey)
+    }
+
+    func hasAttemptedReset(for installationToken: String) -> Bool {
+        defaults.string(forKey: Self.attemptedInstallationTokenKey) == installationToken
+    }
+
+    var lastResetCommand: String? {
+        defaults.string(forKey: Self.lastResetCommandKey)
     }
 
     static func makeResetCommand(bundleIdentifier: String) -> Command {
@@ -101,6 +117,11 @@ final class PermissionResetService: @unchecked Sendable {
             .path
         let modifiedAt = modificationDate?.timeIntervalSince1970 ?? 0
         return "\(normalizedBundlePath)#\(bundleVersion)#\(Int64(modifiedAt))"
+    }
+
+    private func markResetAttempt(for installationToken: String, command: String) {
+        defaults.set(installationToken, forKey: Self.attemptedInstallationTokenKey)
+        defaults.set(command, forKey: Self.lastResetCommandKey)
     }
 }
 

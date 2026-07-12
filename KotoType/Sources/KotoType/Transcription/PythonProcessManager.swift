@@ -239,7 +239,7 @@ final class PythonProcessManager: @unchecked Sendable {
 
     static func resolveLaunchCommand(scriptPath: String, runtime: Runtime) -> PythonLaunchCommand? {
         let currentPath = runtime.currentDirectoryPath()
-        let workingDirectory = BackendLocator.repositoryRoot(currentPath: currentPath)
+        let workingDirectory = repositoryRoot(currentPath: currentPath)
         let isAppBundleExecution = runtime.bundlePath().hasSuffix(".app")
 
         if let bundlePath = runtime.bundleResourcePath() {
@@ -439,6 +439,12 @@ final class PythonProcessManager: @unchecked Sendable {
         } catch {
             return ""
         }
+    }
+
+    private static func repositoryRoot(currentPath: String) -> String {
+        currentPath.range(of: "/KotoType").map {
+            String(currentPath[..<$0.lowerBound])
+        } ?? currentPath
     }
 }
 

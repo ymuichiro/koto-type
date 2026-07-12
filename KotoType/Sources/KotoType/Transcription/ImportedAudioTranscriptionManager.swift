@@ -33,14 +33,12 @@ extension PythonProcessManager: PythonProcessManaging {}
 final class ImportedAudioTranscriptionManager: @unchecked Sendable {
     private let processManager: any PythonProcessManaging
     private let lock = NSLock()
-    private let keepProcessAlive: Bool
 
     private var scriptPath: String = ""
     private var pendingCompletion: ((Result<String, ImportedAudioTranscriptionError>) -> Void)?
 
-    init(processManager: any PythonProcessManaging = PythonProcessManager(), keepProcessAlive: Bool = false) {
+    init(processManager: any PythonProcessManaging = PythonProcessManager()) {
         self.processManager = processManager
-        self.keepProcessAlive = keepProcessAlive
         processManager.outputReceived = { [weak self] output in
             self?.handleOutput(output)
         }
@@ -125,9 +123,7 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
         pendingCompletion = nil
         lock.unlock()
 
-        if !keepProcessAlive {
-            processManager.stop()
-        }
+        processManager.stop()
 
         guard let completion else { return }
         DispatchQueue.main.async {

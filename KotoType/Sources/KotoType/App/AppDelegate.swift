@@ -53,6 +53,7 @@ private enum DeferredRecordingStartupAction {
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let initialSetupCompletedKey = "initialSetupCompleted"
     var menuBarController: MenuBarController?
     var hotkeyManager: HotkeyManager?
     var realtimeRecorder: RealtimeRecorder?
@@ -143,16 +144,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.shared.log("Application did finish launching", level: .info)
-        serverScriptPath = BackendLocator.serverScriptPath()
+        serverScriptPath = Self.serverScriptPath()
         currentSettings = SettingsManager.shared.load()
         Logger.shared.log("Starting Python process at: \(serverScriptPath)", level: .info)
 
         let diagnosticsService = InitialSetupDiagnosticsService()
         let report = diagnosticsService.evaluate()
-        let setupState = InitialSetupStateManager.shared
 
         if report.canStartApplication {
-            PermissionResetStateManager.shared.clearResetAttempt()
+            permissionResetService.clearResetAttempt()
         } else if permissionResetService.resetPermissionsIfNeeded(for: report) {
             Logger.shared.log(
                 "Application did finish launching: automatically reset required permissions and will relaunch",
@@ -166,15 +166,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 "Application did finish launching: relaunch after automatic permission reset failed",
                 level: .warning
             )
-            PermissionResetStateManager.shared.clearResetAttempt()
+            permissionResetService.clearResetAttempt()
         }
 
-        if setupState.hasCompletedInitialSetup && report.canStartApplication {
+        if UserDefaults.standard.bool(forKey: Self.initialSetupCompletedKey) && report.canStartApplication {
             continueSetup()
             return
         }
 
         showInitialSetupWindow(diagnosticsService: diagnosticsService)
+    }
+
+    private static func serverScriptPath(currentPath: String = FileManager.default.currentDirectoryPath) -> String {
+        let root = currentPath.range(of: "/KotoType").map {
+            String(currentPath[..<$0.lowerBound])
+        } ?? currentPath
+        return "\(root)/python/whisper_server.py"
     }
 
     private func showInitialSetupWindow(diagnosticsService: InitialSetupDiagnosticsService) {
@@ -215,7 +222,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func completeInitialSetup() async {
-        InitialSetupStateManager.shared.markCompleted()
+        UserDefaults.standard.set(true, forKey: Self.initialSetupCompletedKey)
         continueSetup()
         let prepared = currentSettings.keepBackendReadyInBackground
             ? await waitForInitialBackendPreparation()
@@ -237,7 +244,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func continueSetup() {
-        PermissionResetStateManager.shared.clearResetAttempt()
+        permissionResetService.clearResetAttempt()
         NSApp.setActivationPolicy(.accessory)
         menuBarController = MenuBarController()
         Logger.shared.log("MenuBarController created", level: .debug)
@@ -303,7 +310,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMemoryPressureMonitoring()
         cleanupStaleTemporaryBatchFiles()
         startTemporaryBatchCleanupTimer()
-        _ = LaunchAtLoginManager.shared.setEnabled(currentSettings.launchAtLogin)
+        _ = LaunchAtLoginManager.setEnabled(currentSettings.launchAtLogin)
         Logger.shared.log("Loaded settings: \(currentSettings)", level: .info)
         
         hotkeyManager = HotkeyManager()

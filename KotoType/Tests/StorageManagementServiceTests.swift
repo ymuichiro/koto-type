@@ -78,7 +78,7 @@ final class StorageManagementServiceTests: XCTestCase {
             historyManager: historyManager,
             modelService: modelService,
             fileManager: .default,
-            scriptPathProvider: { "/tmp/whisper_server.py" },
+            scriptPath: "/tmp/whisper_server.py",
             temporaryCacheURL: temporaryCacheURL,
             managedDownloadCacheURL: downloadCacheURL,
             managedModelsRootURL: tempRoot.appendingPathComponent("models", isDirectory: true)
@@ -109,7 +109,7 @@ final class StorageManagementServiceTests: XCTestCase {
             historyManager: TranscriptionHistoryManager(historyURL: historyURL, maxEntryCount: 10),
             modelService: modelService,
             fileManager: .default,
-            scriptPathProvider: { "/tmp/whisper_server.py" },
+            scriptPath: "/tmp/whisper_server.py",
             temporaryCacheURL: tempRoot.appendingPathComponent("temporary-cache", isDirectory: true),
             managedDownloadCacheURL: tempRoot.appendingPathComponent("download-cache", isDirectory: true),
             managedModelsRootURL: modelsRootURL
@@ -139,7 +139,7 @@ final class StorageManagementServiceTests: XCTestCase {
             historyManager: historyManager,
             modelService: modelService,
             fileManager: .default,
-            scriptPathProvider: { "/tmp/whisper_server.py" },
+            scriptPath: "/tmp/whisper_server.py",
             temporaryCacheURL: temporaryCacheURL,
             managedDownloadCacheURL: downloadCacheURL
         )
