@@ -34,7 +34,12 @@ final class RealtimeRecorderTests: XCTestCase {
 
     func testStopRecording() {
         let didStart = recorder.startRecording()
-        recorder.stopRecording()
+        let stopExpectation = expectation(description: "Stop completed")
+        recorder.stopRecording { result in
+            XCTAssertEqual(result, didStart ? .stopped : .notRecording)
+            stopExpectation.fulfill()
+        }
+        wait(for: [stopExpectation], timeout: 4.0)
         XCTAssertNil(recorder.recordingURL, "Recording URL should be nil after stop without content")
         if didStart {
             XCTAssertNil(recorder.currentInputDeviceName)
@@ -42,21 +47,25 @@ final class RealtimeRecorderTests: XCTestCase {
     }
 
     func testFileCreationCallback() {
-        let expectation = XCTestExpectation(description: "File created callback")
-        expectation.assertForOverFulfill = true
-        expectation.isInverted = false
+        let fileExpectation = XCTestExpectation(description: "File created callback")
+        fileExpectation.assertForOverFulfill = true
+        fileExpectation.isInverted = false
 
         recorder.onFileCreated = { url, index in
-            expectation.fulfill()
+            fileExpectation.fulfill()
             XCTAssertFalse(url.path.isEmpty, "File path should not be empty")
             XCTAssertGreaterThanOrEqual(index, 0, "File index should be non-negative")
         }
 
-        _ = recorder.startRecording()
+        let didStart = recorder.startRecording()
         usleep(300_000)
-        recorder.stopRecording()
+        let stopExpectation = expectation(description: "Stop completed")
+        recorder.stopRecording { result in
+            XCTAssertEqual(result, didStart ? .stopped : .notRecording)
+            stopExpectation.fulfill()
+        }
 
-        let waiterResult = XCTWaiter.wait(for: [expectation], timeout: 1.0)
+        let waiterResult = XCTWaiter.wait(for: [fileExpectation, stopExpectation], timeout: 4.0)
 
         if waiterResult == .timedOut {
             XCTAssertNil(
