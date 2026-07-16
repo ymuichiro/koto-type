@@ -250,7 +250,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("MenuBarController created", level: .debug)
         appUpdater = AppUpdater()
 
-        realtimeRecorder = RealtimeRecorder()
+        realtimeRecorder = makeRealtimeRecorder()
         Logger.shared.log("RealtimeRecorder created", level: .debug)
         ensureMultiProcessManagerCreatedIfNeeded()
         settingsWindowController = SettingsWindowController()
@@ -332,6 +332,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    private func makeRealtimeRecorder() -> RealtimeRecorder {
+        let recorder = RealtimeRecorder()
+        recorder.onAudioConfigurationChanged = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.isRecording else { return }
+                self.pendingLiveRecordingProcessingMessage = "Audio input was reset. Please try again."
+                self.stopRecording()
+            }
+        }
+        return recorder
     }
 
     private func waitForInitialBackendPreparation() async -> Bool {
@@ -611,27 +623,81 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "Stopping audio recording for session \(sessionID)... requestMode=\(session.mode.rawValue), translationTargetLanguage=\(session.translationTargetLanguage)",
             level: .info
         )
-        realtimeRecorder?.stopRecording()
         realtimeRecorder?.onInputLevelChanged = nil
         realtimeRecorder?.onInputDeviceNameChanged = nil
         realtimeRecorder?.onMaximumDurationReached = nil
         realtimeRecorder?.maxRecordingDuration = nil
         recordingIndicatorWindow?.updateRecordingLevel(0)
         recordingIndicatorWindow?.updateRecordingInputDeviceName(nil)
-        Logger.shared.log(
-            "Recording stopped (session \(sessionID), requestMode=\(session.mode.rawValue))",
-            level: .info
-        )
-        Logger.shared.log("Waiting for transcription completion (session \(sessionID))...", level: .info)
         let processingMessage = pendingLiveRecordingProcessingMessage
         pendingLiveRecordingProcessingMessage = nil
         recordingIndicatorWindow?.showProcessing(message: processingMessage)
-        enqueueSessionForFinalization(
-            sessionID: sessionID,
-            timeoutInterval: session.liveTranscriptionPolicy?.finalizationTimeout
-                ?? currentSettings.recordingCompletionTimeout
-        )
-        tryFinalizePendingSessionsIfNeeded()
+        let finalizationTimeout = session.liveTranscriptionPolicy?.finalizationTimeout
+            ?? currentSettings.recordingCompletionTimeout
+        let recorder = realtimeRecorder
+        guard let recorder else {
+            completeRecordingStop(
+                sessionID: sessionID,
+                recorder: nil,
+                timeoutInterval: finalizationTimeout,
+                result: .notRecording
+            )
+            return
+        }
+
+        recorder.stopRecording { [weak self] result in
+            Task { @MainActor [weak self] in
+                self?.completeRecordingStop(
+                    sessionID: sessionID,
+                    recorder: recorder,
+                    timeoutInterval: finalizationTimeout,
+                    result: result
+                )
+            }
+        }
+    }
+
+    private func completeRecordingStop(
+        sessionID: Int,
+        recorder: RealtimeRecorder?,
+        timeoutInterval: TimeInterval,
+        result: RecordingStopResult
+    ) {
+        guard sessionByID[sessionID] != nil else { return }
+
+        switch result {
+        case .stopped:
+            Logger.shared.log(
+                "Recording stopped (session \(sessionID)); waiting for transcription completion...",
+                level: .info
+            )
+            enqueueSessionForFinalization(
+                sessionID: sessionID,
+                timeoutInterval: timeoutInterval
+            )
+            tryFinalizePendingSessionsIfNeeded()
+        case .notRecording:
+            Logger.shared.log(
+                "Recording stop completed without an active recorder (session \(sessionID))",
+                level: .warning
+            )
+            destroySession(sessionID: sessionID)
+            if !isRecording {
+                showTransientRecordingAttention("Audio input is not available")
+            }
+        case .timedOut:
+            Logger.shared.log(
+                "Recording stop timed out (session \(sessionID)); resetting the recorder",
+                level: .error
+            )
+            destroySession(sessionID: sessionID)
+            if let recorder, realtimeRecorder === recorder {
+                realtimeRecorder = makeRealtimeRecorder()
+            }
+            if !isRecording {
+                showTransientRecordingAttention("Audio input was reset. Please try again.")
+            }
+        }
     }
 
     private func handleLiveRecordingMaximumDurationReached(

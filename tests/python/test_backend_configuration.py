@@ -29,21 +29,21 @@ class DecodeProfileTests(unittest.TestCase):
         self.assertEqual(high.best_of, 10)
         self.assertEqual(high.vad_threshold, 0.5)
 
-    def test_build_mlx_decode_profile_uses_deterministic_profiles_without_beam_search(self):
+    def test_build_mlx_decode_profile_uses_temperature_fallback_without_beam_search(self):
         low = whisper_server.build_mlx_decode_profile("low")
         medium = whisper_server.build_mlx_decode_profile("medium")
         high = whisper_server.build_mlx_decode_profile("high")
 
-        self.assertEqual(low.temperature, 0.0)
+        self.assertEqual(low.temperature, (0.0, 0.2, 0.4))
         self.assertIsNone(low.beam_size)
         self.assertIsNone(low.best_of)
         self.assertIsNone(low.vad_threshold)
 
-        self.assertEqual(medium.temperature, 0.0)
+        self.assertEqual(medium.temperature, (0.0, 0.2, 0.4))
         self.assertIsNone(medium.beam_size)
         self.assertIsNone(medium.best_of)
 
-        self.assertEqual(high.temperature, 0.0)
+        self.assertEqual(high.temperature, (0.0, 0.2, 0.4))
         self.assertIsNone(high.beam_size)
         self.assertIsNone(high.best_of)
 
@@ -440,7 +440,7 @@ class ConditionOnPreviousTextTests(unittest.TestCase):
             whisper_server.DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
         )
         self.assertFalse(captured_kwargs["condition_on_previous_text"])
-        self.assertEqual(captured_kwargs["temperature"], 0.0)
+        self.assertEqual(captured_kwargs["temperature"], (0.0, 0.2, 0.4))
         self.assertNotIn("beam_size", captured_kwargs)
         self.assertNotIn("best_of", captured_kwargs)
 
@@ -655,6 +655,59 @@ class ActiveClipRetryTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0]["clip_timestamps"], [0.18, 1.08])
         self.assertNotIn("clip_timestamps", calls[1])
+        self.assertIsNone(calls[1]["initial_prompt"])
+
+    def test_mlx_retry_falls_back_when_active_clip_hits_compression_gate(self):
+        manager = RecordingOptionsBackendManager()
+        calls = []
+
+        class RecordingMLXWhisper:
+            def transcribe(self, audio, **kwargs):
+                calls.append(kwargs)
+                if len(calls) == 1:
+                    return {
+                        "text": "反復文字列" * 20,
+                        "language": "ja",
+                        "segments": [
+                            {
+                                "avg_logprob": -0.2,
+                                "compression_ratio": 8.0,
+                                "no_speech_prob": 0.01,
+                            }
+                        ],
+                    }
+                return {
+                    "text": "明瞭な音声結果",
+                    "language": "ja",
+                    "segments": [
+                        {
+                            "avg_logprob": -0.2,
+                            "compression_ratio": 1.2,
+                            "no_speech_prob": 0.01,
+                        }
+                    ],
+                }
+
+        manager.mlx_whisper = RecordingMLXWhisper()
+
+        with patch.object(
+            whisper_server,
+            "resolve_mlx_active_clip_timestamps",
+            return_value=[0.18, 1.08],
+        ):
+            text, language = manager._transcribe_with_mlx(
+                "/tmp/test.wav",
+                "ja",
+                "medium",
+                "prompt",
+            )
+
+        self.assertEqual(text, "明瞭な音声結果")
+        self.assertEqual(language, "ja")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["clip_timestamps"], [0.18, 1.08])
+        self.assertNotIn("clip_timestamps", calls[1])
+        self.assertIsNone(calls[1]["initial_prompt"])
 
 
 if __name__ == "__main__":

@@ -516,8 +516,22 @@ def build_active_clip_timestamps(
     return [round(start_seconds, 3), round(end_seconds, 3)]
 
 
-def should_retry_mlx_with_full_audio(text):
-    return not str(text or "").strip()
+def mlx_full_audio_retry_reason(result):
+    text = str(result.get("text", "") or "").strip()
+    if not text:
+        return "empty_text"
+
+    decision = evaluate_transcription_confidence_gate(
+        text,
+        collect_segment_metrics(result.get("segments", []) or []),
+    )
+    if decision.should_suppress and decision.reason.startswith("compression_ratio="):
+        return decision.reason
+    return None
+
+
+def should_retry_mlx_with_full_audio(result):
+    return mlx_full_audio_retry_reason(result) is not None
 
 
 def build_mlx_transcribe_kwargs(
@@ -595,12 +609,20 @@ def transcribe_with_mlx_active_clip_retry(
         log("Starting MLX transcription with full audio")
 
     result = mlx_whisper.transcribe(audio_path, **attempt_kwargs)
-    text = str(result.get("text", "")).strip()
-    if clip_timestamps is None or not should_retry_mlx_with_full_audio(text):
+    retry_reason = (
+        mlx_full_audio_retry_reason(result) if clip_timestamps is not None else None
+    )
+    if retry_reason is None:
         return result
 
-    log("MLX active clip transcription returned empty text; retrying with full audio")
-    return mlx_whisper.transcribe(audio_path, **transcribe_kwargs)
+    retry_kwargs = dict(transcribe_kwargs)
+    retry_kwargs.pop("clip_timestamps", None)
+    retry_kwargs["initial_prompt"] = None
+    log(
+        "MLX active clip transcription requires full-audio retry: "
+        f"reason={retry_reason}, initial_prompt_removed=true"
+    )
+    return mlx_whisper.transcribe(audio_path, **retry_kwargs)
 
 
 def optional_float(value):
@@ -1225,9 +1247,9 @@ def build_cpu_decode_profile(quality_preset):
 def build_mlx_decode_profile(quality_preset):
     preset = normalize_quality_preset(quality_preset)
     profiles = {
-        "low": DecodeProfile(temperature=0.0),
-        "medium": DecodeProfile(temperature=0.0),
-        "high": DecodeProfile(temperature=0.0),
+        "low": DecodeProfile(temperature=(0.0, 0.2, 0.4)),
+        "medium": DecodeProfile(temperature=(0.0, 0.2, 0.4)),
+        "high": DecodeProfile(temperature=(0.0, 0.2, 0.4)),
     }
     return profiles[preset]
 

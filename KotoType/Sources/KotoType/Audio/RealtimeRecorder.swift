@@ -7,6 +7,45 @@ enum RecordingStartFailureReason: Equatable, Sendable {
     case failedToStartAudioEngine
 }
 
+enum RecordingStopResult: Equatable, Sendable {
+    case stopped
+    case notRecording
+    case timedOut
+}
+
+private final class SendableBox<Value>: @unchecked Sendable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+}
+
+private final class StopCompletionGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didComplete = false
+    private let completion: ((RecordingStopResult) -> Void)?
+
+    init(completion: ((RecordingStopResult) -> Void)?) {
+        self.completion = completion
+    }
+
+    func complete(_ result: RecordingStopResult) -> Bool {
+        guard let completion else { return false }
+
+        lock.lock()
+        guard !didComplete else {
+            lock.unlock()
+            return false
+        }
+        didComplete = true
+        lock.unlock()
+
+        completion(result)
+        return true
+    }
+}
+
 final class RealtimeRecorder: NSObject, @unchecked Sendable {
     private var audioEngine: AVAudioEngine?
     private var audioBuffer: [Float] = []
@@ -15,12 +54,19 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     private var isRecording = false
     private var capturedSampleRate: Double = 16_000.0
     private let lock = NSLock()
+    private let teardownQueue = DispatchQueue(
+        label: "com.ymuichiro.kototype.realtime-recorder-teardown",
+        qos: .userInitiated
+    )
+    private let stopTimeout: TimeInterval = 3.0
+    private var audioConfigurationObserver: NSObjectProtocol?
     
     var recordingURL: URL? { lastFileURL }
     var onFileCreated: ((URL, Int) -> Void)?
     var onInputLevelChanged: ((Float) -> Void)?
     var onInputDeviceNameChanged: ((String?) -> Void)?
     var onMaximumDurationReached: (() -> Void)?
+    var onAudioConfigurationChanged: (() -> Void)?
     private(set) var lastStartFailureReason: RecordingStartFailureReason?
     private(set) var currentInputDeviceName: String?
     private(set) var lastRecordingDuration: TimeInterval = 0
@@ -39,7 +85,20 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
     init(silenceThreshold: Float = -40.0) {
         self.silenceThreshold = silenceThreshold
         super.init()
+        audioConfigurationObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.AVAudioEngineConfigurationChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            self?.handleAudioConfigurationChange(notification)
+        }
         Logger.shared.log("RealtimeRecorder: initialized with silenceThreshold=\(silenceThreshold)dB", level: .info)
+    }
+
+    deinit {
+        if let audioConfigurationObserver {
+            NotificationCenter.default.removeObserver(audioConfigurationObserver)
+        }
     }
     
     func startRecording() -> Bool {
@@ -115,41 +174,89 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         }
     }
     
-    func stopRecording(discardPendingAudio: Bool = false) {
+    func stopRecording(
+        discardPendingAudio: Bool = false,
+        completion: ((RecordingStopResult) -> Void)? = nil
+    ) {
         Logger.shared.log("RealtimeRecorder: stopRecording called", level: .info)
+
+        let engine: AVAudioEngine?
+        let samples: [Float]
+        let sampleRate: Double
+        let shouldCreateFile: Bool
+        let fileIndex: Int
+        let voiceProcessingActive: Bool
+        let fileCreatedHandler: SendableBox<((URL, Int) -> Void)?>
+
         lock.lock()
-        defer { lock.unlock() }
-        
         guard isRecording else {
+            lock.unlock()
             Logger.shared.log("RealtimeRecorder: not recording", level: .warning)
+            completion?(.notRecording)
             return
         }
-        
-        audioEngine?.stop()
-        if let engine = audioEngine {
-            engine.inputNode.removeTap(onBus: 0)
+
+        isRecording = false
+        engine = audioEngine
+        audioEngine = nil
+        samples = discardPendingAudio ? [] : audioBuffer
+        audioBuffer.removeAll(keepingCapacity: true)
+        sampleRate = Self.normalizeSampleRate(capturedSampleRate)
+        shouldCreateFile = !discardPendingAudio && hasRecordedContent && !samples.isEmpty
+        fileIndex = fileCount
+        if shouldCreateFile {
+            fileCount += 1
         }
+        voiceProcessingActive = isAppleVoiceProcessingActive
+        fileCreatedHandler = SendableBox(onFileCreated)
 
         let stopTime = Date().timeIntervalSince1970
         lastRecordingDuration = max(0, stopTime - recordingStartTime)
-        
-        if !discardPendingAudio && hasRecordedContent && !audioBuffer.isEmpty {
-            createAudioFile(force: true)
-        }
-        
-        if discardPendingAudio {
-            audioBuffer.removeAll()
-        }
         hasRecordedContent = false
         hasReachedMaximumDuration = false
-        isRecording = false
         isAppleVoiceProcessingActive = false
-        audioEngine = nil
         onMaximumDurationReached = nil
         currentInputDeviceName = nil
         reportInputLevel(0, force: true)
         reportInputDeviceName(nil, force: true)
-        Logger.shared.log("RealtimeRecorder: recording stopped", level: .info)
+        lock.unlock()
+
+        let completionGate = StopCompletionGate(completion: completion)
+        let engineBox = SendableBox(engine)
+        let timeout = stopTimeout
+        teardownQueue.async { [weak self] in
+            Logger.shared.log("RealtimeRecorder: removing audio tap", level: .debug)
+            engineBox.value?.inputNode.removeTap(onBus: 0)
+            Logger.shared.log("RealtimeRecorder: stopping audio engine", level: .debug)
+            engineBox.value?.stop()
+            Logger.shared.log("RealtimeRecorder: audio engine stopped", level: .debug)
+
+            if shouldCreateFile, let self {
+                if let fileURL = self.createAudioFile(
+                    samples: samples,
+                    sampleRate: sampleRate,
+                    fileIndex: fileIndex,
+                    appleVoiceProcessing: voiceProcessingActive,
+                    onFileCreated: fileCreatedHandler
+                ) {
+                    self.lock.lock()
+                    self.lastFileURL = fileURL
+                    self.lock.unlock()
+                }
+            }
+
+            Logger.shared.log("RealtimeRecorder: recording stopped", level: .info)
+            _ = completionGate.complete(.stopped)
+        }
+
+        guard completion != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+            guard completionGate.complete(.timedOut) else { return }
+            Logger.shared.log(
+                "RealtimeRecorder: stop timed out after \(String(format: "%.1f", timeout))s; audio teardown is isolated",
+                level: .error
+            )
+        }
     }
     
     // Live recording intentionally stays as one audio file. Earlier app-side
@@ -160,7 +267,7 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         
-        guard let channelData = buffer.floatChannelData?[0] else { return }
+        guard isRecording, let channelData = buffer.floatChannelData?[0] else { return }
         let frameCount = Int(buffer.frameLength)
         let samples = UnsafeBufferPointer(start: channelData, count: frameCount)
         let maxAmplitude = Self.appendSamples(samples, to: &audioBuffer)
@@ -191,21 +298,26 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
         }
     }
     
-    private func createAudioFile(force: Bool = false) {
-        guard force || audioBuffer.count >= 4096 else {
+    private func createAudioFile(
+        samples: [Float],
+        sampleRate: Double,
+        fileIndex: Int,
+        appleVoiceProcessing: Bool,
+        onFileCreated: SendableBox<((URL, Int) -> Void)?>
+    ) -> URL? {
+        guard !samples.isEmpty else {
             Logger.shared.log("RealtimeRecorder: not enough audio data to create file", level: .debug)
-            return
+            return nil
         }
-        
-        let sampleRate = Self.normalizeSampleRate(capturedSampleRate)
-        let totalSamples = audioBuffer.count
+
+        let totalSamples = samples.count
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(totalSamples))!
         buffer.frameLength = AVAudioFrameCount(totalSamples)
         
         if let channelData = buffer.floatChannelData?[0] {
             for i in 0..<totalSamples {
-                channelData[i] = audioBuffer[i]
+                channelData[i] = samples[i]
             }
         }
         
@@ -217,12 +329,12 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
                 "RealtimeRecorder: failed to create temporary batch directory \(tempBatchDirectory.path): \(error)",
                 level: .error
             )
-            return
+            return nil
         }
 
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
         let fileURL = tempBatchDirectory.appendingPathComponent(
-            "batch_\(timestamp)_\(fileCount)_\(UUID().uuidString).wav"
+            "batch_\(timestamp)_\(fileIndex)_\(UUID().uuidString).wav"
         )
         
         let settings: [String: Any] = [
@@ -238,24 +350,39 @@ final class RealtimeRecorder: NSObject, @unchecked Sendable {
             let file = try AVAudioFile(forWriting: fileURL, settings: settings)
             try file.write(from: buffer)
             try LocalFileProtection.tightenFilePermissionsIfPresent(at: fileURL)
-            lastFileURL = fileURL
-            let currentFileCount = fileCount
-            fileCount += 1
             
             Logger.shared.log(
-                "RealtimeRecorder: created audio file: \(fileURL.path) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(currentFileCount), appleVoiceProcessing=\(isAppleVoiceProcessingActive))",
+                "RealtimeRecorder: created audio file: \(fileURL.path) (samples: \(totalSamples), sampleRate: \(Int(sampleRate)), fileCount: \(fileIndex), appleVoiceProcessing=\(appleVoiceProcessing))",
                 level: .info
             )
 
-            let onFileCreatedHandler = onFileCreated
-            DispatchQueue.main.async { [weak self] in
-                guard self != nil else { return }
-                onFileCreatedHandler?(fileURL, currentFileCount)
+            DispatchQueue.main.async {
+                onFileCreated.value?(fileURL, fileIndex)
             }
-            
-            audioBuffer.removeAll()
+            return fileURL
         } catch {
             Logger.shared.log("RealtimeRecorder: failed to create audio file: \(error)", level: .error)
+            return nil
+        }
+    }
+
+    private func handleAudioConfigurationChange(_ notification: Notification) {
+        guard let changedEngine = notification.object as? AVAudioEngine else { return }
+
+        lock.lock()
+        let isCurrentEngine = changedEngine === audioEngine
+        let recording = isRecording
+        let handler = onAudioConfigurationChanged
+        lock.unlock()
+
+        guard isCurrentEngine, recording else { return }
+
+        Logger.shared.log(
+            "RealtimeRecorder: audio engine configuration changed while recording",
+            level: .warning
+        )
+        DispatchQueue.main.async {
+            handler?()
         }
     }
 
