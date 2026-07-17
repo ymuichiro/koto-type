@@ -10,15 +10,22 @@ private final class RecordingSessionContext {
     let mode: RecordingRequestMode
     let translationTargetLanguage: String
     let batchTranscriptionManager: BatchTranscriptionManager
+    let windowFocusTarget: WindowFocusTarget?
     var liveTranscriptionPolicy: LiveTranscriptionPolicy?
     var finalizationReadyWorkItem: DispatchWorkItem?
     var completionTimeoutWorkItem: DispatchWorkItem?
     private var screenshotContext: String?
 
-    init(id: Int, mode: RecordingRequestMode, translationTargetLanguage: String) {
+    init(
+        id: Int,
+        mode: RecordingRequestMode,
+        translationTargetLanguage: String,
+        windowFocusTarget: WindowFocusTarget?
+    ) {
         self.id = id
         self.mode = mode
         self.translationTargetLanguage = translationTargetLanguage
+        self.windowFocusTarget = windowFocusTarget
         self.batchTranscriptionManager = BatchTranscriptionManager()
     }
 
@@ -384,14 +391,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        let windowFocusTarget = WindowFocusRestorer.capture()
         currentSettings = SettingsManager.shared.load()
-        beginRecordingSession(mode: mode)
+        beginRecordingSession(mode: mode, windowFocusTarget: windowFocusTarget)
     }
 
-    private func beginRecordingSession(mode: RecordingRequestMode) {
+    private func beginRecordingSession(
+        mode: RecordingRequestMode,
+        windowFocusTarget: WindowFocusTarget?
+    ) {
         let session = createRecordingSession(
             mode: mode,
-            translationTargetLanguage: currentSettings.translationTargetLanguage
+            translationTargetLanguage: currentSettings.translationTargetLanguage,
+            windowFocusTarget: windowFocusTarget
         )
         let sessionID = session.id
         let liveTranscriptionPolicy = LiveTranscriptionPolicy.resolve(
@@ -783,14 +795,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func createRecordingSession(
         mode: RecordingRequestMode,
-        translationTargetLanguage: String
+        translationTargetLanguage: String,
+        windowFocusTarget: WindowFocusTarget?
     ) -> RecordingSessionContext {
         let sessionID = nextRecordingSessionID
         nextRecordingSessionID += 1
         let session = RecordingSessionContext(
             id: sessionID,
             mode: mode,
-            translationTargetLanguage: translationTargetLanguage
+            translationTargetLanguage: translationTargetLanguage,
+            windowFocusTarget: windowFocusTarget
         )
         sessionByID[sessionID] = session
         return session
@@ -922,6 +936,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 "Processing finalized live recording output (session \(sessionID), length=\(finalText.count))",
                 level: .info
             )
+
+            if let windowFocusTarget = session.windowFocusTarget {
+                let restorationResult = WindowFocusRestorer.restoreIfNeeded(windowFocusTarget)
+                Logger.shared.log(
+                    "Window focus restoration for session "
+                        + String(sessionID)
+                        + ": "
+                        + restorationResult.logDescription,
+                    level: restorationResult == .unavailable ? .warning : .debug
+                )
+            }
 
             if let shortcut = VoiceShortcutManager.shared.resolve(input: finalText) {
                 Logger.shared.log(
