@@ -37,6 +37,35 @@ focused-context=unavailable
 
 この場合は、アプリ本体でも保存対象を作らず、既存の現在フォーカス入力へ戻る扱いにする。実際のログイン済みデスクトップ上でのユーザー操作による確認は、今回の自動実行環境からは完了できなかった。
 
+### ディスプレイ接続後の再検証
+
+前回の実行ではディスプレイが切断されていたため、ディスプレイ接続後に同じプローブを再実行した。`system_profiler` では、DELL S3423DWC がオンラインのメインディスプレイとして認識されていた。
+
+実際のGUIセッションで、次の操作を3回連続して確認した。
+
+1. システムワイドAccessibility APIから、現在のGoogle Chromeの対象ウィンドウを取得する。
+2. Finderを一時的にアクティブ化する。
+3. 保存したChromeアプリをアクティブ化し、保存したChromeウィンドウへ `kAXRaiseAction` を送る。
+4. 復帰後のAccessibilityフォーカス対象とマウスポインタ位置を取得する。
+
+3回とも次の結果になった。
+
+```text
+accessibility-trusted=true
+original=app:Google Chrome pid:1393 window:ChatGPT - 構造化 Agent - Google Chrome
+alternate-app=Finder pid:1412
+alternate-activate=true
+original-activate=true
+original-raise=0
+after=app:Google Chrome pid:1393 window:ChatGPT - 構造化 Agent - Google Chrome
+mouse-before=(2658.0, 645.01953125)
+mouse-after=(2658.0, 645.01953125)
+```
+
+この再検証により、ディスプレイ接続済みの実GUIセッションでは、システム全体の現在ウィンドウを取得し、別アプリを挟んだ後に元のウィンドウへ戻せることを確認できた。また、`activate` と `kAXRaiseAction` の実行によるマウスポインタの移動は観測されなかった。
+
+なお、プローブ内の独立したシステムワイド属性読み出しは引き続き `-25204` を返したが、KotoTypeと同じ取得処理は直後にChromeの対象ウィンドウを正常に取得した。このため、単発の属性読み出しエラーだけでGUIセッション全体を利用不可とは判定せず、対象ウィンドウ取得と復帰後の対象一致を実際の成功条件として扱う。
+
 ### TextEditのウィンドウ取得と前面化
 
 TextEditのAccessibilityアプリケーション要素を直接作成し、`kAXWindowsAttribute` から `AXWindow` を取得した。取得したウィンドウは標準ウィンドウで、識別子も取得できた。
@@ -99,7 +128,7 @@ Accessibility要素のオブジェクト参照だけに依存すると、再取�
 - ウィンドウ前面化に失敗した場合は `unavailable` を返す
 - 識別情報が不足しているウィンドウを同一と誤判定しない
 
-実際のユーザーアプリ上での最終確認は、PRのレビュー時にログイン済みデスクトップで実施する。
+KotoType本体の音声入力から貼り付け完了までのE2E確認は、文字起こしサーバーとユーザー操作を伴うため、今回のAPIプローブとは別の確認項目としてPRレビュー時に実施する。
 
 ## 実装後の検証結果
 
@@ -110,4 +139,4 @@ swift test --filter WindowFocusRestorerTests  6 tests, 0 failures
 git diff --check                     成功
 ```
 
-このため、コード上の復帰条件と既存のSwiftテストは完了している。残る実環境確認は、GUIセッションで実際にKotoTypeを起動し、別アプリの別ウィンドウへ移動した状態から文字起こし結果が保存ウィンドウへ戻ることを確認する作業である。
+このため、コード上の復帰条件、既存のSwiftテスト、およびディスプレイ接続済みGUIセッションでのOS API経路は確認できた。残る確認項目は、実際にKotoTypeを起動し、別アプリの別ウィンドウへ移動した状態から文字起こし結果が保存ウィンドウへ戻ることを、実ユーザー操作で確認することである。
