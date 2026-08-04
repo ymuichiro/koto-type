@@ -145,6 +145,8 @@ make help
 - `make test-user-dictionary` - Run user dictionary unit tests
 - `make test-smoke-server` - Run packaged server smoke tests
 - `make test-benchmark` - Run the reproducible MLX accuracy/latency benchmark (5 measured runs after warmup)
+- `make test-swift-mlx-spike` - Run the isolated MLX Swift Whisper protocol tests
+- `make benchmark-swift-mlx-spike` - Generate the gated MLX Swift feasibility evidence
 - `make check-benchmark BASELINE=... CANDIDATE=...` - Reject accuracy or speed regressions
 - `make test-all` - Run all tests
 
@@ -353,6 +355,10 @@ make test-smoke-server
 
 # Reproducible accuracy and latency benchmark
 make test-benchmark
+
+# Isolated MLX Swift feasibility spike (developer-only, not shipped)
+cd experiments/mlx-swift-whisper-spike && swift test --filter SpikeProtocolTests
+KOTOTYPE_ENABLE_EXPERIMENTAL_SWIFT_ASR=1 swift run mlx-swift-whisper-spike --probe
 
 # Compare two benchmark result files; exits non-zero on any regression
 make check-benchmark BASELINE=path/to/baseline.json CANDIDATE=path/to/candidate.json

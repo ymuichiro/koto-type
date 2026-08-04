@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-noise-eval test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-noise-eval test-benchmark test-swift-mlx-spike benchmark-swift-mlx-spike test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -21,6 +21,8 @@ help:
 	@echo "  make test-noise-eval - ノイズ戦略評価 CLI のユニットテスト"
 	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
 	@echo "  make test-benchmark - 固定音声で精度・速度ベンチマークを実行"
+	@echo "  make test-swift-mlx-spike - MLX Swift 実験 worker の protocol test"
+	@echo "  make benchmark-swift-mlx-spike - MLX Swift 実験 worker の比較証跡を生成"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
 	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
@@ -59,6 +61,12 @@ test-noise-eval:
 
 test-benchmark:
 	$(PYTHON) -m tools.evaluate_noise_strategies --strategies ffmpeg_office_gate --repetitions 5
+
+test-swift-mlx-spike:
+	cd experiments/mlx-swift-whisper-spike && swift test --filter SpikeProtocolTests
+
+benchmark-swift-mlx-spike:
+	uv run python scripts/benchmark_swift_whisper_spike.py --binary experiments/mlx-swift-whisper-spike/.build/arm64-apple-macosx/debug/mlx-swift-whisper-spike
 
 check-benchmark:
 	@test -n "$(BASELINE)" -a -n "$(CANDIDATE)" || (echo "BASELINE and CANDIDATE are required" && exit 2)

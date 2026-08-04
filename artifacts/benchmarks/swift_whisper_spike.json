@@ -1,0 +1,40 @@
+{
+  "status": "not_comparable",
+  "reason": "native_whisper_decoder_not_implemented",
+  "binary": "experiments/mlx-swift-whisper-spike/.build/arm64-apple-macosx/debug/mlx-swift-whisper-spike",
+  "probe": null,
+  "probe_exit_code": 255,
+  "probe_stdout": "MLX error: Failed to load the default metallib. library not found library not found library not found library not found  at /Users/you/.codex/worktrees/a124cec9-5b91-41e3-82ff-238d95bc6014/koto-type/experiments/mlx-swift-whisper-spike/.build/checkouts/mlx-swift/Source/Cmlx/mlx-c/mlx/c/stream.cpp:115",
+  "probe_stderr": "",
+  "probe_parse_error": "Expecting value: line 1 column 1 (char 0)",
+  "cases": [
+    {
+      "audio_path": "/Users/you/.codex/worktrees/a124cec9-5b91-41e3-82ff-238d95bc6014/koto-type/assets/audio/test_speech_ja.wav",
+      "status": "unsupported",
+      "exit_code": 0,
+      "elapsed_seconds": 0.055422040983103216,
+      "peak_rss_bytes_cumulative_child_processes": 26787840,
+      "healthcheck_response": "__KOTOTYPE_HEALTHCHECK_OK__:benchmark",
+      "transcript": "",
+      "diagnostics": [
+        "mlx-swift-whisper-spike: experimental worker; ASR is intentionally unavailable until a native Whisper decoder is supplied",
+        "swift ASR request unsupported: mode=transcribe, audio_path=/Users/you/.codex/worktrees/a124cec9-5b91-41e3-82ff-238d95bc6014/koto-type/assets/audio/test_speech_ja.wav, reason=native_whisper_decoder_missing"
+      ]
+    },
+    {
+      "audio_path": "/Users/you/.codex/worktrees/a124cec9-5b91-41e3-82ff-238d95bc6014/koto-type/assets/audio/test_speech_ja_300s.wav",
+      "status": "unsupported",
+      "exit_code": 0,
+      "elapsed_seconds": 0.06285133305937052,
+      "peak_rss_bytes_cumulative_child_processes": 26787840,
+      "healthcheck_response": "__KOTOTYPE_HEALTHCHECK_OK__:benchmark",
+      "transcript": "",
+      "diagnostics": [
+        "mlx-swift-whisper-spike: experimental worker; ASR is intentionally unavailable until a native Whisper decoder is supplied",
+        "swift ASR request unsupported: mode=transcribe, audio_path=/Users/you/.codex/worktrees/a124cec9-5b91-41e3-82ff-238d95bc6014/koto-type/assets/audio/test_speech_ja_300s.wav, reason=native_whisper_decoder_missing"
+      ]
+    }
+  ],
+  "python_baseline": "artifacts/benchmarks/asr_benchmark_results.json",
+  "comparison_note": "No WER/CER or ASR latency comparison is valid until Swift produces text."
+}
