@@ -8,6 +8,7 @@ class MenuBarController: NSObject {
     private var checkForUpdatesItem: NSMenuItem?
     var showSettings: (() -> Void)?
     var showHistory: (() -> Void)?
+    var showPromptAuthoring: (() -> Void)?
     var importAudioFile: (() -> Void)?
     var checkForUpdates: (() -> Void)?
     
@@ -42,6 +43,14 @@ class MenuBarController: NSObject {
         historyItem.target = self
         menu.addItem(historyItem)
 
+        let promptAuthoringItem = NSMenuItem(
+            title: "Voice Prompt Authoring (Prototype)...",
+            action: #selector(showPromptAuthoringMenu),
+            keyEquivalent: "p"
+        )
+        promptAuthoringItem.target = self
+        menu.addItem(promptAuthoringItem)
+
         let checkForUpdatesItem = NSMenuItem(
             title: "Check for Updates...",
             action: #selector(checkForUpdatesMenu),
@@ -68,6 +77,10 @@ class MenuBarController: NSObject {
 
     @objc private func showHistoryMenu() {
         showHistory?()
+    }
+
+    @objc private func showPromptAuthoringMenu() {
+        showPromptAuthoring?()
     }
 
     @objc private func importAudioFileMenu() {

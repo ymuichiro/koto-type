@@ -312,6 +312,26 @@ Apple references:
 
 This is normal behavior for apps that are not Developer ID signed and notarized. After approval, the app will launch normally.
 
+### Voice Prompt Authoring (Issue 89 prototype)
+
+The menu bar item **Voice Prompt Authoring (Prototype)...** opens an explicit opt-in,
+turn-based session. Each turn uses the existing Python Whisper ASR path. When the
+turn finishes, KotoType keeps the raw transcript, dialogue history, and Prompt Draft
+as separate values, asks the next deterministic local clarification question, and
+speaks that response with the macOS speech synthesizer.
+
+Choose **Clean Prompt** for meaning-preserving prose cleanup or **Structured Prompt**
+for Goal, Background, Constraints, Inputs, Expected Output, and Unknowns sections.
+Unknown sections remain `[Unknown]`; the prototype never adds facts or answers the
+prompt. Review and edit the draft before **Copy Draft** or the explicit **Confirm &
+Paste** action. There is no auto-submit and Voice Shortcuts are bypassed.
+
+This developer-only prototype does not download or invoke a cloud/local LLM yet;
+the clarification policy is deterministic so the safety and state contract can be
+validated without changing the stable ASR runtime. Prompt sessions also do not send
+screen OCR context to post-processing. Raw turns exist only in the open session and
+are not added to ordinary transcription history.
+
 ## Project Structure
 
 ```
@@ -329,7 +349,7 @@ koto-type/
 │   │   ├── Audio/             # Recording
 │   │   ├── Input/             # Hotkey/input handling
 │   │   ├── Transcription/     # Python process communication & batch control
-│   │   ├── UI/                # Menu bar/settings UI
+│   │   ├── UI/                # Menu bar/settings/prompt authoring UI
 │   │   └── Support/           # Logger/settings/permissions
 │   ├── Package.swift
 │   └── scripts/
@@ -585,6 +605,7 @@ Made with ❤️ by [KotoType Contributors](CONTRIBUTORS.md)
 - **Microphone Permission**: Must be granted in System Settings
 - **Accessibility Permission**: Required for hotkeys and keyboard simulation
 - **Whisper Model**: `large-v3-turbo` download on first launch (several GB)
+- **Voice Prompt Authoring**: Issue 89 prototype is opt-in and deterministic; it does not download a prompt-generation model yet
 
 ## Roadmap
 
