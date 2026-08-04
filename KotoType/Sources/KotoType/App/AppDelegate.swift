@@ -11,6 +11,7 @@ private final class RecordingSessionContext {
     let translationTargetLanguage: String
     let batchTranscriptionManager: BatchTranscriptionManager
     let windowFocusTarget: WindowFocusTarget?
+    let isPromptAuthoring: Bool
     var liveTranscriptionPolicy: LiveTranscriptionPolicy?
     var finalizationReadyWorkItem: DispatchWorkItem?
     var completionTimeoutWorkItem: DispatchWorkItem?
@@ -20,12 +21,14 @@ private final class RecordingSessionContext {
         id: Int,
         mode: RecordingRequestMode,
         translationTargetLanguage: String,
-        windowFocusTarget: WindowFocusTarget?
+        windowFocusTarget: WindowFocusTarget?,
+        isPromptAuthoring: Bool
     ) {
         self.id = id
         self.mode = mode
         self.translationTargetLanguage = translationTargetLanguage
         self.windowFocusTarget = windowFocusTarget
+        self.isPromptAuthoring = isPromptAuthoring
         self.batchTranscriptionManager = BatchTranscriptionManager()
     }
 
@@ -68,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var appUpdater: AppUpdater?
     var settingsWindowController: SettingsWindowController?
     var historyWindowController: HistoryWindowController?
+    var promptAuthoringWindowController: PromptAuthoringWindowController?
     var recordingIndicatorWindow: RecordingIndicatorWindow?
     var initialSetupWindowController: InitialSetupWindowController?
     var isRecording = false
@@ -97,6 +101,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingLiveRecordingProcessingMessage: String?
     private var startingRecordingSessionID: Int?
     private var deferredRecordingStartupAction: DeferredRecordingStartupAction?
+    private var isPromptAuthoringActive = false
+    private var promptAuthoringFocusTarget: WindowFocusTarget?
     private let staleBatchFileMaxAge: TimeInterval = 6 * 60 * 60
     private let temporaryBatchCleanupInterval: TimeInterval = 10 * 60
     private let backendPreparationRetryDelay: TimeInterval = 0.25
@@ -262,6 +268,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ensureMultiProcessManagerCreatedIfNeeded()
         settingsWindowController = SettingsWindowController()
         historyWindowController = HistoryWindowController()
+        promptAuthoringWindowController = PromptAuthoringWindowController()
         recordingIndicatorWindow = RecordingIndicatorWindow { [weak self] in
             Task { @MainActor [weak self] in
                 self?.cancelRecording()
@@ -275,6 +282,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.showHistory = { [weak self] in
             self?.historyWindowController?.showHistory()
         }
+        menuBarController?.showPromptAuthoring = { [weak self] in
+            self?.showPromptAuthoring()
+        }
         menuBarController?.importAudioFile = { [weak self] in
             self?.presentImportAudioPanel()
         }
@@ -287,6 +297,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsWindowController?.onShowHistoryRequested = { [weak self] in
             self?.historyWindowController?.showHistory()
+        }
+        promptAuthoringWindowController?.onToggleRecording = { [weak self] in
+            self?.togglePromptAuthoringRecording()
+        }
+        promptAuthoringWindowController?.onEndSession = { [weak self] in
+            self?.endPromptAuthoring()
+        }
+        promptAuthoringWindowController?.onConfirmAndPaste = { [weak self] in
+            self?.promptAuthoringWindowController?.confirmAndPaste()
         }
         settingsWindowController?.onSettingsChanged = { [weak self] in
             Task { @MainActor [weak self] in
@@ -381,6 +400,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    private func showPromptAuthoring() {
+        guard !isImportingAudio else {
+            promptAuthoringWindowController?.setStatus("Finish imported audio transcription before starting a prompt session.")
+            return
+        }
+        guard !isRecording, finalizationQueue.isEmpty else {
+            promptAuthoringWindowController?.setStatus("Wait for the current recording or transcription to finish.")
+            return
+        }
+
+        currentSettings = SettingsManager.shared.load()
+        isPromptAuthoringActive = true
+        promptAuthoringFocusTarget = WindowFocusRestorer.capture()
+        promptAuthoringWindowController?.resetSession()
+        promptAuthoringWindowController?.showPromptAuthoring(focusTarget: promptAuthoringFocusTarget)
+    }
+
+    private func togglePromptAuthoringRecording() {
+        guard isPromptAuthoringActive else { return }
+        if isRecording {
+            guard let sessionID = activeRecordingSessionID,
+                  sessionByID[sessionID]?.isPromptAuthoring == true else {
+                promptAuthoringWindowController?.setStatus("A normal transcription is currently recording.")
+                return
+            }
+            stopRecording()
+        } else {
+            startRecording(mode: .transcribe)
+        }
+    }
+
+    private func endPromptAuthoring() {
+        guard isPromptAuthoringActive || promptAuthoringWindowController?.window?.isVisible == true else {
+            return
+        }
+        if isRecording,
+           let sessionID = activeRecordingSessionID,
+           sessionByID[sessionID]?.isPromptAuthoring == true {
+            cancelRecording()
+        }
+        isPromptAuthoringActive = false
+        promptAuthoringFocusTarget = nil
+        promptAuthoringWindowController?.updateRecordingState(false)
+        promptAuthoringWindowController?.closeWithoutEndingSession()
+    }
+
     func startRecording(mode: RecordingRequestMode = .transcribe) {
         guard !isImportingAudio else {
             Logger.shared.log("Recording request ignored because imported audio transcription is running", level: .warning)
@@ -391,19 +456,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let windowFocusTarget = WindowFocusRestorer.capture()
+        let windowFocusTarget = isPromptAuthoringActive
+            ? promptAuthoringFocusTarget
+            : WindowFocusRestorer.capture()
         currentSettings = SettingsManager.shared.load()
-        beginRecordingSession(mode: mode, windowFocusTarget: windowFocusTarget)
+        let effectiveMode: RecordingRequestMode = isPromptAuthoringActive ? .transcribe : mode
+        beginRecordingSession(
+            mode: effectiveMode,
+            windowFocusTarget: windowFocusTarget,
+            isPromptAuthoring: isPromptAuthoringActive
+        )
     }
 
     private func beginRecordingSession(
         mode: RecordingRequestMode,
-        windowFocusTarget: WindowFocusTarget?
+        windowFocusTarget: WindowFocusTarget?,
+        isPromptAuthoring: Bool = false
     ) {
         let session = createRecordingSession(
             mode: mode,
             translationTargetLanguage: currentSettings.translationTargetLanguage,
-            windowFocusTarget: windowFocusTarget
+            windowFocusTarget: windowFocusTarget,
+            isPromptAuthoring: isPromptAuthoring
         )
         let sessionID = session.id
         let liveTranscriptionPolicy = LiveTranscriptionPolicy.resolve(
@@ -413,6 +487,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         session.liveTranscriptionPolicy = liveTranscriptionPolicy
         pendingLiveRecordingProcessingMessage = nil
         isRecording = true
+        if isPromptAuthoring {
+            promptAuthoringWindowController?.updateRecordingState(true)
+        }
         activeRecordingSessionID = sessionID
         indicatorPresentation.beginLiveSession(sessionID)
         Logger.shared.log(
@@ -543,6 +620,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard didStart else {
+            if sessionByID[sessionID]?.isPromptAuthoring == true {
+                promptAuthoringWindowController?.updateRecordingState(false)
+            }
             handleRecordingStartupFailure(sessionID: sessionID, failureReason: failureReason)
             return
         }
@@ -627,7 +707,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         isRecording = false
         activeRecordingSessionID = nil
-        session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
+        if session.isPromptAuthoring {
+            promptAuthoringWindowController?.updateRecordingState(false)
+        }
+        if !session.isPromptAuthoring {
+            session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.sessionByID[sessionID]?.clearScreenshotContext()
         }
@@ -741,8 +826,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if isRecording, let sessionID = activeRecordingSessionID {
             Logger.shared.log("Canceling audio recording for session \(sessionID)...", level: .info)
+            let isPromptAuthoring = sessionByID[sessionID]?.isPromptAuthoring == true
             isRecording = false
             activeRecordingSessionID = nil
+            if isPromptAuthoring {
+                promptAuthoringWindowController?.updateRecordingState(false)
+            }
             realtimeRecorder?.stopRecording(discardPendingAudio: true)
             realtimeRecorder?.onInputLevelChanged = nil
             realtimeRecorder?.onInputDeviceNameChanged = nil
@@ -766,6 +855,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let sessionID = indicatorPresentation.currentLiveSessionID {
             Logger.shared.log("Canceling pending transcription for session \(sessionID)...", level: .info)
+            if sessionByID[sessionID]?.isPromptAuthoring == true {
+                promptAuthoringWindowController?.updateRecordingState(false)
+            }
             destroySession(sessionID: sessionID)
 
             if indicatorPresentation.currentLiveSessionID == nil {
@@ -796,7 +888,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func createRecordingSession(
         mode: RecordingRequestMode,
         translationTargetLanguage: String,
-        windowFocusTarget: WindowFocusTarget?
+        windowFocusTarget: WindowFocusTarget?,
+        isPromptAuthoring: Bool
     ) -> RecordingSessionContext {
         let sessionID = nextRecordingSessionID
         nextRecordingSessionID += 1
@@ -804,7 +897,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             id: sessionID,
             mode: mode,
             translationTargetLanguage: translationTargetLanguage,
-            windowFocusTarget: windowFocusTarget
+            windowFocusTarget: windowFocusTarget,
+            isPromptAuthoring: isPromptAuthoring
         )
         sessionByID[sessionID] = session
         return session
@@ -930,6 +1024,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         session.cancelFinalizationReadyWorkItem()
 
         let finalText = session.batchTranscriptionManager.finalize() ?? ""
+        if session.isPromptAuthoring {
+            if finalText.isEmpty {
+                promptAuthoringWindowController?.setStatus(
+                    "The turn produced no text. Raw transcript was not changed; try again."
+                )
+            } else {
+                promptAuthoringWindowController?.appendTranscript(finalText)
+            }
+            cleanupPendingSegmentFiles(forSessionID: sessionID)
+            session.batchTranscriptionManager.reset()
+            if indicatorPresentation.currentLiveSessionID == sessionID {
+                indicatorPresentation.setFallbackLiveSession(finalizationQueue.liveIndicatorFallbackSessionID)
+                recordingIndicatorWindow?.hide()
+            }
+            return
+        }
+
         let didInsertText: Bool
         if !finalText.isEmpty {
             Logger.shared.log(
