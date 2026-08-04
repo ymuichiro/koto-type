@@ -36,6 +36,17 @@ final class PromptAuthoringTests: XCTestCase {
         XCTAssertTrue(result.state.pendingQuestion.contains("background") || result.state.pendingQuestion.contains("constraints"))
     }
 
+    func testRawTranscriptPreservesASROutputWhileDraftCleansIt() {
+        let result = PromptAuthoringEngine.applyTurn(
+            to: .initial(format: .cleanPrompt),
+            transcript: "Keep  the API\nunchanged"
+        )
+
+        XCTAssertEqual(result.state.rawTranscripts, ["Keep  the API\nunchanged"])
+        XCTAssertEqual(result.state.dialogue.first?.rawTranscript, "Keep  the API\nunchanged")
+        XCTAssertEqual(result.state.draft, "Keep the API unchanged。")
+    }
+
     func testEmptyTurnDoesNotMutateRawTranscriptOrDraft() {
         let initial = PromptAuthoringState.initial(format: .structuredPrompt)
         let result = PromptAuthoringEngine.applyTurn(to: initial, transcript: "   \n\t")

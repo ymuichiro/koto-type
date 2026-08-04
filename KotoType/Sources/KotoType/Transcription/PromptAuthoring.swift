@@ -77,8 +77,7 @@ enum PromptAuthoringEngine {
         to state: PromptAuthoringState,
         transcript: String
     ) -> PromptAuthoringTurnResult {
-        let normalizedTranscript = normalizeTranscript(transcript)
-        guard !normalizedTranscript.isEmpty else {
+        guard !normalizeTranscript(transcript).isEmpty else {
             var unchanged = state
             unchanged.assistantResponse = "I did not receive a usable transcript. Please try that turn again."
             unchanged.pendingQuestion = state.pendingQuestion
@@ -89,7 +88,7 @@ enum PromptAuthoringEngine {
             )
         }
 
-        let rawTranscripts = state.rawTranscripts + [normalizedTranscript]
+        let rawTranscripts = state.rawTranscripts + [transcript]
         let draft = buildDraft(format: state.format, rawTranscripts: rawTranscripts)
         let nextQuestion = nextQuestion(
             format: state.format,
@@ -97,7 +96,7 @@ enum PromptAuthoringEngine {
         )
         let assistantResponse = nextQuestion
         let turn = PromptDialogueTurn(
-            rawTranscript: normalizedTranscript,
+            rawTranscript: transcript,
             assistantResponse: assistantResponse
         )
         let nextState = PromptAuthoringState(
@@ -110,7 +109,7 @@ enum PromptAuthoringEngine {
         )
         return PromptAuthoringTurnResult(
             state: nextState,
-            acceptedTranscript: normalizedTranscript,
+            acceptedTranscript: transcript,
             validationPassed: validate(nextState)
         )
     }
