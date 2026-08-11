@@ -2,6 +2,8 @@ import Foundation
 
 struct SettingsDraft: Equatable {
     var hotkeyConfig: HotkeyConfiguration
+    var faithfulHotkeyConfig: HotkeyConfiguration
+    var promptHotkeyConfig: HotkeyConfiguration
     var translationHotkeyConfig: HotkeyConfiguration
     var language: String
     var translationTargetLanguage: String
@@ -20,6 +22,8 @@ struct SettingsDraft: Equatable {
         voiceShortcuts: [VoiceShortcut] = VoiceShortcutManager.shared.loadShortcuts()
     ) {
         hotkeyConfig = settings.hotkeyConfig
+        faithfulHotkeyConfig = settings.faithfulHotkeyConfig
+        promptHotkeyConfig = settings.promptHotkeyConfig
         translationHotkeyConfig = settings.translationHotkeyConfig
         language = settings.language
         translationTargetLanguage = settings.translationTargetLanguage
@@ -44,6 +48,8 @@ struct SettingsDraft: Equatable {
     var appSettings: AppSettings {
         AppSettings(
             hotkeyConfig: hotkeyConfig,
+            faithfulHotkeyConfig: faithfulHotkeyConfig,
+            promptHotkeyConfig: promptHotkeyConfig,
             translationHotkeyConfig: translationHotkeyConfig,
             language: language,
             translationTargetLanguage: translationTargetLanguage,

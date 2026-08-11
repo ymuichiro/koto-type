@@ -39,10 +39,27 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
     }
 
     private func applySettings(_ settings: AppSettings) {
-        let translationHotkeyConfig =
-            settings.translationHotkeyConfig.isSet && settings.translationHotkeyConfig == settings.hotkeyConfig
-            ? .unset
-            : settings.translationHotkeyConfig
+        let configuredHotkeys: [RecordingRequestMode: HotkeyConfiguration] = [
+            .transcribe: settings.hotkeyConfig,
+            .faithful: settings.faithfulHotkeyConfig,
+            .prompt: settings.promptHotkeyConfig,
+            .translate: settings.translationHotkeyConfig,
+        ]
+        var usedHotkeys = Set<HotkeyConfiguration>()
+        let normalizedHotkeys = Dictionary(uniqueKeysWithValues: RecordingRequestMode.allCases.map { mode in
+            let configuration = configuredHotkeys[mode] ?? .unset
+            guard configuration.isSet else {
+                return (mode, configuration)
+            }
+            guard usedHotkeys.insert(configuration).inserted else {
+                Logger.shared.log(
+                    "HotkeyManager: ignoring duplicate \(mode.rawValue) shortcut \(configuration.description)",
+                    level: .warning
+                )
+                return (mode, HotkeyConfiguration.unset)
+            }
+            return (mode, configuration)
+        })
 
         var releasedModes: [RecordingRequestMode] = []
         lock.lock()
@@ -51,15 +68,15 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
                 releasedModes.append(mode)
             }
         }
-        hotkeyStateByMode = [
-            .transcribe: HotkeyState(configuration: settings.hotkeyConfig),
-            .translate: HotkeyState(configuration: translationHotkeyConfig),
-        ]
+        hotkeyStateByMode = Dictionary(uniqueKeysWithValues: RecordingRequestMode.allCases.map { mode in
+            let configuration = normalizedHotkeys[mode] ?? .unset
+            return (mode, HotkeyState(configuration: configuration))
+        })
         _previousModifiers = []
         lock.unlock()
 
         Logger.shared.log(
-            "HotkeyManager: Updated configurations - transcription=\(settings.hotkeyConfig.description), translation=\(translationHotkeyConfig.description)",
+            "HotkeyManager: Updated configurations - transcription=\(settings.hotkeyConfig.description), faithful=\(settings.faithfulHotkeyConfig.description), prompt=\(settings.promptHotkeyConfig.description), translation=\(settings.translationHotkeyConfig.description)",
             level: .info
         )
 

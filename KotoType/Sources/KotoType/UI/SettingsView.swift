@@ -225,6 +225,20 @@ struct SettingsView: View {
                 }
             }
 
+            Divider()
+
+            modeHotkeySection(
+                mode: .faithful,
+                configuration: draft.faithfulHotkeyConfig,
+                onChange: { draft.faithfulHotkeyConfig = $0 }
+            )
+
+            modeHotkeySection(
+                mode: .prompt,
+                configuration: draft.promptHotkeyConfig,
+                onChange: { draft.promptHotkeyConfig = $0 }
+            )
+
             if let hotkeyValidationMessage {
                 Text(hotkeyValidationMessage)
                     .font(.caption)
@@ -236,6 +250,28 @@ struct SettingsView: View {
     private var transcriptionSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionTitle("Transcription")
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Recording modes")
+                    .font(.subheadline)
+                ForEach([
+                    RecordingRequestMode.transcribe,
+                    .faithful,
+                    .prompt,
+                    .translate,
+                ], id: \.self) { mode in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(mode.displayName)
+                            .font(.caption)
+                        Text("— \(mode.summary)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Text("AI Markdown prompt mode opens a local review panel and never inserts or submits automatically. The Qwen3-4B-4bit model is downloaded on first use and stays on this Mac.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Language")
@@ -737,6 +773,35 @@ struct SettingsView: View {
             .font(.headline)
     }
 
+    private func modeHotkeySection(
+        mode: RecordingRequestMode,
+        configuration: HotkeyConfiguration,
+        onChange: @escaping (HotkeyConfiguration) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(mode.displayName) shortcut")
+                .font(.subheadline)
+
+            HotkeyRecorderView(initialConfig: configuration, onChange: onChange)
+                .frame(height: 40)
+
+            HStack(spacing: 12) {
+                Text("Current shortcut: \(hotkeyDescription(for: configuration))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Button("Disable") {
+                    onChange(.unset)
+                }
+                .disabled(!configuration.isSet)
+            }
+
+            Text(mode.summary)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
     private func storageCard<Content: View>(
         title: String,
         detail: String,
@@ -955,20 +1020,38 @@ struct SettingsView: View {
     private var hotkeyValidationMessage: String? {
         Self.hotkeyValidationMessage(
             transcriptionHotkey: draft.hotkeyConfig,
-            translationHotkey: draft.translationHotkeyConfig
+            translationHotkey: draft.translationHotkeyConfig,
+            faithfulHotkey: draft.faithfulHotkeyConfig,
+            promptHotkey: draft.promptHotkeyConfig
         )
     }
 
     static func hotkeyValidationMessage(
         transcriptionHotkey: HotkeyConfiguration,
-        translationHotkey: HotkeyConfiguration
+        translationHotkey: HotkeyConfiguration,
+        faithfulHotkey: HotkeyConfiguration = .unset,
+        promptHotkey: HotkeyConfiguration = .unset
     ) -> String? {
-        guard translationHotkey.isSet,
-            translationHotkey == transcriptionHotkey
-        else {
-            return nil
+        let entries: [(RecordingRequestMode, HotkeyConfiguration)] = [
+            (.transcribe, transcriptionHotkey),
+            (.faithful, faithfulHotkey),
+            (.prompt, promptHotkey),
+            (.translate, translationHotkey),
+        ]
+
+        for leftIndex in entries.indices {
+            let (leftMode, leftHotkey) = entries[leftIndex]
+            guard leftHotkey.isSet else { continue }
+            for rightIndex in entries.indices where rightIndex > leftIndex {
+                let (rightMode, rightHotkey) = entries[rightIndex]
+                guard rightHotkey.isSet, leftHotkey == rightHotkey else { continue }
+                if leftMode == .transcribe, rightMode == .translate {
+                    return "Translation shortcut must differ from transcription."
+                }
+                return "\(leftMode.displayName) shortcut must differ from \(rightMode.displayName.lowercased()) shortcut."
+            }
         }
-        return "Translation shortcut must differ from transcription."
+        return nil
     }
 
     private func hotkeyDescription(for configuration: HotkeyConfiguration) -> String {

@@ -28,12 +28,13 @@ hiddenimports = [
     "mlx_whisper.version",
     "mlx_whisper.whisper",
     "mlx_whisper.writers",
+    "mlx_lm",
 ]
 
 datas += collect_data_files("faster_whisper")
 datas += collect_data_files("mlx_whisper")
 
-for package_name in ("mlx",):
+for package_name in ("mlx", "mlx_lm"):
     package_datas, package_binaries, package_hiddenimports = optional_collect_all(
         package_name
     )
