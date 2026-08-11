@@ -20,19 +20,22 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable {
     let source: Source
     let audioFilePath: String?
     let text: String
+    let rawText: String?
 
     init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
         source: Source,
         audioFilePath: String? = nil,
-        text: String
+        text: String,
+        rawText: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
         self.source = source
         self.audioFilePath = audioFilePath
         self.text = text
+        self.rawText = rawText
     }
 }
 
@@ -78,7 +81,12 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
         return readEntriesLocked()
     }
 
-    func addEntry(text: String, source: TranscriptionHistoryEntry.Source, audioFilePath: String? = nil) {
+    func addEntry(
+        text: String,
+        source: TranscriptionHistoryEntry.Source,
+        audioFilePath: String? = nil,
+        rawText: String? = nil
+    ) {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             return
@@ -92,7 +100,8 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
             TranscriptionHistoryEntry(
                 source: source,
                 audioFilePath: audioFilePath,
-                text: normalized
+                text: normalized,
+                rawText: rawText?.trimmingCharacters(in: .whitespacesAndNewlines)
             ),
             at: 0
         )

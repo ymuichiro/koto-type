@@ -35,6 +35,8 @@ struct AppSettings: Codable, Equatable {
     static let defaultTranslationTargetLanguage = "en"
 
     var hotkeyConfig: HotkeyConfiguration
+    var faithfulHotkeyConfig: HotkeyConfiguration
+    var promptHotkeyConfig: HotkeyConfiguration
     var translationHotkeyConfig: HotkeyConfiguration
     var language: String
     var translationTargetLanguage: String
@@ -47,6 +49,8 @@ struct AppSettings: Codable, Equatable {
 
     init(
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
+        faithfulHotkeyConfig: HotkeyConfiguration = .unset,
+        promptHotkeyConfig: HotkeyConfiguration = .unset,
         translationHotkeyConfig: HotkeyConfiguration = .unset,
         language: String = "auto",
         translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
@@ -58,6 +62,8 @@ struct AppSettings: Codable, Equatable {
         recordingCompletionTimeout: Double = AppSettings.defaultRecordingCompletionTimeout
     ) {
         self.hotkeyConfig = hotkeyConfig
+        self.faithfulHotkeyConfig = faithfulHotkeyConfig
+        self.promptHotkeyConfig = promptHotkeyConfig
         self.translationHotkeyConfig = translationHotkeyConfig
         self.language = language
         self.translationTargetLanguage = Self.normalizedTranslationTargetLanguage(
@@ -78,6 +84,12 @@ struct AppSettings: Codable, Equatable {
         hotkeyConfig =
             try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .hotkeyConfig)
             ?? HotkeyConfiguration()
+        faithfulHotkeyConfig =
+            try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .faithfulHotkeyConfig)
+            ?? .unset
+        promptHotkeyConfig =
+            try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .promptHotkeyConfig)
+            ?? .unset
         translationHotkeyConfig =
             try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .translationHotkeyConfig)
             ?? .unset
@@ -155,7 +167,7 @@ final class SettingsManager: @unchecked Sendable {
     func save(_ settings: AppSettings) {
         Logger.shared.log("SettingsManager.save: saving to \(settingsURL.path)")
         Logger.shared.log(
-            "SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), language=\(settings.language), translationTargetLanguage=\(settings.translationTargetLanguage), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
+            "SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), faithfulHotkey=\(settings.faithfulHotkeyConfig.description), promptHotkey=\(settings.promptHotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), language=\(settings.language), translationTargetLanguage=\(settings.translationTargetLanguage), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
         )
         do {
             let data = try JSONEncoder().encode(settings)
@@ -175,7 +187,7 @@ final class SettingsManager: @unchecked Sendable {
             return AppSettings()
         }
         Logger.shared.log(
-            "SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), language=\(settings.language), translationTargetLanguage=\(settings.translationTargetLanguage), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
+            "SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), faithfulHotkey=\(settings.faithfulHotkeyConfig.description), promptHotkey=\(settings.promptHotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), language=\(settings.language), translationTargetLanguage=\(settings.translationTargetLanguage), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
         )
         return settings
     }

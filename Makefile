@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-noise-eval test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-prompt-transformation test-noise-eval test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -53,6 +53,10 @@ test-backend-config:
 	@echo "backend 選択/プリセット関連ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_backend_configuration.py
 
+test-prompt-transformation:
+	@echo "AI Markdown prompt transformation tests..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_prompt_transformation.py
+
 test-noise-eval:
 	@echo "ノイズ戦略評価 CLI のユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_noise_strategy_eval.py
@@ -72,7 +76,7 @@ test-user-dictionary:
 	@echo "辞書機能ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_user_dictionary.py
 
-test-all: test-audio-preprocess test-backend-config test-noise-eval test-user-dictionary
+test-all: test-audio-preprocess test-backend-config test-prompt-transformation test-noise-eval test-user-dictionary
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 

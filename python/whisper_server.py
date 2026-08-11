@@ -24,8 +24,10 @@ import wave
 HEALTHCHECK_REQUEST_PREFIX = "__KOTOTYPE_HEALTHCHECK__:"
 HEALTHCHECK_RESPONSE_PREFIX = "__KOTOTYPE_HEALTHCHECK_OK__:"
 CONTROL_MESSAGE_PREFIX = "__KOTOTYPE_CONTROL__:"
+PROMPT_RESULT_PREFIX = "__KOTOTYPE_PROMPT_RESULT__:"
 DEFAULT_CPU_MODEL_ID = "large-v3-turbo"
 DEFAULT_MLX_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
+DEFAULT_PROMPT_MODEL_ID = "mlx-community/Qwen3-4B-4bit"
 DEFAULT_TASK = "transcribe"
 DEFAULT_REQUEST_MODE = "transcribe"
 DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en"
@@ -124,6 +126,10 @@ def default_managed_cpu_model_path():
 
 def default_managed_mlx_model_path():
     return os.path.join(default_managed_models_root(), "mlx-whisper-large-v3-turbo")
+
+
+def default_managed_prompt_model_path():
+    return os.path.join(default_managed_models_root(), "qwen3-4b-4bit")
 
 
 def default_managed_model_cache_path():
@@ -1108,7 +1114,7 @@ def normalize_quality_preset(value):
 
 def normalize_request_mode(value):
     normalized = str(value or "").strip().lower()
-    if normalized in {DEFAULT_REQUEST_MODE, "translate"}:
+    if normalized in {DEFAULT_REQUEST_MODE, "faithful", "prompt", "translate"}:
         return normalized
     return DEFAULT_REQUEST_MODE
 
@@ -1126,6 +1132,40 @@ def select_whisper_task(mode, translation_target_language):
     if normalized_mode == "translate" and normalized_target == "en":
         return "translate"
     return DEFAULT_TASK
+
+
+def build_prompt_messages(raw_text, language=None):
+    """Build a no-fabrication Markdown editing request for the local model."""
+    language_hint = str(language or "").strip().lower()
+    language_note = (
+        f"The source language is probably {language_hint}. Preserve the source language unless a translation is explicitly requested."
+        if language_hint and language_hint != "auto"
+        else "Preserve the source language unless a translation is explicitly requested."
+    )
+    system = (
+        "You are a prompt editor, not the task-solving AI. Turn the user's speech transcript into a concise, "
+        "clear Markdown prompt that can be sent to another AI. Preserve the user's intent and every explicit fact. "
+        "Remove filler words and obvious repetition, but do not invent requirements, names, numbers, constraints, "
+        "tools, or conclusions. Keep uncertainty explicit with wording such as 'unknown' or 'to be decided'. "
+        "When useful, organize the Markdown with short headings such as Goal, Context, Constraints, Inputs, "
+        "Expected output, and Unknowns; omit sections that are not supported by the transcript. "
+        "Do not answer or execute the request. Return only readable Markdown, never JSON and never a code fence. "
+        + language_note
+    )
+    user = "Source transcript:\n\n" + str(raw_text).strip() + "\n\n/no_think"
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def normalize_prompt_markdown(text):
+    """Remove model wrappers while keeping the generated Markdown intact."""
+    normalized = str(text or "").strip()
+    normalized = re.sub(r"^<think>.*?(?:</think>|$)\s*", "", normalized, flags=re.DOTALL | re.IGNORECASE)
+    normalized = re.sub(r"^```(?:markdown|md)?\s*", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s*```$", "", normalized)
+    return normalized.strip()
 
 
 def select_output_language(mode, translation_target_language, detected_language):
@@ -1402,6 +1442,7 @@ class BackendManager:
         mlx_model_dir,
         model_cache_dir,
         log,
+        prompt_model_dir=None,
     ):
         self.state_path = state_path
         self.lock_path = lock_path
@@ -1410,6 +1451,7 @@ class BackendManager:
         self.model_load_wait_timeout = model_load_wait_timeout
         self.cpu_model_dir = cpu_model_dir
         self.mlx_model_dir = mlx_model_dir
+        self.prompt_model_dir = prompt_model_dir or default_managed_prompt_model_path()
         self.model_cache_dir = model_cache_dir
         self.log = log
         self.cpu_model = None
@@ -1421,6 +1463,9 @@ class BackendManager:
         self.mlx_runtime_reason = None
         self.mlx_disabled_for_session = False
         self.mlx_model_loaded = False
+        self.prompt_model = None
+        self.prompt_tokenizer = None
+        self.prompt_model_failed = False
 
     def _managed_model_status(self, model_kind):
         normalized_kind = normalize_model_kind(model_kind)
@@ -1469,6 +1514,94 @@ class BackendManager:
             self.mlx_model_loaded = False
             remove_directory_tree(self.mlx_model_dir)
         return self._managed_model_status(normalized_kind)
+
+    def _prompt_model_assets_exist(self):
+        config_path = os.path.join(self.prompt_model_dir, "config.json")
+        tokenizer_path = os.path.join(self.prompt_model_dir, "tokenizer.json")
+        has_weights = any(
+            name.endswith((".safetensors", ".safetensors.index.json"))
+            for name in os.listdir(self.prompt_model_dir)
+        ) if os.path.isdir(self.prompt_model_dir) else False
+        return os.path.isfile(config_path) and os.path.isfile(tokenizer_path) and has_weights
+
+    def _ensure_prompt_model(self):
+        if self.prompt_model is not None and self.prompt_tokenizer is not None:
+            return self.prompt_model, self.prompt_tokenizer
+        if self.prompt_model_failed:
+            raise RuntimeError("prompt model was unavailable earlier in this server session")
+
+        def load_prompt_model():
+            from mlx_lm import load
+
+            if not self._prompt_model_assets_exist():
+                from huggingface_hub import snapshot_download
+
+                ensure_private_directory(os.path.dirname(self.prompt_model_dir))
+                self.log(
+                    f"Downloading prompt model {DEFAULT_PROMPT_MODEL_ID} to {self.prompt_model_dir}"
+                )
+                snapshot_download(
+                    repo_id=DEFAULT_PROMPT_MODEL_ID,
+                    local_dir=self.prompt_model_dir,
+                )
+                tighten_directory_tree_permissions(self.prompt_model_dir)
+
+            self.log(f"Loading prompt model from {self.prompt_model_dir}")
+            return load(self.prompt_model_dir)
+
+        try:
+            self.prompt_model, self.prompt_tokenizer = self._run_with_model_load_slot(load_prompt_model)
+            return self.prompt_model, self.prompt_tokenizer
+        except Exception as error:
+            self.prompt_model_failed = True
+            self.log(f"Prompt model unavailable: {error}")
+            self.log(traceback.format_exc())
+            raise
+
+    def transform_prompt(self, raw_text, language=None):
+        raw_text = str(raw_text or "").strip()
+        if not raw_text:
+            return "", True
+
+        try:
+            from mlx_lm import generate
+            from mlx_lm.generate import make_sampler
+
+            model, tokenizer = self._ensure_prompt_model()
+            messages = build_prompt_messages(raw_text, language=language)
+            if hasattr(tokenizer, "apply_chat_template"):
+                prompt = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            else:
+                prompt = "\n\n".join(
+                    f"{message['role']}: {message['content']}" for message in messages
+                ) + "\n\nassistant:"
+            generated = generate(
+                model,
+                tokenizer,
+                prompt=prompt,
+                max_tokens=512,
+                sampler=make_sampler(temp=0.2, top_p=0.9),
+                verbose=False,
+            )
+            normalized = normalize_prompt_markdown(generated)
+            if not normalized:
+                raise ValueError("prompt model returned empty Markdown")
+            if normalized.startswith(("{", "[")):
+                try:
+                    json.loads(normalized)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    raise ValueError("prompt model returned JSON instead of Markdown")
+            return normalized, False
+        except Exception as error:
+            self.log(f"Prompt transformation failed; preserving raw transcript: {error}")
+            self.log(traceback.format_exc())
+            return raw_text, True
 
     def _cpu_model_assets_exist(self):
         config_path = os.path.join(self.cpu_model_dir, "config.json")
@@ -2117,6 +2250,7 @@ def main():
     lock_path = default_server_state_lock_path()
     cpu_model_dir = os.environ.get("KOTOTYPE_CPU_MODEL_DIR", default_managed_cpu_model_path())
     mlx_model_dir = os.environ.get("KOTOTYPE_MLX_MODEL_DIR", default_managed_mlx_model_path())
+    prompt_model_dir = os.environ.get("KOTOTYPE_PROMPT_MODEL_DIR", default_managed_prompt_model_path())
     model_cache_dir = os.environ.get("KOTOTYPE_MODEL_CACHE_DIR", default_managed_model_cache_path())
     current_pid = os.getpid()
     parent_pid = parse_int(os.environ.get("KOTOTYPE_PARENT_PID"), 0)
@@ -2166,6 +2300,7 @@ def main():
         model_load_wait_timeout=model_load_wait_timeout,
         cpu_model_dir=cpu_model_dir,
         mlx_model_dir=mlx_model_dir,
+        prompt_model_dir=prompt_model_dir,
         model_cache_dir=model_cache_dir,
         log=log,
     )
@@ -2341,15 +2476,46 @@ def main():
                     )
                     transcription = ""
 
-                transcription = post_process_text(
-                    transcription,
-                    output_language,
-                    auto_punctuation=request.auto_punctuation,
-                )
+                if request.mode in {"faithful", "prompt"}:
+                    # Keep the Whisper wording intact for the as-spoken workflow and
+                    # preserve a clean ASR source for the prompt editor.
+                    # The confidence gate still protects against unreliable output.
+                    transcription = transcription.strip()
+                else:
+                    transcription = post_process_text(
+                        transcription,
+                        output_language,
+                        auto_punctuation=request.auto_punctuation,
+                    )
                 log(f"Post-processed transcription length: {len(transcription)} characters")
 
+                if request.mode == "prompt":
+                    raw_transcription = transcription
+                    prompt_markdown, used_fallback = backend_manager.transform_prompt(
+                        raw_transcription,
+                        language=output_language,
+                    )
+                    prompt_payload = json.dumps(
+                        {
+                            "rawTranscript": raw_transcription,
+                            "promptMarkdown": prompt_markdown,
+                            "usedFallback": used_fallback,
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    transcription_output = f"{PROMPT_RESULT_PREFIX}{prompt_payload}"
+                    log(
+                        "Prompt transformation completed: "
+                        f"raw_length={len(raw_transcription)}, "
+                        f"markdown_length={len(prompt_markdown)}, "
+                        f"fallback={used_fallback}"
+                    )
+                else:
+                    transcription_output = transcription
+
                 emit_backend_status(backend_status)
-                print(transcription, file=sys.stdout)
+                print(transcription_output, file=sys.stdout)
                 sys.stdout.flush()
                 log("Output flushed")
             finally:

@@ -11,6 +11,8 @@ private final class RecordingSessionContext {
     let translationTargetLanguage: String
     let batchTranscriptionManager: BatchTranscriptionManager
     let windowFocusTarget: WindowFocusTarget?
+    var rawTranscription: String?
+    var promptUsedFallback = false
     var liveTranscriptionPolicy: LiveTranscriptionPolicy?
     var finalizationReadyWorkItem: DispatchWorkItem?
     var completionTimeoutWorkItem: DispatchWorkItem?
@@ -69,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindowController: SettingsWindowController?
     var historyWindowController: HistoryWindowController?
     var recordingIndicatorWindow: RecordingIndicatorWindow?
+    var promptReviewWindow: PromptReviewWindow?
     var initialSetupWindowController: InitialSetupWindowController?
     var isRecording = false
     private var isImportingAudio = false
@@ -267,6 +270,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.cancelRecording()
             }
         }
+        promptReviewWindow = PromptReviewWindow()
         Logger.shared.log("RecordingIndicatorWindow created", level: .debug)
         
         menuBarController?.showSettings = { [weak self] in
@@ -464,11 +468,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             self.pendingSegmentFiles[globalIndex] = url
             currentSession.batchTranscriptionManager.addSegment(url: url, index: localIndex)
-            let screenshotContext = currentSession.consumeScreenshotContext()
+            let screenshotContext: String?
+            if currentSession.mode == .prompt {
+                // OCR is retained for Whisper vocabulary hints in ordinary modes only.
+                // Never forward screen context implicitly to the prompt post-processor.
+                currentSession.clearScreenshotContext()
+                screenshotContext = nil
+            } else {
+                screenshotContext = currentSession.consumeScreenshotContext()
+            }
+            var requestSettings = self.currentSettings
+            if currentSession.mode == .faithful {
+                requestSettings.autoPunctuation = false
+                requestSettings.transcriptionQualityPreset = .high
+            }
             self.multiProcessManager?.processFile(
                 url: url,
                 index: globalIndex,
-                settings: self.currentSettings,
+                settings: requestSettings,
                 sessionID: sessionID,
                 screenshotContext: screenshotContext,
                 mode: currentSession.mode,
@@ -627,7 +644,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         isRecording = false
         activeRecordingSessionID = nil
-        session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
+        if session.mode == .prompt {
+            session.clearScreenshotContext()
+        } else {
+            session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.sessionByID[sessionID]?.clearScreenshotContext()
         }
@@ -852,7 +873,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        session.batchTranscriptionManager.completeSegment(index: route.localIndex, text: output)
+        var finalOutput = output
+        if let promptResult = PythonProcessManager.parsePromptResult(from: output) {
+            session.rawTranscription = promptResult.rawTranscript
+            session.promptUsedFallback = promptResult.usedFallback
+            finalOutput = promptResult.promptMarkdown
+            Logger.shared.log(
+                "Prompt transformation received for session \(route.sessionID): rawLength=\(promptResult.rawTranscript.count), markdownLength=\(promptResult.promptMarkdown.count), fallback=\(promptResult.usedFallback)",
+                level: promptResult.usedFallback ? .warning : .info
+            )
+        } else if session.mode == .prompt {
+            session.rawTranscription = output
+            session.promptUsedFallback = true
+        }
+
+        session.batchTranscriptionManager.completeSegment(index: route.localIndex, text: finalOutput)
         tryFinalizePendingSessionsIfNeeded()
     }
 
@@ -930,6 +965,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         session.cancelFinalizationReadyWorkItem()
 
         let finalText = session.batchTranscriptionManager.finalize() ?? ""
+        let rawText = session.rawTranscription ?? finalText
         let didInsertText: Bool
         if !finalText.isEmpty {
             Logger.shared.log(
@@ -937,47 +973,62 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 level: .info
             )
 
-            if let windowFocusTarget = session.windowFocusTarget {
-                let restorationResult = WindowFocusRestorer.restoreIfNeeded(windowFocusTarget)
-                Logger.shared.log(
-                    "Window focus restoration for session "
-                        + String(sessionID)
-                        + ": "
-                        + restorationResult.logDescription,
-                    level: restorationResult == .unavailable ? .warning : .debug
+            if session.mode == .prompt {
+                TranscriptionHistoryManager.shared.addEntry(
+                    text: finalText,
+                    source: .liveRecording,
+                    rawText: rawText
                 )
-            }
-
-            if let shortcut = VoiceShortcutManager.shared.resolve(input: finalText) {
-                Logger.shared.log(
-                    "Voice shortcut matched for session \(sessionID) with action=\(shortcut.actionKind.rawValue) and inputLength=\(finalText.count)",
-                    level: .info
+                presentPromptReview(
+                    rawText: rawText,
+                    promptMarkdown: finalText,
+                    usedFallback: session.promptUsedFallback,
+                    windowFocusTarget: session.windowFocusTarget
                 )
-
-                if VoiceShortcutExecutor.execute(shortcut) {
+                didInsertText = true
+            } else {
+                if let windowFocusTarget = session.windowFocusTarget {
+                    let restorationResult = WindowFocusRestorer.restoreIfNeeded(windowFocusTarget)
                     Logger.shared.log(
-                        "Voice shortcut executed successfully (session \(sessionID))",
+                        "Window focus restoration for session "
+                            + String(sessionID)
+                            + ": "
+                            + restorationResult.logDescription,
+                        level: restorationResult == .unavailable ? .warning : .debug
+                    )
+                }
+
+                if let shortcut = VoiceShortcutManager.shared.resolve(input: finalText) {
+                    Logger.shared.log(
+                        "Voice shortcut matched for session \(sessionID) with action=\(shortcut.actionKind.rawValue) and inputLength=\(finalText.count)",
                         level: .info
                     )
-                    didInsertText = true
+
+                    if VoiceShortcutExecutor.execute(shortcut) {
+                        Logger.shared.log(
+                            "Voice shortcut executed successfully (session \(sessionID))",
+                            level: .info
+                        )
+                        didInsertText = true
+                    } else {
+                        Logger.shared.log(
+                            "Voice shortcut execution failed; falling back to text insertion (session \(sessionID))",
+                            level: .warning
+                        )
+                        KeystrokeSimulator.typeText(finalText)
+                        didInsertText = true
+                    }
                 } else {
-                    Logger.shared.log(
-                        "Voice shortcut execution failed; falling back to text insertion (session \(sessionID))",
-                        level: .warning
-                    )
                     KeystrokeSimulator.typeText(finalText)
+                    Logger.shared.log("Text typing completed (session \(sessionID))", level: .info)
                     didInsertText = true
                 }
-            } else {
-                KeystrokeSimulator.typeText(finalText)
-                Logger.shared.log("Text typing completed (session \(sessionID))", level: .info)
-                didInsertText = true
-            }
 
-            TranscriptionHistoryManager.shared.addEntry(
-                text: finalText,
-                source: .liveRecording
-            )
+                TranscriptionHistoryManager.shared.addEntry(
+                    text: finalText,
+                    source: .liveRecording
+                )
+            }
         } else {
             didInsertText = false
         }
@@ -1003,6 +1054,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 sessionID: sessionID,
                 fallbackSessionID: self.finalizationQueue.liveIndicatorFallbackSessionID
             )
+        }
+    }
+
+    private func presentPromptReview(
+        rawText: String,
+        promptMarkdown: String,
+        usedFallback: Bool,
+        windowFocusTarget: WindowFocusTarget?
+    ) {
+        guard let promptReviewWindow else {
+            KeystrokeSimulator.copyText(promptMarkdown)
+            showTransientRecordingAttention("Prompt copied; review window was unavailable")
+            return
+        }
+
+        promptReviewWindow.present(
+            rawTranscript: rawText,
+            promptMarkdown: promptMarkdown,
+            usedFallback: usedFallback
+        ) { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case let .insert(text):
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                if let windowFocusTarget {
+                    let restorationResult = WindowFocusRestorer.restoreIfNeeded(windowFocusTarget)
+                    if restorationResult == .unavailable {
+                        KeystrokeSimulator.copyText(text)
+                        self.showTransientRecordingAttention("Target unavailable; prompt copied instead")
+                    } else {
+                        KeystrokeSimulator.typeText(text)
+                    }
+                } else {
+                    KeystrokeSimulator.copyText(text)
+                    self.showTransientRecordingAttention("No target field; prompt copied instead")
+                }
+            case let .copy(text):
+                KeystrokeSimulator.copyText(text)
+                if let windowFocusTarget {
+                    _ = WindowFocusRestorer.restoreIfNeeded(windowFocusTarget)
+                }
+            case .cancel:
+                Logger.shared.log("Prompt review canceled by user", level: .info)
+                if let windowFocusTarget {
+                    _ = WindowFocusRestorer.restoreIfNeeded(windowFocusTarget)
+                }
+            }
         }
     }
 

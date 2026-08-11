@@ -101,6 +101,15 @@ private struct HistoryRowView: View {
             Text(entry.text)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let rawText = entry.rawText, !rawText.isEmpty {
+                DisclosureGroup("Raw transcript") {
+                    Text(rawText)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
         .padding(10)
         .background(Color(NSColor.controlBackgroundColor))

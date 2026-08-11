@@ -42,6 +42,8 @@ Hold your hotkey, speak, release, and KotoType transcribes your speech and inser
 - **Session-Safe Finalization**: If you start another recording before a previous one finishes, each recording finalizes independently in stop order (no mixed chunks)
 - **High-Accuracy Transcription**: Powered by OpenAI Whisper, with optional Apple Silicon MLX acceleration
 - **Automatic Text Input**: Automatically types transcribed text at the cursor position
+- **Three recording workflows**: fast transcription, faithful as-spoken transcription, and an opt-in AI Markdown prompt draft
+- **Prompt review panel**: AI prompt mode keeps the raw transcript visible, lets you edit the Markdown draft, and requires Copy or Insert confirmation
 - **Audio Preprocessing**: Noise reduction with spectral subtraction and normalization
 - **History Management**: Access past transcriptions from the history menu
 - **Audio File Import**: Import `wav`/`mp3` files for transcription
@@ -230,6 +232,16 @@ ffmpeg -version
 1. Click the text field where you want output.
 2. Hold your hotkey while speaking.
 3. Release the hotkey and wait for automatic text insertion.
+
+### Recording modes
+
+The Settings window lets you assign separate push-to-talk shortcuts to each workflow:
+
+- **Fast transcription** keeps the existing low-friction behavior and inserts the transcript directly.
+- **Faithful transcription** preserves spoken wording and disables punctuation rewriting before insertion.
+- **AI Markdown prompt** sends only the local Whisper transcript to the optional local Qwen3-4B-4bit model. It opens a review panel with both the preserved raw transcript and an editable Markdown prompt. The panel never submits or inserts automatically; choose **Copy**, **Insert**, or **Cancel**.
+
+The AI prompt model is downloaded on first use into KotoType-managed application storage (approximately 2–3 GB depending on the model revision). Transcripts and prompts stay local; screen OCR context is not sent to the prompt model. If the model is unavailable, KotoType shows the raw transcript as the draft and does not discard it.
 
 #### After updating to a new version
 

@@ -10,6 +10,7 @@ struct PythonLaunchCommand: Equatable {
 
 final class PythonProcessManager: @unchecked Sendable {
     static let controlMessagePrefix = "__KOTOTYPE_CONTROL__:"
+    static let promptResultPrefix = "__KOTOTYPE_PROMPT_RESULT__:"
     private static let healthCheckRequestPrefix = "__KOTOTYPE_HEALTHCHECK__:"
 
     struct Runtime {
@@ -305,6 +306,18 @@ final class PythonProcessManager: @unchecked Sendable {
         }
 
         return lines
+    }
+
+    static func parsePromptResult(from output: String) -> PromptTransformationResult? {
+        guard output.hasPrefix(promptResultPrefix) else {
+            return nil
+        }
+
+        let payload = String(output.dropFirst(promptResultPrefix.count))
+        guard let data = payload.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PromptTransformationResult.self, from: data)
     }
 
     private static func decodeControlMessage<T: Decodable>(_ type: T.Type, from output: String) -> T? {

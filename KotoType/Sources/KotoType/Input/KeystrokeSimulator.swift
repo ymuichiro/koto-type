@@ -80,6 +80,13 @@ final class KeystrokeSimulator {
         Logger.shared.log("KeystrokeSimulator: Cmd+V executed via CGEvent", level: .info)
     }
 
+    static func copyText(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        Logger.shared.log("KeystrokeSimulator: copied text to pasteboard (length=\(text.count))", level: .info)
+    }
+
     static func executeKeyCommand(_ command: HotkeyConfiguration) {
         guard command.keyCode > 0 else {
             Logger.shared.log(
