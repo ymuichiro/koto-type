@@ -91,13 +91,6 @@ private struct HistoryRowView: View {
                 .buttonStyle(.bordered)
             }
 
-            if let path = entry.audioFilePath, !path.isEmpty {
-                Text(path)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-
             Text(entry.text)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)

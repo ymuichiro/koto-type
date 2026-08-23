@@ -1153,8 +1153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 TranscriptionHistoryManager.shared.addEntry(
                     text: text,
-                    source: .importedFile,
-                    audioFilePath: fileURL.path
+                    source: .importedFile
                 )
                 self.historyWindowController?.showHistory()
                 Logger.shared.log("Imported audio transcription completed and saved to history", level: .info)

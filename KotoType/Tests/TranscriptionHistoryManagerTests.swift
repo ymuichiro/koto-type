@@ -26,15 +26,38 @@ final class TranscriptionHistoryManagerTests: XCTestCase {
 
     func testAddAndLoadEntries() {
         manager.addEntry(text: "  first text  ", source: .liveRecording)
-        manager.addEntry(text: "second text", source: .importedFile, audioFilePath: "/tmp/test.mp3")
+        manager.addEntry(text: "second text", source: .importedFile)
 
         let entries = manager.loadEntries()
         XCTAssertEqual(entries.count, 2)
         XCTAssertEqual(entries[0].text, "second text")
         XCTAssertEqual(entries[0].source, .importedFile)
-        XCTAssertEqual(entries[0].audioFilePath, "/tmp/test.mp3")
+        XCTAssertNil(entries[0].audioFilePath)
         XCTAssertEqual(entries[1].text, "first text")
         XCTAssertEqual(entries[1].source, .liveRecording)
+    }
+
+    func testLegacyAudioPathIsRemovedWhenHistoryIsLoaded() throws {
+        let legacyEntry = TranscriptionHistoryEntry(
+            source: .importedFile,
+            audioFilePath: "/Users/example/recording.wav",
+            text: "legacy text"
+        )
+        let data = try JSONEncoder().encode([legacyEntry])
+        try data.write(to: historyURL)
+
+        let entries = manager.loadEntries()
+
+        XCTAssertNil(entries.first?.audioFilePath)
+        let rewrittenData = try Data(contentsOf: historyURL)
+        XCTAssertFalse(String(decoding: rewrittenData, as: UTF8.self).contains("recording.wav"))
+    }
+
+    func testNewEntriesDoNotPersistAudioPathKey() throws {
+        manager.addEntry(text: "imported text", source: .importedFile)
+
+        let storedData = try Data(contentsOf: historyURL)
+        XCTAssertFalse(String(decoding: storedData, as: UTF8.self).contains("audioFilePath"))
     }
 
     func testEmptyEntryIsIgnored() {

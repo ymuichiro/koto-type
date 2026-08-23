@@ -18,6 +18,8 @@ struct TranscriptionHistoryEntry: Codable, Identifiable, Equatable {
     let id: UUID
     let createdAt: Date
     let source: Source
+    // Kept for decoding legacy history files. New entries never persist audio
+    // paths, and legacy paths are removed during the first subsequent load.
     let audioFilePath: String?
     let text: String
 
@@ -78,7 +80,7 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
         return readEntriesLocked()
     }
 
-    func addEntry(text: String, source: TranscriptionHistoryEntry.Source, audioFilePath: String? = nil) {
+    func addEntry(text: String, source: TranscriptionHistoryEntry.Source) {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             return
@@ -91,7 +93,6 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
         entries.insert(
             TranscriptionHistoryEntry(
                 source: source,
-                audioFilePath: audioFilePath,
                 text: normalized
             ),
             at: 0
@@ -120,7 +121,24 @@ final class TranscriptionHistoryManager: @unchecked Sendable {
             return []
         }
 
-        return entries
+        let sanitizedEntries = entries.map { entry in
+            guard entry.audioFilePath != nil else {
+                return entry
+            }
+
+            return TranscriptionHistoryEntry(
+                id: entry.id,
+                createdAt: entry.createdAt,
+                source: entry.source,
+                text: entry.text
+            )
+        }
+
+        if sanitizedEntries != entries {
+            writeEntriesLocked(sanitizedEntries)
+        }
+
+        return sanitizedEntries
     }
 
     private func writeEntriesLocked(_ entries: [TranscriptionHistoryEntry]) {
