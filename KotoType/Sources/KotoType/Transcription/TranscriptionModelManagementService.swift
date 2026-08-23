@@ -7,7 +7,8 @@ protocol PythonModelManaging: AnyObject {
     func startPython(scriptPath: String)
     func sendModelManagement(
         action: ManagedTranscriptionModelAction,
-        modelKind: ManagedTranscriptionModelKind?
+        modelKind: ManagedTranscriptionModelKind?,
+        requestID: UInt64
     ) -> Bool
     func isRunning() -> Bool
     func stop()
@@ -17,24 +18,34 @@ extension PythonProcessManager: PythonModelManaging {}
 
 final class TranscriptionModelManagementService: @unchecked Sendable {
     private enum PendingRequest {
-        case models(([ManagedTranscriptionModelStatus]) -> Void)
-        case model((ManagedTranscriptionModelStatus?) -> Void)
+        case models(id: UInt64, completion: ([ManagedTranscriptionModelStatus]) -> Void)
+        case model(id: UInt64, completion: (ManagedTranscriptionModelStatus?) -> Void)
     }
 
     private let processManager: any PythonModelManaging
+    private let scheduleTimeout: (TimeInterval, @escaping @Sendable () -> Void) -> Void
     private let lock = NSLock()
 
     private var scriptPath: String = ""
     private var pendingRequest: PendingRequest?
+    private var nextRequestID: UInt64 = 0
 
-    init(processManager: any PythonModelManaging = PythonProcessManager()) {
+    init(
+        processManager: any PythonModelManaging = PythonProcessManager(),
+        scheduleTimeout: @escaping (TimeInterval, @escaping @Sendable () -> Void) -> Void = { timeout, operation in
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + timeout,
+                execute: operation
+            )
+        }
+    ) {
         self.processManager = processManager
+        self.scheduleTimeout = scheduleTimeout
         processManager.outputReceived = { [weak self] output in
             self?.handleOutput(output)
         }
         processManager.processTerminated = { [weak self] _ in
-            self?.finishModels([])
-            self?.finishModel(nil)
+            self?.finishPendingRequest()
         }
     }
 
@@ -111,26 +122,38 @@ final class TranscriptionModelManagementService: @unchecked Sendable {
         timeout: TimeInterval,
         pending: PendingKind
     ) async -> Response? {
-        let (currentScriptPath, hasPendingRequest) = lock.withLock {
-            (scriptPath, pendingRequest != nil)
+        let currentScriptPath = lock.withLock {
+            scriptPath
         }
 
-        guard !currentScriptPath.isEmpty, !hasPendingRequest else {
+        guard !currentScriptPath.isEmpty else {
             return nil
         }
 
         return await withCheckedContinuation { continuation in
-            lock.withLock {
+            let requestID = lock.withLock { () -> UInt64? in
+                guard pendingRequest == nil else {
+                    return nil
+                }
+
+                nextRequestID &+= 1
+                let requestID = nextRequestID
                 switch pending {
                 case .models:
-                    pendingRequest = .models { models in
+                    pendingRequest = .models(id: requestID) { models in
                         continuation.resume(returning: .models(models))
                     }
                 case .model:
-                    pendingRequest = .model { model in
+                    pendingRequest = .model(id: requestID) { model in
                         continuation.resume(returning: .model(model))
                     }
                 }
+                return requestID
+            }
+
+            guard let requestID else {
+                continuation.resume(returning: nil)
+                return
             }
 
             if !processManager.isRunning() {
@@ -139,34 +162,35 @@ final class TranscriptionModelManagementService: @unchecked Sendable {
             guard processManager.isRunning() else {
                 switch pending {
                 case .models:
-                    finishModels([])
+                    finishModels([], requestID: requestID)
                 case .model:
-                    finishModel(nil)
+                    finishModel(nil, requestID: requestID)
                 }
                 return
             }
 
             let sent = processManager.sendModelManagement(
                 action: action,
-                modelKind: modelKind
+                modelKind: modelKind,
+                requestID: requestID
             )
             guard sent else {
                 switch pending {
                 case .models:
-                    finishModels([])
+                    finishModels([], requestID: requestID)
                 case .model:
-                    finishModel(nil)
+                    finishModel(nil, requestID: requestID)
                 }
                 return
             }
 
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { [weak self] in
+            scheduleTimeout(timeout) { [weak self] in
                 guard let self else { return }
                 switch pending {
                 case .models:
-                    self.finishModels([])
+                    self.finishModels([], requestID: requestID)
                 case .model:
-                    self.finishModel(nil)
+                    self.finishModel(nil, requestID: requestID)
                 }
             }
         }
@@ -175,44 +199,84 @@ final class TranscriptionModelManagementService: @unchecked Sendable {
     private func handleOutput(_ output: String) {
         if let response = PythonProcessManager.parseManagedModelsResponse(from: output),
            response.type == "managed_models" {
-            finishModels(response.models)
+            guard let requestID = response.requestID else {
+                Logger.shared.log(
+                    "Ignoring model list response without request_id",
+                    level: .warning
+                )
+                return
+            }
+            finishModels(response.models, requestID: requestID)
             return
         }
 
         if let response = PythonProcessManager.parseManagedModelResponse(from: output),
            response.type == "managed_model" {
-            finishModel(response.model)
+            guard let requestID = response.requestID else {
+                Logger.shared.log(
+                    "Ignoring model response without request_id",
+                    level: .warning
+                )
+                return
+            }
+            finishModel(response.model, requestID: requestID)
         }
     }
 
-    private func finishModels(_ models: [ManagedTranscriptionModelStatus]) {
+    private func finishPendingRequest() {
         let request = lock.withLock {
             let current = pendingRequest
-            if case .models = current {
-                pendingRequest = nil
-            }
+            pendingRequest = nil
             return current
         }
 
         guard let request else { return }
+        switch request {
+        case let .models(_, completion):
+            completion([])
+        case let .model(_, completion):
+            completion(nil)
+        }
+    }
+
+    private func finishModels(
+        _ models: [ManagedTranscriptionModelStatus],
+        requestID: UInt64
+    ) {
+        let request = lock.withLock {
+            let current = pendingRequest
+            if case let .models(id, _) = current,
+               requestID == id {
+                pendingRequest = nil
+                return current
+            }
+            return nil
+        }
+
+        guard let request else { return }
         processManager.stop()
-        if case let .models(completion) = request {
+        if case let .models(_, completion) = request {
             completion(models)
         }
     }
 
-    private func finishModel(_ model: ManagedTranscriptionModelStatus?) {
+    private func finishModel(
+        _ model: ManagedTranscriptionModelStatus?,
+        requestID: UInt64
+    ) {
         let request = lock.withLock {
             let current = pendingRequest
-            if case .model = current {
+            if case let .model(id, _) = current,
+               requestID == id {
                 pendingRequest = nil
+                return current
             }
-            return current
+            return nil
         }
 
         guard let request else { return }
         processManager.stop()
-        if case let .model(completion) = request {
+        if case let .model(_, completion) = request {
             completion(model)
         }
     }

@@ -129,6 +129,30 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(buffer, "")
     }
 
+    func testTerminationCallbackOnlyHandlesCurrentProcess() {
+        let activeProcess = Process()
+        let staleProcess = Process()
+
+        XCTAssertTrue(
+            PythonProcessManager.shouldHandleTermination(
+                activeProcess: activeProcess,
+                terminatedProcess: activeProcess
+            )
+        )
+        XCTAssertFalse(
+            PythonProcessManager.shouldHandleTermination(
+                activeProcess: activeProcess,
+                terminatedProcess: staleProcess
+            )
+        )
+        XCTAssertFalse(
+            PythonProcessManager.shouldHandleTermination(
+                activeProcess: nil,
+                terminatedProcess: staleProcess
+            )
+        )
+    }
+
     func testParseBackendStatusDecodesControlMessage() {
         let output =
             PythonProcessManager.controlMessagePrefix
@@ -179,7 +203,7 @@ final class PythonProcessManagerTests: XCTestCase {
     func testParseManagedModelsResponseDecodesControlMessage() {
         let output =
             PythonProcessManager.controlMessagePrefix
-            + "{\"type\":\"managed_models\",\"models\":[{\"kind\":\"cpu\",\"displayName\":\"CPU model\",\"modelID\":\"large-v3-turbo\",\"directoryPath\":\"/tmp/cpu\",\"isDownloaded\":true,\"fileCount\":3,\"byteCount\":100}]}"
+            + "{\"type\":\"managed_models\",\"request_id\":17,\"models\":[{\"kind\":\"cpu\",\"displayName\":\"CPU model\",\"modelID\":\"large-v3-turbo\",\"directoryPath\":\"/tmp/cpu\",\"isDownloaded\":true,\"fileCount\":3,\"byteCount\":100}]}"
 
         let response = PythonProcessManager.parseManagedModelsResponse(from: output)
 
@@ -187,18 +211,20 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(response?.models.first?.kind, .cpu)
         XCTAssertEqual(response?.models.first?.directoryPath, "/tmp/cpu")
         XCTAssertEqual(response?.models.first?.isDownloaded, true)
+        XCTAssertEqual(response?.requestID, 17)
     }
 
     func testParseManagedModelResponseDecodesControlMessage() {
         let output =
             PythonProcessManager.controlMessagePrefix
-            + "{\"type\":\"managed_model\",\"model\":{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":false,\"fileCount\":0,\"byteCount\":0}}"
+            + "{\"type\":\"managed_model\",\"request_id\":17,\"model\":{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":false,\"fileCount\":0,\"byteCount\":0}}"
 
         let response = PythonProcessManager.parseManagedModelResponse(from: output)
 
         XCTAssertEqual(response?.type, "managed_model")
         XCTAssertEqual(response?.model.kind, .mlx)
         XCTAssertEqual(response?.model.isDownloaded, false)
+        XCTAssertEqual(response?.requestID, 17)
     }
 
     func testRuntimeEnvironmentForAppBundleForcesBackendSafetyCaps() {

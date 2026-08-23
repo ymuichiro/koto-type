@@ -75,6 +75,16 @@ final class PythonProcessManager: @unchecked Sendable {
         process?.environment = environment
         process?.terminationHandler = { [weak self] terminatedProcess in
             guard let self = self else { return }
+            guard Self.shouldHandleTermination(
+                activeProcess: self.process,
+                terminatedProcess: terminatedProcess
+            ) else {
+                Logger.shared.log(
+                    "Ignoring termination callback from stale Python process",
+                    level: .debug
+                )
+                return
+            }
             if self.isStoppingProcess {
                 Logger.shared.log(
                     "Python process terminated during normal stop: \(terminatedProcess.terminationStatus)",
@@ -193,7 +203,8 @@ final class PythonProcessManager: @unchecked Sendable {
 
     func sendModelManagement(
         action: ManagedTranscriptionModelAction,
-        modelKind: ManagedTranscriptionModelKind? = nil
+        modelKind: ManagedTranscriptionModelKind? = nil,
+        requestID: UInt64
     ) -> Bool {
         var payload: [String: Any] = [
             "type": "model_management",
@@ -202,6 +213,7 @@ final class PythonProcessManager: @unchecked Sendable {
         if let modelKind {
             payload["model_kind"] = modelKind.rawValue
         }
+        payload["request_id"] = requestID
         guard let input = Self.encodeJSONPayload(payload) else {
             Logger.shared.log("Failed to encode model management payload", level: .error)
             return false
@@ -305,6 +317,10 @@ final class PythonProcessManager: @unchecked Sendable {
         }
 
         return lines
+    }
+
+    static func shouldHandleTermination(activeProcess: Process?, terminatedProcess: Process) -> Bool {
+        activeProcess === terminatedProcess
     }
 
     private static func decodeControlMessage<T: Decodable>(_ type: T.Type, from output: String) -> T? {

@@ -82,11 +82,25 @@ struct ManagedTranscriptionModelStatus: Codable, Equatable, Identifiable, Sendab
 struct ManagedTranscriptionModelsResponse: Codable, Equatable, Sendable {
     let type: String
     let models: [ManagedTranscriptionModelStatus]
+    let requestID: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case models
+        case requestID = "request_id"
+    }
 }
 
 struct ManagedTranscriptionModelResponse: Codable, Equatable, Sendable {
     let type: String
     let model: ManagedTranscriptionModelStatus
+    let requestID: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case model
+        case requestID = "request_id"
+    }
 }
 
 enum KotoTypeStoragePaths {

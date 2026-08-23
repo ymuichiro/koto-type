@@ -24,6 +24,7 @@ import wave
 HEALTHCHECK_REQUEST_PREFIX = "__KOTOTYPE_HEALTHCHECK__:"
 HEALTHCHECK_RESPONSE_PREFIX = "__KOTOTYPE_HEALTHCHECK_OK__:"
 CONTROL_MESSAGE_PREFIX = "__KOTOTYPE_CONTROL__:"
+MAX_MODEL_MANAGEMENT_REQUEST_ID = (1 << 64) - 1
 DEFAULT_CPU_MODEL_ID = "large-v3-turbo"
 DEFAULT_MLX_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
 DEFAULT_TASK = "transcribe"
@@ -1155,6 +1156,7 @@ class BackendProbeRequest:
 @dataclass(frozen=True)
 class ModelManagementRequest:
     action: str
+    request_id: int
     model_kind: str | None = None
 
 
@@ -1268,6 +1270,19 @@ def normalize_model_management_action(value):
     raise ValueError(f"Unsupported model management action: {value}")
 
 
+def normalize_model_management_request_id(value):
+    if value is None:
+        raise ValueError("Model management request_id is required")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > MAX_MODEL_MANAGEMENT_REQUEST_ID
+    ):
+        raise ValueError(f"Unsupported model management request id: {value}")
+    return value
+
+
 def emit_backend_status(status):
     payload = json.dumps(
         {
@@ -1307,11 +1322,12 @@ def serialize_managed_model_status(status):
     }
 
 
-def emit_managed_models(models):
+def emit_managed_models(models, request_id):
     payload = json.dumps(
         {
             "type": "managed_models",
             "models": [serialize_managed_model_status(model) for model in models],
+            "request_id": request_id,
         },
         ensure_ascii=False,
     )
@@ -1319,11 +1335,12 @@ def emit_managed_models(models):
     sys.stdout.flush()
 
 
-def emit_managed_model(model):
+def emit_managed_model(model, request_id):
     payload = json.dumps(
         {
             "type": "managed_model",
             "model": serialize_managed_model_status(model),
+            "request_id": request_id,
         },
         ensure_ascii=False,
     )
@@ -1358,6 +1375,7 @@ def parse_request_line(raw_line):
             "request": ModelManagementRequest(
                 action=action,
                 model_kind=None if action == "status_all" else normalize_model_kind(model_kind),
+                request_id=normalize_model_management_request_id(payload.get("request_id")),
             ),
         }
     if request_type != "transcription_request":
@@ -2209,14 +2227,19 @@ def main():
                     f"action={request.action}, model_kind={request.model_kind or 'all'}"
                 )
                 if request.action == "status_all":
-                    emit_managed_models(backend_manager.managed_model_statuses())
+                    emit_managed_models(
+                        backend_manager.managed_model_statuses(),
+                        request_id=request.request_id,
+                    )
                 elif request.action == "download":
                     emit_managed_model(
-                        backend_manager.download_managed_model(request.model_kind)
+                        backend_manager.download_managed_model(request.model_kind),
+                        request_id=request.request_id,
                     )
                 elif request.action == "delete":
                     emit_managed_model(
-                        backend_manager.delete_managed_model(request.model_kind)
+                        backend_manager.delete_managed_model(request.model_kind),
+                        request_id=request.request_id,
                     )
                 continue
 

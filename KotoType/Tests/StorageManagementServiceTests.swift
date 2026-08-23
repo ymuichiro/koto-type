@@ -26,7 +26,7 @@ final class StorageManagementServiceTests: XCTestCase {
     func testModelManagementServiceFetchesStatuses() async {
         let mock = MockPythonModelManager(
             responseOutput: PythonProcessManager.controlMessagePrefix
-                + "{\"type\":\"managed_models\",\"models\":[{\"kind\":\"cpu\",\"displayName\":\"CPU model\",\"modelID\":\"large-v3-turbo\",\"directoryPath\":\"/tmp/cpu\",\"isDownloaded\":true,\"fileCount\":3,\"byteCount\":100}]}"
+                + "{\"type\":\"managed_models\",\"request_id\":1,\"models\":[{\"kind\":\"cpu\",\"displayName\":\"CPU model\",\"modelID\":\"large-v3-turbo\",\"directoryPath\":\"/tmp/cpu\",\"isDownloaded\":true,\"fileCount\":3,\"byteCount\":100}]}"
         )
         let service = TranscriptionModelManagementService(processManager: mock)
         service.configure(scriptPath: "/tmp/whisper_server.py")
@@ -44,7 +44,7 @@ final class StorageManagementServiceTests: XCTestCase {
     func testModelManagementServiceDownloadsSingleModel() async {
         let mock = MockPythonModelManager(
             responseOutput: PythonProcessManager.controlMessagePrefix
-                + "{\"type\":\"managed_model\",\"model\":{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":true,\"fileCount\":5,\"byteCount\":200}}"
+                + "{\"type\":\"managed_model\",\"request_id\":1,\"model\":{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":true,\"fileCount\":5,\"byteCount\":200}}"
         )
         let service = TranscriptionModelManagementService(processManager: mock)
         service.configure(scriptPath: "/tmp/whisper_server.py")
@@ -71,7 +71,7 @@ final class StorageManagementServiceTests: XCTestCase {
 
         let mock = MockPythonModelManager(
             responseOutput: PythonProcessManager.controlMessagePrefix
-                + "{\"type\":\"managed_models\",\"models\":[{\"kind\":\"cpu\",\"displayName\":\"CPU model\",\"modelID\":\"large-v3-turbo\",\"directoryPath\":\"/tmp/cpu\",\"isDownloaded\":false,\"fileCount\":0,\"byteCount\":0},{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":true,\"fileCount\":5,\"byteCount\":200}]}"
+                + "{\"type\":\"managed_models\",\"request_id\":1,\"models\":[{\"kind\":\"cpu\",\"displayName\":\"CPU model\",\"modelID\":\"large-v3-turbo\",\"directoryPath\":\"/tmp/cpu\",\"isDownloaded\":false,\"fileCount\":0,\"byteCount\":0},{\"kind\":\"mlx\",\"displayName\":\"MLX model\",\"modelID\":\"mlx-community/whisper-large-v3-turbo\",\"directoryPath\":\"/tmp/mlx\",\"isDownloaded\":true,\"fileCount\":5,\"byteCount\":200}]}"
         )
         let modelService = TranscriptionModelManagementService(processManager: mock)
         let service = StorageManagementService(
@@ -102,7 +102,7 @@ final class StorageManagementServiceTests: XCTestCase {
 
         let mock = MockPythonModelManager(
             responseOutput: PythonProcessManager.controlMessagePrefix
-                + "{\"type\":\"managed_models\",\"models\":[]}"
+                + "{\"type\":\"managed_models\",\"request_id\":1,\"models\":[]}"
         )
         let modelService = TranscriptionModelManagementService(processManager: mock)
         let service = StorageManagementService(
@@ -175,7 +175,8 @@ private final class MockPythonModelManager: PythonModelManaging {
 
     func sendModelManagement(
         action: ManagedTranscriptionModelAction,
-        modelKind: ManagedTranscriptionModelKind?
+        modelKind: ManagedTranscriptionModelKind?,
+        requestID: UInt64
     ) -> Bool {
         lastAction = action
         lastModelKind = modelKind
