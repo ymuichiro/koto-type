@@ -58,6 +58,17 @@ def read_available_stderr(process):
     return "\n".join(chunks)
 
 
+def resolve_smoke_audio_path(project_root):
+    configured_path = os.environ.get("KOTOTYPE_SMOKE_AUDIO_PATH", "").strip()
+    if configured_path:
+        return Path(configured_path).expanduser().resolve()
+    return project_root / "assets" / "audio" / "test_speech_ja.wav"
+
+
+def resolve_smoke_language():
+    return os.environ.get("KOTOTYPE_SMOKE_LANGUAGE", "ja").strip() or "ja"
+
+
 def main():
     project_root = Path(__file__).resolve().parents[2]
     server_binary = (
@@ -65,7 +76,8 @@ def main():
         if len(sys.argv) > 1
         else (project_root / "dist" / "whisper_server")
     )
-    test_audio = project_root / "assets" / "audio" / "test_speech_ja.wav"
+    test_audio = resolve_smoke_audio_path(project_root)
+    smoke_language = resolve_smoke_language()
     real_home = Path.home()
 
     if not server_binary.exists():
@@ -82,6 +94,7 @@ def main():
         env["HOME"] = tmp_home
         env["HF_HOME"] = str(real_home / ".cache" / "huggingface")
         env["HUGGINGFACE_HUB_CACHE"] = str(real_home / ".cache" / "huggingface" / "hub")
+        env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
         env["KOTOTYPE_SKIP_AUDIO_PREPROCESSING"] = "1"
         env["KOTOTYPE_VAD_STRICT"] = "0"
         env["KOTOTYPE_FALLBACK_ON_EMPTY_VAD"] = "1"
@@ -100,7 +113,7 @@ def main():
                 {
                     "type": "transcription_request",
                     "audio_path": str(test_audio),
-                    "language": "ja",
+                    "language": smoke_language,
                     "auto_punctuation": True,
                     "quality_preset": "medium",
                     "gpu_acceleration_enabled": False,

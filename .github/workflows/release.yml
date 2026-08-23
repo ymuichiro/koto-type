@@ -101,7 +101,19 @@ jobs:
         run: |
           make build-server
 
+      - name: Generate deterministic release smoke audio
+        run: |
+          say -v Samantha -o "${RUNNER_TEMP}/koto-type-release-smoke.aiff" \
+            "KotoType release smoke test."
+          afconvert -f WAVE -d LEI16@16000 \
+            "${RUNNER_TEMP}/koto-type-release-smoke.aiff" \
+            "${RUNNER_TEMP}/koto-type-release-smoke.wav"
+
       - name: Smoke Test Python Server Binary
+        env:
+          KOTOTYPE_SMOKE_AUDIO_PATH: ${{ runner.temp }}/koto-type-release-smoke.wav
+          KOTOTYPE_SMOKE_LANGUAGE: en
+          KOTOTYPE_CPU_MODEL_DIR: ${{ runner.temp }}/koto-type-cpu-model
         run: |
           source .venv/bin/activate
           .venv/bin/python tests/python/smoke_whisper_server_binary.py dist/whisper_server
@@ -116,6 +128,10 @@ jobs:
           ./scripts/create_app.sh
 
       - name: Verify bundled whisper_server binary
+        env:
+          KOTOTYPE_SMOKE_AUDIO_PATH: ${{ runner.temp }}/koto-type-release-smoke.wav
+          KOTOTYPE_SMOKE_LANGUAGE: en
+          KOTOTYPE_CPU_MODEL_DIR: ${{ runner.temp }}/koto-type-cpu-model
         run: |
           source .venv/bin/activate
           WHISPER_SERVER_PATH="KotoType/KotoType.app/Contents/Resources/whisper_server"

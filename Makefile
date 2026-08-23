@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -20,6 +20,7 @@ help:
 	@echo "  make test-backend-config - backend 選択/プリセット関連ユニットテスト"
 	@echo "  make test-noise-eval - ノイズ戦略評価 CLI のユニットテスト"
 	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
+	@echo "  make test-release-smoke-script - リリーススモークスクリプトの回帰テスト"
 	@echo "  make test-benchmark - 固定音声で精度・速度ベンチマークを実行"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
 	@echo "  make test-all       - Pythonユニットテストを実行"
@@ -68,6 +69,10 @@ test-smoke-server:
 	@echo "whisper_server バイナリのスモークテストを実行中..."
 	$(PYTHON) $(PYTHON_TEST_DIR)/smoke_whisper_server_binary.py
 
+test-release-smoke-script:
+	@echo "リリーススモークスクリプトの回帰テストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_smoke_whisper_server_binary.py
+
 test-user-dictionary:
 	@echo "辞書機能ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_user_dictionary.py
@@ -80,7 +85,7 @@ test-logging-privacy:
 	@echo "ログプライバシーのユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_logging_privacy.py
 
-test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-user-dictionary test-ending-fidelity
+test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-user-dictionary test-ending-fidelity
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 
