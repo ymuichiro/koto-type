@@ -37,6 +37,36 @@ final class LoggerTests: XCTestCase {
         XCTAssertTrue(true, "Empty or whitespace messages should be handled")
     }
 
+    func testSanitizedMessageRedactsAbsolutePaths() {
+        let message = "failed to process /Users/example/recordings/sample.wav, /private/tmp/kototype.wav, and /usr/local/bin/ffmpeg"
+
+        let sanitized = Logger.sanitizedMessage(message)
+
+        XCTAssertFalse(sanitized.contains("/Users/example"))
+        XCTAssertFalse(sanitized.contains("/private/tmp"))
+        XCTAssertFalse(sanitized.contains("/usr/local"))
+        XCTAssertEqual(sanitized, "failed to process <path>, <path>, and <path>")
+    }
+
+    func testSanitizedMessageRedactsQuotedPathsWithSpaces() {
+        let message = "script=\"/Users/example/Library/Application Support/koto-type/server.py\""
+
+        let sanitized = Logger.sanitizedMessage(message)
+
+        XCTAssertEqual(sanitized, "script=\"<path>\"")
+    }
+
+    func testSanitizedMessageRedactsFileURLsAndSmartQuotedPaths() {
+        let message = "url=file:///Users/example/Library/Application%20Support/koto-type/server.py, error=The file “/Users/example/recording.wav” could not be saved"
+
+        let sanitized = Logger.sanitizedMessage(message)
+
+        XCTAssertEqual(
+            sanitized,
+            "url=<path>, error=The file “<path>” could not be saved"
+        )
+    }
+
     func testLongMessage() throws {
         let logger = Logger.shared
         
