@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import io
+import json
 import math
 import tempfile
 import unittest
 import wave
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from python import whisper_server
@@ -104,13 +107,66 @@ class ParseRequestLineTests(unittest.TestCase):
 
     def test_parse_request_line_decodes_model_management_request(self):
         payload = whisper_server.parse_request_line(
-            '{"type":"model_management","action":"download","model_kind":"mlx"}'
+            '{"type":"model_management","action":"download","model_kind":"mlx","request_id":17}'
         )
 
         self.assertEqual(payload["kind"], "model_management")
         request = payload["request"]
         self.assertEqual(request.action, "download")
         self.assertEqual(request.model_kind, "mlx")
+        self.assertEqual(request.request_id, 17)
+
+    def test_parse_request_line_requires_model_management_request_id(self):
+        with self.assertRaisesRegex(ValueError, "request_id is required"):
+            whisper_server.parse_request_line(
+                '{"type":"model_management","action":"status_all"}'
+            )
+
+    def test_parse_request_line_rejects_request_id_outside_uint64(self):
+        invalid_request_ids = (True, -1, 1.5, "17", 1 << 64)
+
+        for request_id in invalid_request_ids:
+            with self.subTest(request_id=request_id):
+                payload = json.dumps(
+                    {
+                        "type": "model_management",
+                        "action": "status_all",
+                        "request_id": request_id,
+                    }
+                )
+                with self.assertRaises(ValueError):
+                    whisper_server.parse_request_line(payload)
+
+    def test_parse_request_line_accepts_uint64_maximum(self):
+        payload = whisper_server.parse_request_line(
+            json.dumps(
+                {
+                    "type": "model_management",
+                    "action": "status_all",
+                    "request_id": (1 << 64) - 1,
+                }
+            )
+        )
+
+        self.assertEqual(payload["request"].request_id, (1 << 64) - 1)
+
+    def test_emit_managed_model_response_preserves_request_id(self):
+        status = whisper_server.ManagedModelStatus(
+            kind="cpu",
+            display_name="CPU model",
+            model_id="large-v3-turbo",
+            directory_path="/tmp/cpu",
+            is_downloaded=True,
+            file_count=3,
+            byte_count=100,
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            whisper_server.emit_managed_model(status, request_id=17)
+
+        payload = output.getvalue().removeprefix(whisper_server.CONTROL_MESSAGE_PREFIX).strip()
+        self.assertEqual(json.loads(payload)["request_id"], 17)
 
 
 class FakeBackendManager(whisper_server.BackendManager):
