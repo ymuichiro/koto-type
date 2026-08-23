@@ -139,7 +139,10 @@ final class PythonProcessManager: @unchecked Sendable {
                 if !trimmed.isEmpty {
                     let isError = trimmed.contains("Error:") || trimmed.contains("Traceback") || trimmed.contains("Exception")
                     let level: Logger.LogLevel = isError ? .error : .info
-                    Logger.shared.log("Python stderr: \(trimmed)", level: level)
+                    Logger.shared.log(
+                        "Python stderr received (length=\(trimmed.count))",
+                        level: level
+                    )
                 }
             }
         }

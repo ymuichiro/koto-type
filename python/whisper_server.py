@@ -12,7 +12,6 @@ import shutil
 import time
 import sys
 import threading
-import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -45,6 +44,43 @@ DEFAULT_FAST_AUDIO_MAX_DURATION_SECONDS = 3.0
 DEFAULT_FAST_AUDIO_MIN_ACTIVE_RATIO = 0.65
 DEFAULT_FAST_AUDIO_MIN_PEAK_DBFS = -18.0
 TRANSLATION_TARGET_LANGUAGE_PATTERN = re.compile(r"^[a-z0-9-]{1,10}$")
+QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(
+    r'(["\'])(/(?!/)[^"\']*)\1'
+)
+SMART_QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(
+    r'([“‘])(/(?!/)[^”’]*)([”’])'
+)
+QUOTED_FILE_URL_PATTERN = re.compile(
+    r'(["\'])(file://(?:localhost)?/(?!/)[^"\']*)\1'
+)
+SMART_QUOTED_FILE_URL_PATTERN = re.compile(
+    r'([“‘])(file://(?:localhost)?/(?!/)[^”’]*)([”’])'
+)
+UNQUOTED_FILE_URL_PATTERN = re.compile(
+    r'file://(?:localhost)?/(?!/)[^\s,;)"\'“”‘’]+'
+)
+ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(^|[\s:(=“‘])/(?!/)[^\s,;)\"'“”‘’]+"
+)
+
+
+def sanitize_log_message(message: str) -> str:
+    quoted_file_url_sanitized = QUOTED_FILE_URL_PATTERN.sub(
+        r"\1<path>\1", message
+    )
+    smart_quoted_file_url_sanitized = SMART_QUOTED_FILE_URL_PATTERN.sub(
+        r"\1<path>\3", quoted_file_url_sanitized
+    )
+    file_url_sanitized = UNQUOTED_FILE_URL_PATTERN.sub(
+        "<path>", smart_quoted_file_url_sanitized
+    )
+    quoted_sanitized = QUOTED_ABSOLUTE_PATH_PATTERN.sub(
+        r"\1<path>\1", file_url_sanitized
+    )
+    smart_quoted_sanitized = SMART_QUOTED_ABSOLUTE_PATH_PATTERN.sub(
+        r"\1<path>\3", quoted_sanitized
+    )
+    return ABSOLUTE_PATH_PATTERN.sub(r"\1<path>", smart_quoted_sanitized)
 
 
 class MlxCoreModule(Protocol):
@@ -100,7 +136,8 @@ def setup_logging():
 
     def log(message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_line = f"[{timestamp}] [pid={os.getpid()}] {message}\n"
+        safe_message = sanitize_log_message(str(message))
+        log_line = f"[{timestamp}] [pid={os.getpid()}] {safe_message}\n"
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(log_line)
 
@@ -584,7 +621,7 @@ def resolve_mlx_active_clip_timestamps(audio_path, log):
     try:
         clip_timestamps = build_active_clip_timestamps(audio_path)
     except Exception as error:
-        log(f"MLX active clip analysis failed: {error}")
+        log(f"MLX active clip analysis failed (error_type={type(error).__name__})")
         return None
     if clip_timestamps is not None:
         log(
@@ -815,9 +852,9 @@ def cleanup_temporary_audio_files(paths, log):
             continue
         try:
             os.remove(path)
-            log(f"Removed temporary audio file: {path}")
+            log("Removed temporary audio file")
         except OSError as error:
-            log(f"Failed to remove temporary audio file {path}: {error}")
+            log(f"Failed to remove temporary audio file (error_type={type(error).__name__})")
 
 
 def cleanup_transcription_audio_path(audio_path, original_audio_path, log):
@@ -852,7 +889,7 @@ def audio_preprocess(
         base, _ = os.path.splitext(input_path)
         output_path = f"{base}_processed.wav"
 
-        log(f"Preprocessing audio: {input_path} -> {output_path}")
+        log("Preprocessing audio")
         preserve_input_format = is_standard_pcm16_mono_wav(input_path)
         skip_denoise = should_skip_denoise(input_path)
         if preserve_input_format:
@@ -877,11 +914,8 @@ def audio_preprocess(
                 tighten_file_permissions(output_path)
                 log(f"Audio preprocessing completed: {output_path}")
                 return output_path
-            except Exception as error:
-                log(
-                    "Noise reduction preprocessing failed, trying next filter chain: "
-                    f"{format_ffmpeg_error(error)}"
-                )
+            except Exception:
+                log("Noise reduction preprocessing failed, trying next filter chain")
                 cleanup_temporary_audio_files(
                     [output_path],
                     log,
@@ -892,7 +926,7 @@ def audio_preprocess(
         return input_path
 
     except Exception as e:
-        log(f"Audio preprocessing failed: {str(e)}")
+        log(f"Audio preprocessing failed (error_type={type(e).__name__})")
         cleanup_temporary_audio_files([output_path], log)
         return input_path
 
@@ -992,8 +1026,7 @@ def transcribe_with_vad_fallback(
         )
         segments = list(segments_iter)
     except Exception as transcribe_error:
-        log(f"Transcription error: {str(transcribe_error)}")
-        log(f"Transcription error traceback: {traceback.format_exc()}")
+        log(f"Transcription error (error_type={type(transcribe_error).__name__})")
 
         if should_retry_without_vad(transcribe_error):
             log("Retrying transcription with vad_filter=False due to missing VAD asset")
@@ -1005,8 +1038,10 @@ def transcribe_with_vad_fallback(
                 )
                 return list(segments_iter), info
             except Exception as fallback_error:
-                log(f"Fallback transcription error: {str(fallback_error)}")
-                log(f"Fallback transcription traceback: {traceback.format_exc()}")
+                log(
+                    "Fallback transcription error "
+                    f"(error_type={type(fallback_error).__name__})"
+                )
 
         return [], DummyInfo()
 
@@ -1024,8 +1059,10 @@ def transcribe_with_vad_fallback(
             )
             fallback_segments = list(fallback_segments_iter)
         except Exception as fallback_error:
-            log(f"Fallback transcription error: {str(fallback_error)}")
-            log(f"Fallback transcription traceback: {traceback.format_exc()}")
+            log(
+                "Fallback transcription error "
+                f"(error_type={type(fallback_error).__name__})"
+            )
             log("Non-VAD retry failed; keeping empty result")
             return segments, info
 
@@ -1600,8 +1637,10 @@ class BackendManager:
             elapsed = time.perf_counter() - import_started_at
             self.mlx_runtime_available = False
             self.mlx_runtime_reason = "mlx_runtime_import_failed"
-            self.log(f"MLX runtime unavailable after {elapsed:.2f} seconds: {error}")
-            self.log(traceback.format_exc())
+            self.log(
+                "MLX runtime unavailable after "
+                f"{elapsed:.2f} seconds (error_type={type(error).__name__})"
+            )
         finally:
             self.mlx_runtime_checked = True
 
@@ -1613,8 +1652,7 @@ class BackendManager:
         self.mlx_runtime_reason = "mlx_disabled_for_session"
         self.log(f"MLX disabled for app session (reason={reason})")
         if error is not None:
-            self.log(f"MLX error: {error}")
-            self.log(traceback.format_exc())
+            self.log(f"MLX error (error_type={type(error).__name__})")
 
     def _status_for_gpu_request(self, gpu_acceleration_enabled, progress=None):
         if progress is not None:
@@ -2041,7 +2079,7 @@ def load_user_dictionary(path=None, log=None):
         return words
     except Exception as error:
         if log:
-            log(f"Failed to load user dictionary: {error}")
+            log(f"Failed to load user dictionary (error_type={type(error).__name__})")
         return []
 
 
@@ -2205,7 +2243,7 @@ def main():
                 token = request_payload["token"]
                 print(f"{HEALTHCHECK_RESPONSE_PREFIX}{token}", file=sys.stdout)
                 sys.stdout.flush()
-                log(f"Health check acknowledged (token={token})")
+                log("Health check acknowledged")
                 continue
             if request_payload["kind"] == "backend_probe":
                 request = request_payload["request"]
@@ -2276,7 +2314,10 @@ def main():
                     )
                 transcription_audio_path = processed_audio_path
             except Exception as e:
-                log(f"Error checking processed file: {str(e)}, using original")
+                log(
+                    "Error checking processed file, using original "
+                    f"(error_type={type(e).__name__})"
+                )
                 transcription_audio_path = request.audio_path
 
             try:
@@ -2302,7 +2343,10 @@ def main():
                     sys.stdout.flush()
                     continue
             except Exception as activity_error:
-                log(f"Audio activity analysis failed: {activity_error}")
+                log(
+                    "Audio activity analysis failed "
+                    f"(error_type={type(activity_error).__name__})"
+                )
 
             user_words = load_user_dictionary(log=log)
             initial_prompt = generate_initial_prompt(
@@ -2383,8 +2427,7 @@ def main():
                 )
 
         except Exception as e:
-            log(f"Error: {str(e)}")
-            log(f"Traceback: {traceback.format_exc()}")
+            log(f"Error (error_type={type(e).__name__})")
             print("", file=sys.stdout)
             sys.stdout.flush()
 
