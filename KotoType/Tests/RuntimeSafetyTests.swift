@@ -51,6 +51,33 @@ final class RuntimeSafetyTests: XCTestCase {
         XCTAssertEqual(limits.maxParallelModelLoads, 1)
     }
 
+    func testCanceledRecordingRecreatesRecorderOnlyAfterTimeout() {
+        XCTAssertFalse(AppDelegate.shouldRecreateRecorderAfterStop(.stopped))
+        XCTAssertFalse(AppDelegate.shouldRecreateRecorderAfterStop(.notRecording))
+        XCTAssertTrue(AppDelegate.shouldRecreateRecorderAfterStop(.timedOut))
+    }
+
+    func testRecordingStartIsBlockedWhileRecorderIsStopping() {
+        XCTAssertFalse(
+            AppDelegate.shouldIgnoreRecordingStart(
+                isRecording: false,
+                isRecorderStopping: false
+            )
+        )
+        XCTAssertTrue(
+            AppDelegate.shouldIgnoreRecordingStart(
+                isRecording: true,
+                isRecorderStopping: false
+            )
+        )
+        XCTAssertTrue(
+            AppDelegate.shouldIgnoreRecordingStart(
+                isRecording: false,
+                isRecorderStopping: true
+            )
+        )
+    }
+
     func testEffectiveBackendDefaultWorkerCountsMatchPresetStrategy() {
         XCTAssertEqual(EffectiveTranscriptionBackend.cpu.defaultWorkerCount, 2)
         XCTAssertEqual(EffectiveTranscriptionBackend.mlx.defaultWorkerCount, 1)

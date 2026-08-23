@@ -71,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var recordingIndicatorWindow: RecordingIndicatorWindow?
     var initialSetupWindowController: InitialSetupWindowController?
     var isRecording = false
+    private var isRealtimeRecorderStopping = false
     private var isImportingAudio = false
     private var isCancelingImportedAudioTranscription = false
     private var didSuspendRealtimeWorkersForImport = false
@@ -125,6 +126,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             bundlePath: bundlePath
         )
         return (max(1, workerCount), 1)
+    }
+
+    nonisolated static func shouldRecreateRecorderAfterStop(
+        _ result: RecordingStopResult
+    ) -> Bool {
+        result == .timedOut
+    }
+
+    nonisolated static func shouldIgnoreRecordingStart(
+        isRecording: Bool,
+        isRecorderStopping: Bool
+    ) -> Bool {
+        isRecording || isRecorderStopping
     }
 
     // Dispatch source handlers run on their configured queue, so create a nonisolated
@@ -386,8 +400,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.shared.log("Recording request ignored because imported audio transcription is running", level: .warning)
             return
         }
-        guard !isRecording else {
-            Logger.shared.log("Recording request ignored because recording is already active", level: .debug)
+        guard !Self.shouldIgnoreRecordingStart(
+            isRecording: isRecording,
+            isRecorderStopping: isRealtimeRecorderStopping
+        ) else {
+            Logger.shared.log(
+                "Recording request ignored because recording or recorder teardown is already active",
+                level: .debug
+            )
             return
         }
 
@@ -657,6 +677,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        isRealtimeRecorderStopping = true
         recorder.stopRecording { [weak self] result in
             Task { @MainActor [weak self] in
                 self?.completeRecordingStop(
@@ -675,6 +696,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timeoutInterval: TimeInterval,
         result: RecordingStopResult
     ) {
+        isRealtimeRecorderStopping = false
+        if Self.shouldRecreateRecorderAfterStop(result),
+           let recorder,
+           realtimeRecorder === recorder {
+            Logger.shared.log(
+                "Recording stop timed out (session \(sessionID)); resetting the recorder",
+                level: .error
+            )
+            realtimeRecorder = makeRealtimeRecorder()
+        }
         guard sessionByID[sessionID] != nil else { return }
 
         switch result {
@@ -699,13 +730,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         case .timedOut:
             Logger.shared.log(
-                "Recording stop timed out (session \(sessionID)); resetting the recorder",
+                "Recording stop timed out (session \(sessionID)); discarding the recording session",
                 level: .error
             )
             destroySession(sessionID: sessionID)
-            if let recorder, realtimeRecorder === recorder {
-                realtimeRecorder = makeRealtimeRecorder()
-            }
             if !isRecording {
                 showTransientRecordingAttention("Audio input was reset. Please try again.")
             }
@@ -743,7 +771,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.shared.log("Canceling audio recording for session \(sessionID)...", level: .info)
             isRecording = false
             activeRecordingSessionID = nil
-            realtimeRecorder?.stopRecording(discardPendingAudio: true)
+            let recorder = realtimeRecorder
+            if let recorder {
+                isRealtimeRecorderStopping = true
+                recorder.stopRecording(discardPendingAudio: true) { [weak self] result in
+                    Task { @MainActor [weak self] in
+                        self?.completeCanceledRecordingStop(
+                            sessionID: sessionID,
+                            recorder: recorder,
+                            result: result
+                        )
+                    }
+                }
+            }
             realtimeRecorder?.onInputLevelChanged = nil
             realtimeRecorder?.onInputDeviceNameChanged = nil
             realtimeRecorder?.onMaximumDurationReached = nil
@@ -791,6 +831,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Logger.shared.log("Cancel request ignored because there is no active recording/transcription task", level: .debug)
+    }
+
+    private func completeCanceledRecordingStop(
+        sessionID: Int,
+        recorder: RealtimeRecorder?,
+        result: RecordingStopResult
+    ) {
+        isRealtimeRecorderStopping = false
+        guard Self.shouldRecreateRecorderAfterStop(result),
+              let recorder,
+              realtimeRecorder === recorder else {
+            return
+        }
+
+        Logger.shared.log(
+            "Canceled recording stop timed out (session \(sessionID)); resetting the recorder",
+            level: .error
+        )
+        realtimeRecorder = makeRealtimeRecorder()
     }
 
     private func createRecordingSession(
