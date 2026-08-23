@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -21,6 +21,7 @@ help:
 	@echo "  make test-noise-eval - ノイズ戦略評価 CLI のユニットテスト"
 	@echo "  make test-smoke-server - whisper_server バイナリのスモークテスト"
 	@echo "  make test-release-smoke-script - リリーススモークスクリプトの回帰テスト"
+	@echo "  make test-release-workflow - リリース検証workflowの回帰テスト"
 	@echo "  make test-benchmark - 固定音声で精度・速度ベンチマークを実行"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
 	@echo "  make test-all       - Pythonユニットテストを実行"
@@ -73,6 +74,10 @@ test-release-smoke-script:
 	@echo "リリーススモークスクリプトの回帰テストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_smoke_whisper_server_binary.py
 
+test-release-workflow:
+	@echo "リリース検証workflowの回帰テストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_verify_release_assets_workflow.py
+
 test-user-dictionary:
 	@echo "辞書機能ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_user_dictionary.py
@@ -85,7 +90,7 @@ test-logging-privacy:
 	@echo "ログプライバシーのユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_logging_privacy.py
 
-test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-user-dictionary test-ending-fidelity
+test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 
