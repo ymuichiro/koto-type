@@ -58,7 +58,9 @@ The application may write the following local files:
 Notes:
 
 - Transcription history is stored locally until the user clears it.
-- Logs are intended for troubleshooting and may contain operational metadata such as file paths, settings values, and stack traces.
+- History stores transcription text and metadata only. Imported audio is not copied or retained by the history feature, and source audio paths are not persisted for new entries.
+- Legacy history entries that contain an audio path are sanitized and rewritten without that path when history is next loaded.
+- Logs are intended for troubleshooting but do not record transcription text or source audio paths.
 - Persistent local files are written with owner-only POSIX permissions where supported.
 - Automatic text insertion uses pasteboard-based paste simulation and restores the previous clipboard contents immediately after pasting. Transcribed text may still pass briefly through the macOS pasteboard and may be observable by clipboard managers.
 
