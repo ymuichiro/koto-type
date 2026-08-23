@@ -146,7 +146,8 @@
       <section class="compat reveal">
         <h2>対応環境</h2>
         <div class="chip-row">
-          <span class="chip">macOS 13+</span>
+          <span class="chip">macOS 26+（現行Release）</span>
+          <span class="chip">CPU-only経路：macOS 14 / 15</span>
           <span class="chip">Apple Silicon / Intel</span>
           <span class="chip">MLX 加速あり</span>
           <span class="chip">Accessibility 権限</span>
@@ -154,6 +155,7 @@
           <span class="chip">画面収録権限</span>
           <span class="chip">システム `ffmpeg` が必要</span>
         </div>
+        <p>現行の配布ReleaseはmacOS 26以降でビルド・検証しています。macOS 14および15でもCPU-only経路で動作する可能性があり、その経路はCIで別途検証しますが、正式なRelease対象ではなく、動作を保証しません。macOS 13はSwiftのソースターゲットとしてのみ扱い、現行の配布ランタイム依存関係での動作は保証しません。</p>
       </section>
 
       <section class="setup reveal" id="setup-checklist">

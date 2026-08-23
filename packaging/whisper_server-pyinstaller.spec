@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import importlib.util
 import os
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files
@@ -14,26 +15,36 @@ def optional_collect_all(package_name):
         return [], [], []
 
 
+def module_is_available(module_name):
+    return importlib.util.find_spec(module_name) is not None
+
+
 datas = []
 binaries = []
 hiddenimports = [
     "ctranslate2",
-    "mlx_whisper",
-    "mlx_whisper.audio",
-    "mlx_whisper.decoding",
-    "mlx_whisper.load_models",
-    "mlx_whisper.timing",
-    "mlx_whisper.tokenizer",
-    "mlx_whisper.transcribe",
-    "mlx_whisper.version",
-    "mlx_whisper.whisper",
-    "mlx_whisper.writers",
 ]
 
 datas += collect_data_files("faster_whisper")
-datas += collect_data_files("mlx_whisper")
+
+if module_is_available("mlx_whisper"):
+    hiddenimports += [
+        "mlx_whisper",
+        "mlx_whisper.audio",
+        "mlx_whisper.decoding",
+        "mlx_whisper.load_models",
+        "mlx_whisper.timing",
+        "mlx_whisper.tokenizer",
+        "mlx_whisper.transcribe",
+        "mlx_whisper.version",
+        "mlx_whisper.whisper",
+        "mlx_whisper.writers",
+    ]
+    datas += collect_data_files("mlx_whisper")
 
 for package_name in ("mlx",):
+    if not module_is_available(package_name):
+        continue
     package_datas, package_binaries, package_hiddenimports = optional_collect_all(
         package_name
     )

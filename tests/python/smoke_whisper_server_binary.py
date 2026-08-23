@@ -17,13 +17,13 @@ def wait_for_line(process, timeout_seconds):
     deadline = time.time() + timeout_seconds
 
     while time.time() < deadline:
-        if process.poll() is not None:
-            break
         events = selector.select(timeout=1)
         if events:
             line = process.stdout.readline()
             if line:
                 return line.rstrip("\n")
+        if process.poll() is not None:
+            break
     return None
 
 
@@ -69,13 +69,25 @@ def resolve_smoke_language():
     return os.environ.get("KOTOTYPE_SMOKE_LANGUAGE", "ja").strip() or "ja"
 
 
+def parse_smoke_arguments(arguments):
+    healthcheck_only = "--healthcheck" in arguments
+    positional_arguments = [argument for argument in arguments if argument != "--healthcheck"]
+    if len(positional_arguments) > 1:
+        raise ValueError("Only one server binary path may be provided")
+    server_binary = (
+        Path(positional_arguments[0]).resolve() if positional_arguments else None
+    )
+    return server_binary, healthcheck_only
+
+
 def main():
     project_root = Path(__file__).resolve().parents[2]
-    server_binary = (
-        Path(sys.argv[1]).resolve()
-        if len(sys.argv) > 1
-        else (project_root / "dist" / "whisper_server")
-    )
+    try:
+        configured_server_binary, healthcheck_only = parse_smoke_arguments(sys.argv[1:])
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    server_binary = configured_server_binary or (project_root / "dist" / "whisper_server")
     test_audio = resolve_smoke_audio_path(project_root)
     smoke_language = resolve_smoke_language()
     real_home = Path.home()
@@ -83,7 +95,7 @@ def main():
     if not server_binary.exists():
         print(f"Server binary not found: {server_binary}", file=sys.stderr)
         return 2
-    if not test_audio.exists():
+    if not healthcheck_only and not test_audio.exists():
         print(f"Test audio not found: {test_audio}", file=sys.stderr)
         return 2
 
@@ -109,6 +121,24 @@ def main():
             env=env,
         )
         try:
+            if healthcheck_only:
+                token = "cpu-only"
+                process.stdin.write(f"__KOTOTYPE_HEALTHCHECK__:{token}\n")
+                process.stdin.flush()
+                process.stdin.close()
+                line = wait_for_line(process, timeout_seconds=15)
+                expected = f"__KOTOTYPE_HEALTHCHECK_OK__:{token}"
+                if line != expected:
+                    stderr = read_available_stderr(process)
+                    print("whisper_server healthcheck failed", file=sys.stderr)
+                    if line:
+                        print(f"Unexpected response: {line}", file=sys.stderr)
+                    if stderr:
+                        print(stderr[:2000], file=sys.stderr)
+                    return 1
+                print("Whisper server healthcheck passed")
+                return 0
+
             request = json.dumps(
                 {
                     "type": "transcription_request",

@@ -132,6 +132,7 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 FRAMEWORKS_DIR="${CONTENTS_DIR}/Frameworks"
 SPARKLE_FEED_URL="${KOTOTYPE_SPARKLE_FEED_URL:-https://github.com/ymuichiro/koto-type/releases/latest/download/appcast.xml}"
 SPARKLE_PUBLIC_ED_KEY="${KOTOTYPE_SPARKLE_PUBLIC_ED_KEY:-}"
+MINIMUM_SYSTEM_VERSION="${KOTOTYPE_MINIMUM_SYSTEM_VERSION:-26.0}"
 # Finder/Dock icon source (Big Sur+ style rounded app icon)
 ICON_SOURCE="../assets/logo/kototype_app_icon_1024.png"
 EXECUTABLE_SOURCE=""
@@ -277,6 +278,7 @@ EOF
 # バージョン埋め込み
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string ${MINIMUM_SYSTEM_VERSION}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :SUFeedURL string ${SPARKLE_FEED_URL}" "${CONTENTS_DIR}/Info.plist"
 
 if [ -n "${SPARKLE_PUBLIC_ED_KEY}" ]; then
