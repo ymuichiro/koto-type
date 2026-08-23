@@ -221,7 +221,7 @@ jobs:
         run: |
           INFO_PLIST="KotoType/KotoType.app/Contents/Info.plist"
           minimum="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "${INFO_PLIST}" 2>/dev/null || true)"
-          if minimum != "26.0":
+          if [ "${minimum}" != "26.0" ]; then
               echo "Expected bundled app LSMinimumSystemVersion=26.0, got '${minimum}'"
               exit 1
           fi
