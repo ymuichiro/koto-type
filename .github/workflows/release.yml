@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-26
     
     steps:
       - name: Resolve release tag
@@ -50,7 +50,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv sync --extra dev
+          uv sync --extra mlx --extra dev
 
       - name: Validate Sparkle secrets
         run: |
@@ -122,6 +122,7 @@ jobs:
         env:
           KOTOTYPE_SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml
           KOTOTYPE_SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          KOTOTYPE_MINIMUM_SYSTEM_VERSION: "26.0"
         run: |
           cd KotoType
           export KOTOTYPE_BUILD_CONFIG=release
@@ -215,6 +216,26 @@ jobs:
             exit 1
           fi
           printf '%s' "${KOTOTYPE_SPARKLE_PRIVATE_ED_KEY}" | "${SIGN_UPDATE_BIN}" --verify --ed-key-file - "${ZIP_PATH}" "${ZIP_SIGNATURE}"
+
+      - name: Verify generated appcast minimum system version
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("KotoType/appcast.xml").getroot()
+          minimum = next(
+              (
+                  value
+                  for element in root.iter()
+                  for key, value in element.attrib.items()
+                  if key.endswith("minimumSystemVersion")
+              ),
+              None,
+          )
+          if minimum != "26.0":
+              raise SystemExit(f"Expected appcast minimumSystemVersion=26.0, got {minimum!r}")
+          print(f"Verified appcast minimumSystemVersion={minimum}")
+          PY
       
       - name: Create DMG
         run: |

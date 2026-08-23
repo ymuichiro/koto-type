@@ -47,6 +47,14 @@ class SmokeWhisperServerBinaryTests(unittest.TestCase):
             )
             self.assertEqual(SMOKE.resolve_smoke_language(), "en")
 
+    def test_healthcheck_flag_does_not_require_audio(self):
+        server_binary, healthcheck_only = SMOKE.parse_smoke_arguments(
+            ["--healthcheck", "/tmp/whisper_server"]
+        )
+
+        self.assertEqual(server_binary, Path("/tmp/whisper_server").resolve())
+        self.assertTrue(healthcheck_only)
+
 
 if __name__ == "__main__":
     unittest.main()

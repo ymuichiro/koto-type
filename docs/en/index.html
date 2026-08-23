@@ -146,7 +146,8 @@
       <section class="compat reveal">
         <h2>Compatibility at a glance</h2>
         <div class="chip-row">
-          <span class="chip">macOS 13+</span>
+          <span class="chip">macOS 26+ (current release)</span>
+          <span class="chip">CPU-only fallback: macOS 14 / 15</span>
           <span class="chip">Apple Silicon / Intel</span>
           <span class="chip">Optional MLX acceleration</span>
           <span class="chip">Accessibility permission</span>
@@ -154,6 +155,7 @@
           <span class="chip">Screen Recording permission</span>
           <span class="chip">Requires system `ffmpeg`</span>
         </div>
+        <p>The current packaged release is built and validated on macOS 26 or later. macOS 14 and 15 may work through the CPU-only path, and that path is tested separately in CI, but it is not an official release target and is not guaranteed. macOS 13 remains a Swift source deployment target only; current packaged runtime dependencies are not guaranteed there.</p>
       </section>
 
       <section class="setup reveal" id="setup-checklist">

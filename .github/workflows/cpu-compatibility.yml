@@ -1,0 +1,80 @@
+name: CPU-only Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - "python/**"
+      - "packaging/**"
+      - "tests/python/**"
+      - ".github/workflows/cpu-compatibility.yml"
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - "python/**"
+      - "packaging/**"
+      - "tests/python/**"
+      - ".github/workflows/cpu-compatibility.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-only:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install UV
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install CPU-only dependencies
+        run: uv sync --extra dev
+
+      - name: Confirm MLX is not installed
+        run: |
+          .venv/bin/python - <<'PY'
+          import importlib.util
+
+          unexpected = [
+              name
+              for name in ("mlx", "mlx_metal", "mlx_whisper")
+              if importlib.util.find_spec(name) is not None
+          ]
+          if unexpected:
+              raise SystemExit(f"CPU-only environment unexpectedly contains: {unexpected}")
+          print("CPU-only dependency set confirmed")
+          PY
+
+      - name: Run Python tests
+        run: make test-all
+
+      - name: Build CPU-only backend
+        run: make build-server
+
+      - name: Run CPU-only backend healthcheck
+        run: .venv/bin/python tests/python/smoke_whisper_server_binary.py --healthcheck dist/whisper_server
+
+      - name: Run Swift tests
+        run: |
+          cd KotoType
+          swift test

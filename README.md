@@ -67,6 +67,12 @@ Hold your hotkey, speak, release, and KotoType transcribes your speech and inser
 > **Update note**: After upgrading KotoType to a newer version, macOS permissions must be granted again.
 > Re-open KotoType and re-allow **Accessibility**, **Microphone**, and **Screen Recording** in `System Settings > Privacy & Security` if prompted.
 
+### Compatibility
+
+- The official packaged release is built and validated for **macOS 26 or later**.
+- macOS 14 and 15 **may work through the CPU-only path**. This path is tested separately in CI, but it is not an official release target and is not guaranteed.
+- macOS 13 remains a Swift source deployment target only; it is not a supported target for the current packaged runtime dependencies.
+
 ### Install FFmpeg (Required)
 
 KotoType validates `ffmpeg` during the initial setup and cannot proceed without it.
@@ -90,7 +96,8 @@ sudo port install ffmpeg
 
 #### Prerequisites
 
-- macOS 13.0 or later
+- macOS 26.0 or later for official packaged release validation
+- macOS 14 or 15 may work with the CPU-only source path; see the compatibility note above
 - Xcode 15.0 or later
 - Python 3.13
 - [uv](https://github.com/astral-sh/uv) package manager
@@ -103,10 +110,12 @@ git clone https://github.com/ymuichiro/koto-type.git
 cd koto-type
 ```
 
-2. Install dependencies (including dev dependencies)
+2. Install CPU-only dependencies (including dev dependencies)
 ```bash
 make install-deps
 ```
+
+For MLX acceleration on a supported Apple Silicon environment, use `make install-deps-mlx` instead.
 
 3. Build the application (Python + Swift)
 ```bash

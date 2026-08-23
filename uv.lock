@@ -306,9 +306,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "faster-whisper" },
     { name = "ffmpeg-python" },
-    { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "mlx-metal", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "ruff" },
     { name = "scipy" },
@@ -320,14 +317,19 @@ dependencies = [
 dev = [
     { name = "pyinstaller" },
 ]
+mlx = [
+    { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "mlx-metal", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "faster-whisper", specifier = ">=1.2.1" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
-    { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.31.1" },
-    { name = "mlx-metal", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.31.1" },
-    { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.4.3" },
+    { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'mlx'", specifier = ">=0.31.1" },
+    { name = "mlx-metal", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'mlx'", specifier = ">=0.31.1" },
+    { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'mlx'", specifier = ">=0.4.3" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "ruff", specifier = ">=0.15.0" },
@@ -335,7 +337,7 @@ requires-dist = [
     { name = "setuptools-rust", specifier = ">=1.12.0" },
     { name = "ty", specifier = ">=0.0.15" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["mlx", "dev"]
 
 [[package]]
 name = "llvmlite"

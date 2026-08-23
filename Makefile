@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -31,6 +31,7 @@ help:
 	@echo "  make build-app     - Swiftアプリケーションをビルド"
 	@echo "  make build-all     - すべてのビルド（Python + Swift）"
 	@echo "  make install-deps  - Python依存関係をインストール"
+	@echo "  make install-deps-mlx - Python依存関係（MLX加速を含む）をインストール"
 	@echo ""
 	@echo "ユーティリティ:"
 	@echo "  make clean          - 一時ファイルを削除"
@@ -108,6 +109,10 @@ build-all: build-server build-app
 install-deps:
 	@echo "Python依存関係をインストール中..."
 	uv sync --extra dev
+
+install-deps-mlx:
+	@echo "Python依存関係（MLX加速を含む）をインストール中..."
+	uv sync --extra mlx --extra dev
 
 clean:
 	@echo "一時ファイルを削除中..."
