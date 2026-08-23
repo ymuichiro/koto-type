@@ -711,7 +711,7 @@ class ActiveClipRetryTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0]["clip_timestamps"], [0.18, 1.08])
         self.assertNotIn("clip_timestamps", calls[1])
-        self.assertIsNone(calls[1]["initial_prompt"])
+        self.assertEqual(calls[1]["initial_prompt"], "prompt")
 
     def test_mlx_retry_falls_back_when_active_clip_hits_compression_gate(self):
         manager = RecordingOptionsBackendManager()
@@ -763,7 +763,7 @@ class ActiveClipRetryTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0]["clip_timestamps"], [0.18, 1.08])
         self.assertNotIn("clip_timestamps", calls[1])
-        self.assertIsNone(calls[1]["initial_prompt"])
+        self.assertEqual(calls[1]["initial_prompt"], "prompt")
 
 
 if __name__ == "__main__":

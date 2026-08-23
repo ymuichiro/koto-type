@@ -655,10 +655,10 @@ def transcribe_with_mlx_active_clip_retry(
 
     retry_kwargs = dict(transcribe_kwargs)
     retry_kwargs.pop("clip_timestamps", None)
-    retry_kwargs["initial_prompt"] = None
     log(
         "MLX active clip transcription requires full-audio retry: "
-        f"reason={retry_reason}, initial_prompt_removed=true"
+        f"reason={retry_reason}, initial_prompt_preserved="
+        f"{retry_kwargs.get('initial_prompt') is not None}"
     )
     return mlx_whisper.transcribe(audio_path, **retry_kwargs)
 
@@ -1117,11 +1117,20 @@ def post_process_text(text, language="ja", auto_punctuation=True):
         text = re.sub(r"\s*([、。！？])\s*", r"\1", text)
         text = normalize_japanese_punctuation_sequence(text)
 
-        if text and not text.endswith(("。", "！", "？", "!", "?")):
-            if text.endswith("、"):
-                text = text[:-1] + "。"
-            else:
-                text += "。"
+        if text:
+            if re.search(r"(?:でしょうか|ませんか|か)[。！？!?]$", text):
+                text = re.sub(r"[。！？!?]$", "？", text)
+            elif re.search(r"(?:でしょうか|ませんか|か)$", text):
+                text += "？"
+            elif not text.endswith(("。", "！", "？", "!", "?")):
+                if text.endswith("、"):
+                    text_without_comma = text[:-1]
+                    if re.search(r"(?:でしょうか|ませんか|か)$", text_without_comma):
+                        text = text_without_comma + "？"
+                    else:
+                        text = text_without_comma + "。"
+                else:
+                    text += "。"
 
         text = normalize_japanese_punctuation_sequence(text)
     else:
@@ -2123,6 +2132,12 @@ def generate_initial_prompt(
         ]
 
     normalized_language = str(language or "").strip().lower()
+    if normalized_mode != "translate" and normalized_language == "ja":
+        prompt_parts.append(
+            "Japanese ending fidelity: preserve spoken sentence-final particles and "
+            "interrogative endings exactly, including か, でしょうか, ませんか, ね, "
+            "and よ. Do not turn a question into a declarative sentence."
+        )
     language_hint = language_hint_by_code.get(normalized_language)
     if language_hint:
         prompt_parts.append(

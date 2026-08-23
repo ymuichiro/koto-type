@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-user-dictionary test-all build-server build-app build-all install-deps clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -72,11 +72,15 @@ test-user-dictionary:
 	@echo "辞書機能ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_user_dictionary.py
 
+test-ending-fidelity:
+	@echo "語尾忠実度評価ユニットテストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_ending_fidelity.py
+
 test-logging-privacy:
 	@echo "ログプライバシーのユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_logging_privacy.py
 
-test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-user-dictionary
+test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-user-dictionary test-ending-fidelity
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 
