@@ -1,0 +1,38 @@
+[
+  {
+    "id": "question_kadoka",
+    "reference": "これは実現できますか？",
+    "spoken_ending": "できますか",
+    "question": true
+  },
+  {
+    "id": "question_deshouka",
+    "reference": "この方法で問題ないでしょうか？",
+    "spoken_ending": "問題ないでしょうか",
+    "question": true
+  },
+  {
+    "id": "question_masenka",
+    "reference": "明日までに確認してもらえませんか？",
+    "spoken_ending": "確認してもらえませんか",
+    "question": true
+  },
+  {
+    "id": "particle_ne",
+    "reference": "今日はここまでですね。",
+    "spoken_ending": "ここまでですね",
+    "question": false
+  },
+  {
+    "id": "particle_yo",
+    "reference": "この設定で動きますよ。",
+    "spoken_ending": "動きますよ",
+    "question": false
+  },
+  {
+    "id": "declarative",
+    "reference": "これは実現できます。",
+    "spoken_ending": "実現できます",
+    "question": false
+  }
+]

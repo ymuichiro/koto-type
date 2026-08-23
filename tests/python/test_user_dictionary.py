@@ -83,6 +83,8 @@ class UserDictionaryTests(unittest.TestCase):
         self.assertPromptUsesNoTranslationGuidance(prompt)
         self.assertIn("Expected spoken language hint: Japanese.", prompt)
         self.assertIn("Preserve any spoken code-switching.", prompt)
+        self.assertIn("Japanese ending fidelity:", prompt)
+        self.assertIn("Do not turn a question into a declarative sentence.", prompt)
         self.assertNotIn("正確な日本語で出力してください", prompt)
 
     def test_generate_initial_prompt_includes_user_vocabulary_hints(self):
@@ -209,6 +211,40 @@ class UserDictionaryTests(unittest.TestCase):
             auto_punctuation=True,
         )
         self.assertEqual(processed, "これはテストです。")
+
+    def test_post_process_text_preserves_japanese_question_endings(self):
+        cases = {
+            "これは実現できますか": "これは実現できますか？",
+            "この方法で問題ないでしょうか。": "この方法で問題ないでしょうか？",
+            "確認してもらえませんか、": "確認してもらえませんか？",
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(
+                    whisper_server.post_process_text(
+                        text,
+                        language="ja",
+                        auto_punctuation=True,
+                    ),
+                    expected,
+                )
+
+    def test_post_process_text_does_not_change_japanese_ending_particles(self):
+        expected = {
+            "ここまでですね": "ここまでですね。",
+            "この設定で動きますよ": "この設定で動きますよ。",
+        }
+        for text, expected_text in expected.items():
+            with self.subTest(text=text):
+                self.assertEqual(
+                    whisper_server.post_process_text(
+                        text,
+                        language="ja",
+                        auto_punctuation=True,
+                    ),
+                    expected_text,
+                )
 
     def test_post_process_text_normalizes_existing_comma_period_sequence(self):
         processed = whisper_server.post_process_text(
