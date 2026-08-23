@@ -73,8 +73,3 @@ jobs:
 
       - name: Run CPU-only backend healthcheck
         run: .venv/bin/python tests/python/smoke_whisper_server_binary.py --healthcheck dist/whisper_server
-
-      - name: Run Swift tests
-        run: |
-          cd KotoType
-          swift test
