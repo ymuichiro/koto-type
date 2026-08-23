@@ -217,25 +217,15 @@ jobs:
           fi
           printf '%s' "${KOTOTYPE_SPARKLE_PRIVATE_ED_KEY}" | "${SIGN_UPDATE_BIN}" --verify --ed-key-file - "${ZIP_PATH}" "${ZIP_SIGNATURE}"
 
-      - name: Verify generated appcast minimum system version
+      - name: Verify bundled app minimum system version
         run: |
-          python3 - <<'PY'
-          import xml.etree.ElementTree as ET
-
-          root = ET.parse("KotoType/appcast.xml").getroot()
-          minimum = next(
-              (
-                  value
-                  for element in root.iter()
-                  for key, value in element.attrib.items()
-                  if key.endswith("minimumSystemVersion")
-              ),
-              None,
-          )
+          INFO_PLIST="KotoType/KotoType.app/Contents/Info.plist"
+          minimum="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "${INFO_PLIST}" 2>/dev/null || true)"
           if minimum != "26.0":
-              raise SystemExit(f"Expected appcast minimumSystemVersion=26.0, got {minimum!r}")
-          print(f"Verified appcast minimumSystemVersion={minimum}")
-          PY
+              echo "Expected bundled app LSMinimumSystemVersion=26.0, got '${minimum}'"
+              exit 1
+          fi
+          echo "Verified bundled app LSMinimumSystemVersion=${minimum}"
       
       - name: Create DMG
         run: |
