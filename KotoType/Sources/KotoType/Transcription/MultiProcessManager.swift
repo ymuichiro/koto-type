@@ -864,9 +864,9 @@ final class MultiProcessManager: @unchecked Sendable {
             )
         }
 
-        for (processIndex, token) in timedOutHealthChecks {
+        for (processIndex, _) in timedOutHealthChecks {
             Logger.shared.log(
-                "MultiProcessManager: health check timeout on process \(processIndex), token=\(token)",
+                "MultiProcessManager: health check timeout on process \(processIndex)",
                 level: .warning
             )
             recoverProcess(processIndex: processIndex)
