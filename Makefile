@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -24,6 +24,7 @@ help:
 	@echo "  make test-release-workflow - リリース検証workflowの回帰テスト"
 	@echo "  make test-benchmark - 固定音声で精度・速度ベンチマークを実行"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
+	@echo "  make test-public-docs - 公開対応環境表記の回帰テスト"
 	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
 	@echo "ビルド:"
@@ -87,11 +88,15 @@ test-ending-fidelity:
 	@echo "語尾忠実度評価ユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_ending_fidelity.py
 
+test-public-docs:
+	@echo "公開対応環境表記の回帰テストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_public_compatibility_docs.py
+
 test-logging-privacy:
 	@echo "ログプライバシーのユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_logging_privacy.py
 
-test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity
+test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 
