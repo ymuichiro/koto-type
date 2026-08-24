@@ -199,6 +199,7 @@ test_*.py
 !tests/python/test_user_dictionary.py
 !tests/python/test_logging_privacy.py
 !tests/python/test_public_compatibility_docs.py
+!tests/python/test_real_audio_e2e_preflight.py
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 

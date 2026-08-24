@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight test-real-audio-preflight-unit test-real-audio-capture test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -25,6 +25,9 @@ help:
 	@echo "  make test-benchmark - 固定音声で精度・速度ベンチマークを実行"
 	@echo "  make test-user-dictionary - 辞書機能ユニットテスト"
 	@echo "  make test-public-docs - 公開対応環境表記の回帰テスト"
+	@echo "  make test-real-audio-preflight - 実マイクE2Eの入力デバイス事前確認"
+	@echo "  make test-real-audio-preflight-unit - 実マイクpreflight判定のユニットテスト"
+	@echo "  make test-real-audio-capture - 入力デバイス確認後にAVAudioEngine録音器をスモークテスト"
 	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
 	@echo "ビルド:"
@@ -92,11 +95,23 @@ test-public-docs:
 	@echo "公開対応環境表記の回帰テストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_public_compatibility_docs.py
 
+test-real-audio-preflight:
+	@echo "実マイクE2Eの入力デバイスを事前確認中..."
+	$(PYTHON) tools/real_audio_e2e_preflight.py
+
+test-real-audio-preflight-unit:
+	@echo "実マイクpreflight判定のユニットテストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_real_audio_e2e_preflight.py
+
+test-real-audio-capture: test-real-audio-preflight
+	@echo "AVAudioEngine録音器の実入力スモークテストを実行中..."
+	cd KotoType && swift test --filter RealtimeRecorderTests
+
 test-logging-privacy:
 	@echo "ログプライバシーのユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_logging_privacy.py
 
-test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs
+test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight-unit
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 
