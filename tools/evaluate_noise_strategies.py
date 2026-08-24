@@ -261,7 +261,7 @@ def ensure_dataset(work_dir: Path) -> list[EvalCase]:
         synthesize_speech(long_target_text, "Kyoko", long_target_path)
     if not background_jp_path.exists():
         synthesize_speech(
-            background_jp_text, "Eddy (日本語（日本）)", background_jp_path
+            background_jp_text, "Kyoko", background_jp_path
         )
     if not background_en_path.exists():
         synthesize_speech(background_en_text, "Samantha", background_en_path)
