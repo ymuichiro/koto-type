@@ -18,6 +18,13 @@ RELEASE_WORKFLOW_PATH = (
     / "release.yml"
 )
 
+BENCHMARK_WORKFLOW_PATH = (
+    Path(__file__).resolve().parents[2]
+    / ".github"
+    / "workflows"
+    / "benchmark.yml"
+)
+
 
 class VerifyReleaseAssetsWorkflowTests(unittest.TestCase):
     def test_checks_out_the_resolved_release_tag(self) -> None:
@@ -47,6 +54,15 @@ class VerifyReleaseAssetsWorkflowTests(unittest.TestCase):
             ),
             3,
         )
+
+    def test_benchmark_workflow_installs_mlx_extra_before_running_benchmark(self):
+        workflow = BENCHMARK_WORKFLOW_PATH.read_text(encoding="utf-8")
+        install_start = workflow.index("- name: Install ffmpeg")
+        benchmark_start = workflow.index("- name: Run benchmark")
+        install_step = workflow[install_start:benchmark_start]
+
+        self.assertIn("uv sync --extra mlx --extra dev", install_step)
+        self.assertIn("brew install ffmpeg", install_step)
 
 
 if __name__ == "__main__":
