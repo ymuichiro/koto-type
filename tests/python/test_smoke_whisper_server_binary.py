@@ -55,6 +55,9 @@ class SmokeWhisperServerBinaryTests(unittest.TestCase):
         self.assertEqual(server_binary, Path("/tmp/whisper_server").resolve())
         self.assertTrue(healthcheck_only)
 
+    def test_missing_server_log_tail_is_empty(self):
+        self.assertEqual(SMOKE.read_server_log_tail(Path("/tmp/no-koto-type-server.log")), "")
+
 
 if __name__ == "__main__":
     unittest.main()
