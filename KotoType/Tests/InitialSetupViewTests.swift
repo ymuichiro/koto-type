@@ -1,6 +1,7 @@
 @testable import KotoType
 import XCTest
 
+@MainActor
 final class InitialSetupViewTests: XCTestCase {
     func testGuidedActionTitleAlwaysUsesGrantAccessibility() {
         XCTAssertEqual(InitialSetupView.guidedActionTitle(for: "accessibility"), "Grant Accessibility")
