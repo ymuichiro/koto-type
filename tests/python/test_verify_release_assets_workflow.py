@@ -11,6 +11,13 @@ WORKFLOW_PATH = (
     / "verify-release-assets.yml"
 )
 
+RELEASE_WORKFLOW_PATH = (
+    Path(__file__).resolve().parents[2]
+    / ".github"
+    / "workflows"
+    / "release.yml"
+)
+
 
 class VerifyReleaseAssetsWorkflowTests(unittest.TestCase):
     def test_checks_out_the_resolved_release_tag(self) -> None:
@@ -23,6 +30,23 @@ class VerifyReleaseAssetsWorkflowTests(unittest.TestCase):
         self.assertLess(resolve_start, checkout_start)
         self.assertIn("ref: ${{ steps.target.outputs.tag }}", checkout_step)
         self.assertIn("fetch-depth: 1", checkout_step)
+
+    def test_cpu_model_is_prepared_before_both_smoke_checks(self):
+        workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
+        prepare_start = workflow.index("- name: Prepare CPU model for release smoke")
+        binary_smoke_start = workflow.index("- name: Smoke Test Python Server Binary")
+        bundle_smoke_start = workflow.index("- name: Verify bundled whisper_server binary")
+
+        self.assertLess(prepare_start, binary_smoke_start)
+        self.assertLess(binary_smoke_start, bundle_smoke_start)
+        self.assertIn("DEFAULT_CPU_MODEL_ID", workflow[prepare_start:binary_smoke_start])
+        self.assertIn("utils.download_model", workflow[prepare_start:binary_smoke_start])
+        self.assertEqual(
+            workflow.count(
+                "KOTOTYPE_CPU_MODEL_DIR: ${{ runner.temp }}/koto-type-cpu-model"
+            ),
+            3,
+        )
 
 
 if __name__ == "__main__":

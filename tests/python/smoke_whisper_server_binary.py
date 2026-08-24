@@ -58,6 +58,12 @@ def read_available_stderr(process):
     return "\n".join(chunks)
 
 
+def read_server_log_tail(log_path, max_lines=80):
+    if not log_path.exists():
+        return ""
+    return "\n".join(log_path.read_text(encoding="utf-8").splitlines()[-max_lines:])
+
+
 def resolve_smoke_audio_path(project_root):
     configured_path = os.environ.get("KOTOTYPE_SMOKE_AUDIO_PATH", "").strip()
     if configured_path:
@@ -163,6 +169,10 @@ def main():
                 print("No response from whisper_server", file=sys.stderr)
                 if stderr:
                     print(stderr[:2000], file=sys.stderr)
+                server_log_tail = read_server_log_tail(log_dir / "server.log")
+                if server_log_tail:
+                    print("--- server.log (tail) ---", file=sys.stderr)
+                    print(server_log_tail, file=sys.stderr)
                 return 1
 
             if not line.strip():
@@ -171,11 +181,10 @@ def main():
                     "whisper_server returned empty transcription for speech sample",
                     file=sys.stderr,
                 )
-                if log_path.exists():
+                server_log_tail = read_server_log_tail(log_path)
+                if server_log_tail:
                     print("--- server.log (tail) ---", file=sys.stderr)
-                    tail_lines = log_path.read_text(encoding="utf-8").splitlines()[-80:]
-                    for log_line in tail_lines:
-                        print(log_line, file=sys.stderr)
+                    print(server_log_tail, file=sys.stderr)
                 return 1
 
             print(f"Transcription smoke passed: {line[:120]}")

@@ -109,6 +109,40 @@ jobs:
             "${RUNNER_TEMP}/koto-type-release-smoke.aiff" \
             "${RUNNER_TEMP}/koto-type-release-smoke.wav"
 
+      - name: Prepare CPU model for release smoke
+        env:
+          KOTOTYPE_CPU_MODEL_DIR: ${{ runner.temp }}/koto-type-cpu-model
+          HF_HUB_DISABLE_IMPLICIT_TOKEN: "1"
+        run: |
+          source .venv/bin/activate
+          PYTHONPATH=python .venv/bin/python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from faster_whisper import utils
+          from whisper_server import DEFAULT_CPU_MODEL_ID
+
+          model_dir = Path(os.environ["KOTOTYPE_CPU_MODEL_DIR"])
+          cache_dir = model_dir.parent / "koto-type-model-cache"
+          model_dir.parent.mkdir(parents=True, exist_ok=True)
+          cache_dir.mkdir(parents=True, exist_ok=True)
+          utils.download_model(
+              DEFAULT_CPU_MODEL_ID,
+              output_dir=str(model_dir),
+              cache_dir=str(cache_dir),
+          )
+
+          required_files = ("config.json", "model.bin", "tokenizer.json")
+          missing_files = [
+              name for name in required_files if not (model_dir / name).is_file()
+          ]
+          if missing_files:
+              raise SystemExit(
+                  f"CPU model preparation is incomplete; missing: {', '.join(missing_files)}"
+              )
+          print(f"Prepared CPU model {DEFAULT_CPU_MODEL_ID} at {model_dir}")
+          PY
+
       - name: Smoke Test Python Server Binary
         env:
           KOTOTYPE_SMOKE_AUDIO_PATH: ${{ runner.temp }}/koto-type-release-smoke.wav
