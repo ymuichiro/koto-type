@@ -246,6 +246,25 @@ class UserDictionaryTests(unittest.TestCase):
                     expected_text,
                 )
 
+    def test_post_process_text_preserves_raw_japanese_wording(self):
+        raw_texts = [
+            "これはですい",
+            "これからますい",
+            "以前はでしたい",
+            "その後はましたい",
+        ]
+
+        for raw_text in raw_texts:
+            with self.subTest(raw_text=raw_text):
+                self.assertEqual(
+                    whisper_server.post_process_text(
+                        raw_text,
+                        language="ja",
+                        auto_punctuation=False,
+                    ),
+                    raw_text,
+                )
+
     def test_post_process_text_normalizes_existing_comma_period_sequence(self):
         processed = whisper_server.post_process_text(
             "これはテストです、。",

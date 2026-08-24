@@ -1083,18 +1083,6 @@ def post_process_text(text, language="ja", auto_punctuation=True):
 
     auto_punctuation = parse_bool(auto_punctuation, default=True)
 
-    ERROR_CORRECTION_DICT = {
-        "ですい": "です",
-        "ますい": "ます",
-        "でしたい": "でした",
-        "ましたい": "ました",
-    }
-
-    for wrong, correct in sorted(
-        ERROR_CORRECTION_DICT.items(), key=lambda x: len(x[0]), reverse=True
-    ):
-        text = text.replace(wrong, correct)
-
     text = text.strip()
 
     text = " ".join(text.split())
