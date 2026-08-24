@@ -120,12 +120,15 @@ def main():
             bufsize=1,
             env=env,
         )
+        if process.stdin is None:
+            raise RuntimeError("whisper_server smoke process has no stdin pipe")
+        stdin = process.stdin
         try:
             if healthcheck_only:
                 token = "cpu-only"
-                process.stdin.write(f"__KOTOTYPE_HEALTHCHECK__:{token}\n")
-                process.stdin.flush()
-                process.stdin.close()
+                stdin.write(f"__KOTOTYPE_HEALTHCHECK__:{token}\n")
+                stdin.flush()
+                stdin.close()
                 line = wait_for_line(process, timeout_seconds=15)
                 expected = f"__KOTOTYPE_HEALTHCHECK_OK__:{token}"
                 if line != expected:
@@ -150,9 +153,9 @@ def main():
                 },
                 ensure_ascii=False,
             ) + "\n"
-            process.stdin.write(request)
-            process.stdin.flush()
-            process.stdin.close()
+            stdin.write(request)
+            stdin.flush()
+            stdin.close()
 
             line = wait_for_transcript_line(process, timeout_seconds=180)
             if line is None:
@@ -179,7 +182,7 @@ def main():
             return 0
         finally:
             try:
-                process.stdin.close()
+                stdin.close()
             except Exception:
                 pass
             try:

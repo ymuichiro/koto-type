@@ -16,10 +16,10 @@ class NoiseStrategyEvalTests(unittest.TestCase):
             evaluate_noise_strategies.character_error_rate("確認します", "確認します"),
             0.0,
         )
-        self.assertAlmostEqual(
-            evaluate_noise_strategies.character_error_rate("確認します", "確認した"),
-            0.4,
-        )
+        cer = evaluate_noise_strategies.character_error_rate("確認します", "確認した")
+        if cer is None:
+            raise AssertionError("character_error_rate returned None for a non-empty reference")
+        self.assertAlmostEqual(cer, 0.4)
 
     def test_summary_orders_false_insertions_before_latency(self):
         activity = evaluate_noise_strategies.whisper_server.AudioActivityStats(
