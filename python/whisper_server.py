@@ -1163,8 +1163,12 @@ def normalize_prompt_markdown(text):
     """Remove model wrappers while keeping the generated Markdown intact."""
     normalized = str(text or "").strip()
     normalized = re.sub(r"^<think>.*?(?:</think>|$)\s*", "", normalized, flags=re.DOTALL | re.IGNORECASE)
-    normalized = re.sub(r"^```(?:markdown|md)?\s*", "", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\s*```$", "", normalized)
+    lines = normalized.splitlines()
+    if len(lines) >= 2:
+        opening_fence = lines[0].strip().lower()
+        closing_fence = lines[-1].strip()
+        if opening_fence in {"```", "```markdown", "```md"} and closing_fence == "```":
+            normalized = "\n".join(lines[1:-1]).strip()
     return normalized.strip()
 
 
