@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KotoType スプリント総点検 — 2026-08-30</title>
+  <style>
+    :root { --ink:#172033; --muted:#60708b; --line:#dce3ee; --paper:#fff; --bg:#f4f7fb; --ok:#078968; --warn:#b76a00; --bad:#c23b4b; --info:#4567b7; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--bg); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif; }
+    main { max-width:1120px; margin:auto; padding:40px 24px 64px; }
+    .hero { padding:36px; color:#fff; background:linear-gradient(135deg,#16264d,#325f9a); border-radius:20px; box-shadow:0 18px 40px #19366033; }
+    .eyebrow { margin:0 0 8px; color:#c8d9ff; font-size:.78rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+    h1 { margin:0; font-size:clamp(1.8rem,4vw,3.2rem); line-height:1.2; }
+    .hero p { max-width:720px; margin:16px 0 0; color:#e3ecff; font-size:1.04rem; }
+    .meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+    .chip { padding:5px 10px; border:1px solid #ffffff44; border-radius:999px; font-size:.82rem; }
+    h2 { margin:42px 0 14px; font-size:1.35rem; }
+    h3 { margin:0 0 8px; font-size:1.03rem; }
+    .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }
+    .card { padding:18px; background:var(--paper); border:1px solid var(--line); border-radius:14px; box-shadow:0 3px 10px #15295b0a; }
+    .metric { display:block; font-size:1.85rem; font-weight:760; line-height:1.1; }
+    .label { color:var(--muted); font-size:.86rem; }
+    .status { display:inline-block; margin-bottom:8px; padding:3px 8px; border-radius:5px; font-size:.75rem; font-weight:750; letter-spacing:.04em; }
+    .status.ok { color:#056d53; background:#dff7ef; } .status.warn { color:#8d5200; background:#fff0d7; } .status.bad { color:#a22a39; background:#ffe4e8; } .status.info { color:#34539b; background:#e7edff; }
+    .decision { display:grid; grid-template-columns:145px 1fr; gap:16px; align-items:center; padding:20px; border:1px solid #efc4ca; border-left:6px solid var(--bad); border-radius:12px; background:#fffafa; }
+    .decision strong { color:#a22a39; font-size:1.18rem; }
+    .findings { display:grid; gap:14px; }
+    .finding { padding:20px; background:var(--paper); border:1px solid var(--line); border-left:5px solid var(--info); border-radius:12px; }
+    .finding.p1 { border-left-color:var(--bad); } .finding.p2 { border-left-color:var(--warn); } .finding.p3 { border-left-color:var(--info); }
+    .finding p { margin:7px 0; } .finding code, td code { font-size:.86em; color:#263a69; }
+    .evidence { color:var(--muted); font-size:.91rem; }
+    table { width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--paper); }
+    th,td { padding:13px 14px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line); }
+    th { color:#40506d; background:#f7f9fc; font-size:.84rem; } tr:last-child td { border-bottom:0; }
+    .flow { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; align-items:center; margin:16px 0; }
+    .flow div { min-height:74px; display:grid; place-items:center; padding:10px; text-align:center; border:1px solid var(--line); border-radius:10px; background:var(--paper); font-size:.88rem; font-weight:650; }
+    .flow .blocked { color:#9f2b39; border-color:#edc0c8; background:#fff5f6; }
+    .arrow { color:#90a0b7; text-align:center; }
+    .checklist { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .check { padding:15px; border-radius:10px; background:var(--paper); border:1px solid var(--line); }
+    .check b { display:block; margin-bottom:4px; } .check.pass b::before { content:"✓ "; color:var(--ok); } .check.hold b::before { content:"○ "; color:var(--warn); }
+    .foot { margin-top:38px; color:var(--muted); font-size:.87rem; }
+    @media (max-width:760px) { .grid { grid-template-columns:repeat(2,1fr); } .flow { grid-template-columns:1fr; } .arrow { transform:rotate(90deg); } .checklist { grid-template-columns:1fr; } .decision { grid-template-columns:1fr; gap:4px; } }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <p class="eyebrow">KotoType / Sprint health audit</p>
+    <h1>スプリント総点検レポート</h1>
+    <p>Swift↔Python の同時実行安全化とローカル・プライバシー保護を点検した結果です。機能・品質検証は良好ですが、現在の作業ツリーは統合前であり、出荷承認には至りません。</p>
+    <div class="meta"><span class="chip">監査日: 2026-08-30 JST</span><span class="chip">対象: ローカル main + 未コミット差分</span><span class="chip">基点: c79d31d / origin/main は 45f7264</span></div>
+  </section>
+
+  <h2>結論</h2>
+  <section class="decision"><strong>リリース判定: HOLD</strong><span>ユニット・静的検証はすべて通過しました。しかし <b>20 コミット遅れの作業ツリー</b>に未コミットの重複変更があり、プロセス開始に競合余地もあります。上流同期、競合解消、開始/停止競合テスト、実機 E2E を終えるまでリリースしません。</span></section>
+
+  <h2>実装・検証のスナップショット</h2>
+  <section class="grid">
+    <div class="card"><span class="metric">15</span><span class="label">未コミット変更ファイル<br>331 追加 / 73 削除</span></div>
+    <div class="card"><span class="metric">70</span><span class="label">Python テスト成功<br>4 モジュール</span></div>
+    <div class="card"><span class="metric">255</span><span class="label">Swift テスト成功<br>0 failures</span></div>
+    <div class="card"><span class="metric">0</span><span class="label">pip-audit 既知脆弱性<br>Ruff / ty も成功</span></div>
+  </section>
+
+  <h2>今回実現したこと</h2>
+  <table>
+    <thead><tr><th>領域</th><th>変更の意図</th><th>実装と検証</th></tr></thead>
+    <tbody>
+      <tr><td>Swift→Python 入力</td><td>並行したヘルスチェック等で stdin の JSON/行が混ざらないようにする。</td><td><code>inputWriteLock</code> で送信と停止を直列化。24 並行リクエストの行区切り回帰テストを追加。</td></tr>
+      <tr><td>子プロセスの世代</td><td>停止済みの旧プロセスから届く stdout/stderr/終了通知で新しいセッションを壊さない。</td><td><code>processGeneration</code> と状態ロックを追加。旧世代を無視するユニットテストを追加。</td></tr>
+      <tr><td>プロセス管理・ログ</td><td>共有辞書とログファイルの同時書込みによる破損を防ぐ。</td><td><code>MultiProcessManager</code> の取得をロック下に移動し、Logger のファイル書込みを直列化。64 並行ログ行を検証。</td></tr>
+      <tr><td>履歴プライバシー</td><td>インポートした音声ファイルの絶対パスを永続化・UI 表示しない。</td><td>新規履歴では保存を廃止し、既存履歴は次回ロードで消去。履歴 UI のパス表示も削除。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>検証レイヤー</h2>
+  <section class="checklist">
+    <div class="check pass"><b>ローカル自動検証</b><code>make test-all</code>、Ruff、ty、<code>swift build</code>、<code>swift test</code> は成功。</div>
+    <div class="check pass"><b>依存関係・整合性</b><code>pip-audit</code> は既知脆弱性なし。<code>git fsck --no-dangling</code> と <code>git diff --check</code> も成功。</div>
+    <div class="check hold"><b>統合・CI</b>ローカル HEAD は origin/main より 20 コミット遅れ。未コミット変更を含むため、対象ブランチの CI は未検証。</div>
+    <div class="check hold"><b>実機・配布物</b>マイク、Accessibility、Screen Recording、署名済みアプリ、更新 ZIP/Appcast の E2E は今回未実施。</div>
+  </section>
+
+  <h2>重要な発見事項</h2>
+  <section class="findings">
+    <article class="finding p1"><span class="status bad">P1 / 統合・リリース阻害</span><h3>上流と乖離した未コミット差分を出荷できない</h3><p>ローカル <code>main</code> は <code>origin/main</code> より 20 コミット遅れています。未コミットの履歴パス削除とログ変更は、上流にも同目的の変更があり、取り込み時に重複・競合・片方の安全対策の消失を起こし得ます。</p><p class="evidence">証跡: HEAD <code>c79d31d</code>、origin/main <code>45f7264</code>。上流には <code>ca42265 fix: stop persisting imported audio paths</code> と <code>2c4320d fix: redact sensitive runtime logs</code> が存在。</p><p><b>対応:</b> clean worktree で origin/main を基準に差分を三者比較し、重複を捨てずに意図単位で統合、再テストしてから PR 化する。</p></article>
+    <article class="finding p1"><span class="status bad">P1 / 同時実行</span><h3>プロセス開始はまだ原子的ではない</h3><p><code>startPython</code> は状態ロックを解除してから <code>Process.run()</code> を呼びます。その間に第二の開始要求が来ると、まだ <code>isRunning == false</code> の一つ目を「未起動」と誤認して管理対象を上書きし、最初の子プロセスを追跡不能にできます。</p><p class="evidence">該当: <code>KotoType/Sources/KotoType/Transcription/PythonProcessManager.swift</code> 95–143 行。追加テストは 24 並行送信と世代比較であり、開始↔開始・開始↔停止の競合を再現していない。</p><p><b>対応:</b> <code>stopped / starting / running / stopping</code> の状態遷移を一つの排他境界にし、開始中は再要求を拒否または合流させる。並行 start/stop で孤立 PID が残らない回帰テストを追加する。</p></article>
+    <article class="finding p2"><span class="status warn">P2 / プライバシー</span><h3>このローカル状態の診断出力は絶対パスを露出する</h3><p>Logger はメッセージをそのままファイル・標準出力へ出し、プロセス管理は音声パス、Python stderr は内容全体を渡します。実行した Swift テストでも Application Support と一時音声ファイルの絶対パスが端末に出ました。ファイルの owner-only 権限は共有された stdout/stderr を保護しません。</p><p class="evidence">該当: <code>Logger.swift</code> 54–67 行、<code>MultiProcessManager.swift</code> 131・228 行、<code>PythonProcessManager.swift</code> 168–177 行、<code>python/whisper_server.py</code> の traceback 記録。上流にはパスを <code>&lt;path&gt;</code> へ置換する未取り込み修正とテストがある。</p><p><b>対応:</b> 上流の Swift/Python 両方のサニタイズを統合し、stderr は内容でなく型・長さを記録する。既存ログの扱いは保存期間ポリシーを決めてから別途実施する。</p></article>
+    <article class="finding p3"><span class="status info">P3 / 残置コード</span><h3>テスト専用の本番 API が残っている</h3><p><code>shouldHandleProcessEvent(generation:currentGeneration:)</code> は production code から一度も呼ばれず、テストだけが参照しています。実際の判定は private な <code>isCurrentGeneration</code> です。</p><p class="evidence">該当: <code>PythonProcessManager.swift</code> 216–218 行。参照は <code>PythonProcessManagerTests.swift</code> のみ。</p><p><b>対応:</b> 削除し、世代をまたぐ実プロセス/pipe コールバックの統合テストへ置換する。</p></article>
+  </section>
+
+  <h2>出荷までの最短経路</h2>
+  <section class="flow"><div class="blocked">1. origin/main と<br>意図単位で統合</div><div class="arrow">→</div><div class="blocked">2. start/stop 競合を<br>修正・再現テスト</div><div class="arrow">→</div><div class="blocked">3. ログ秘匿化を<br>上流と統合</div><div class="arrow">→</div><div>4. CI・実機権限・<br>署名済み更新を検証</div></section>
+  <p class="foot">外部状態: 公開リポジトリの最新リリースは v1.0.0.91、ローカルのタグは v1.0.0.71。今回確認した v1.0.0.71 の配布資産（DMG / ZIP / appcast）は過去の公開物であり、この未コミット差分の配布証跡ではありません。機密値は取得・表示していません。</p>
+</main>
+</body>
+</html>

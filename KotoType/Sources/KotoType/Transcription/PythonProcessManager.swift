@@ -25,11 +25,42 @@ final class PythonProcessManager: @unchecked Sendable {
     private var errorPipe: Pipe?
     private var inputPipe: Pipe?
     private var stdoutBuffer: String = ""
+    private let stateLock = NSLock()
     private let ioLock = NSLock()
+    private let inputWriteLock = NSLock()
+    private var processGeneration: UInt64 = 0
     private var isStoppingProcess = false
+    private var outputReceivedHandler: ((String) -> Void)?
+    private var processTerminatedHandler: ((Int32) -> Void)?
     private let runtime: Runtime
-    var outputReceived: ((String) -> Void)?
-    var processTerminated: ((Int32) -> Void)?
+
+    var outputReceived: ((String) -> Void)? {
+        get {
+            stateLock.lock()
+            let handler = outputReceivedHandler
+            stateLock.unlock()
+            return handler
+        }
+        set {
+            stateLock.lock()
+            outputReceivedHandler = newValue
+            stateLock.unlock()
+        }
+    }
+
+    var processTerminated: ((Int32) -> Void)? {
+        get {
+            stateLock.lock()
+            let handler = processTerminatedHandler
+            stateLock.unlock()
+            return handler
+        }
+        set {
+            stateLock.lock()
+            processTerminatedHandler = newValue
+            stateLock.unlock()
+        }
+    }
 
     init(runtime: Runtime = .live()) {
         self.runtime = runtime
@@ -52,66 +83,68 @@ final class PythonProcessManager: @unchecked Sendable {
         Logger.shared.log("Python binary: \(launchCommand.executablePath)", level: .debug)
         Logger.shared.log("Script args: \(launchCommand.arguments)", level: .debug)
 
-        process = Process()
-        outputPipe = Pipe()
-        errorPipe = Pipe()
-        inputPipe = Pipe()
+        let newProcess = Process()
+        let newOutputPipe = Pipe()
+        let newErrorPipe = Pipe()
+        let newInputPipe = Pipe()
+
         ioLock.lock()
         stdoutBuffer = ""
         ioLock.unlock()
-        isStoppingProcess = false
 
-        process?.executableURL = URL(fileURLWithPath: launchCommand.executablePath)
-        process?.arguments = launchCommand.arguments
-        process?.standardOutput = outputPipe
-        process?.standardError = errorPipe
-        process?.standardInput = inputPipe
-        process?.currentDirectoryURL = URL(fileURLWithPath: launchCommand.workingDirectory)
+        inputWriteLock.lock()
+        defer { inputWriteLock.unlock() }
+        stateLock.lock()
+        if process?.isRunning == true {
+            stateLock.unlock()
+            Logger.shared.log("Python process is already running", level: .debug)
+            return
+        }
+        processGeneration &+= 1
+        let generation = processGeneration
+        process = newProcess
+        outputPipe = newOutputPipe
+        errorPipe = newErrorPipe
+        inputPipe = newInputPipe
+        isStoppingProcess = false
+        stateLock.unlock()
+
+        newProcess.executableURL = URL(fileURLWithPath: launchCommand.executablePath)
+        newProcess.arguments = launchCommand.arguments
+        newProcess.standardOutput = newOutputPipe
+        newProcess.standardError = newErrorPipe
+        newProcess.standardInput = newInputPipe
+        newProcess.currentDirectoryURL = URL(fileURLWithPath: launchCommand.workingDirectory)
         var environment = Self.runtimeEnvironment(
             base: ProcessInfo.processInfo.environment,
             bundlePath: runtime.bundlePath()
         )
         environment["KOTOTYPE_PARENT_PID"] = "\(ProcessInfo.processInfo.processIdentifier)"
-        process?.environment = environment
-        process?.terminationHandler = { [weak self] terminatedProcess in
-            guard let self = self else { return }
-            guard Self.shouldHandleTermination(
-                activeProcess: self.process,
-                terminatedProcess: terminatedProcess
-            ) else {
-                Logger.shared.log(
-                    "Ignoring termination callback from stale Python process",
-                    level: .debug
-                )
-                return
-            }
-            if self.isStoppingProcess {
-                Logger.shared.log(
-                    "Python process terminated during normal stop: \(terminatedProcess.terminationStatus)",
-                    level: .debug
-                )
-                return
-            }
-            let reason = terminatedProcess.terminationReason == .exit ? "exit" : "uncaught-signal"
-            Logger.shared.log(
-                "Python process terminated with status: \(terminatedProcess.terminationStatus), reason: \(reason)",
-                level: .warning
-            )
-            self.processTerminated?(terminatedProcess.terminationStatus)
+        newProcess.environment = environment
+        newProcess.terminationHandler = { [weak self] terminatedProcess in
+            self?.handleTermination(of: terminatedProcess, generation: generation)
         }
-        
+
         do {
-            try process?.run()
+            try newProcess.run()
             Logger.shared.log("Python process started successfully", level: .info)
-            setupOutputHandler()
-            setupErrorHandler()
+            setupOutputHandler(for: newOutputPipe, generation: generation)
+            setupErrorHandler(for: newErrorPipe, generation: generation)
         } catch {
+            stateLock.lock()
+            if processGeneration == generation {
+                process = nil
+                outputPipe = nil
+                errorPipe = nil
+                inputPipe = nil
+            }
+            stateLock.unlock()
             Logger.shared.log("Failed to start Python process: \(error)", level: .error)
         }
     }
     
-    private func setupOutputHandler() {
-        outputPipe?.fileHandleForReading.readabilityHandler = { [weak self] handle in
+    private func setupOutputHandler(for outputPipe: Pipe, generation: UInt64) {
+        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             guard let self = self else { return }
             let data = handle.availableData
             if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
@@ -120,6 +153,7 @@ final class PythonProcessManager: @unchecked Sendable {
                 self.ioLock.unlock()
 
                 for line in lines {
+                    guard self.isCurrentGeneration(generation) else { return }
                     Logger.shared.log(
                         "Python stdout line received (length=\(line.count))",
                         level: .debug
@@ -131,12 +165,12 @@ final class PythonProcessManager: @unchecked Sendable {
         Logger.shared.log("Output handler set up", level: .debug)
     }
     
-    private func setupErrorHandler() {
-        errorPipe?.fileHandleForReading.readabilityHandler = { handle in
+    private func setupErrorHandler(for errorPipe: Pipe, generation: UInt64) {
+        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
                 let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
+                if !trimmed.isEmpty, self?.isCurrentGeneration(generation) == true {
                     let isError = trimmed.contains("Error:") || trimmed.contains("Traceback") || trimmed.contains("Exception")
                     let level: Logger.LogLevel = isError ? .error : .info
                     Logger.shared.log(
@@ -148,7 +182,45 @@ final class PythonProcessManager: @unchecked Sendable {
         }
         Logger.shared.log("Error handler set up", level: .debug)
     }
-    
+
+    private func handleTermination(of terminatedProcess: Process, generation: UInt64) {
+        stateLock.lock()
+        let activeProcess = process
+        guard generation == processGeneration,
+              Self.shouldHandleTermination(
+                  activeProcess: activeProcess,
+                  terminatedProcess: terminatedProcess
+              ) else {
+            stateLock.unlock()
+            return
+        }
+        let wasStopping = isStoppingProcess
+        let terminationHandler = processTerminatedHandler
+        stateLock.unlock()
+
+        if wasStopping {
+            Logger.shared.log(
+                "Python process terminated during normal stop: \(terminatedProcess.terminationStatus)",
+                level: .debug
+            )
+            return
+        }
+
+        let reason = terminatedProcess.terminationReason == .exit ? "exit" : "uncaught-signal"
+        Logger.shared.log(
+            "Python process terminated with status: \(terminatedProcess.terminationStatus), reason: \(reason)",
+            level: .warning
+        )
+        terminationHandler?(terminatedProcess.terminationStatus)
+    }
+
+    private func isCurrentGeneration(_ generation: UInt64) -> Bool {
+        stateLock.lock()
+        let isCurrent = generation == processGeneration
+        stateLock.unlock()
+        return isCurrent
+    }
+
     func sendInput(
         _ text: String,
         language: String = "auto",
@@ -229,24 +301,34 @@ final class PythonProcessManager: @unchecked Sendable {
     }
     
     func isRunning() -> Bool {
-        process?.isRunning ?? false
+        stateLock.lock()
+        let running = process?.isRunning ?? false
+        stateLock.unlock()
+        return running
     }
 
     func stop() {
         Logger.shared.log("Stopping Python process", level: .info)
+        inputWriteLock.lock()
+        stateLock.lock()
         isStoppingProcess = true
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        errorPipe?.fileHandleForReading.readabilityHandler = nil
+        let outputPipeToStop = outputPipe
+        let errorPipeToStop = errorPipe
         let processToStop = process
+        process = nil
+        outputPipe = nil
+        errorPipe = nil
+        inputPipe = nil
+        stateLock.unlock()
+        inputWriteLock.unlock()
+
+        outputPipeToStop?.fileHandleForReading.readabilityHandler = nil
+        errorPipeToStop?.fileHandleForReading.readabilityHandler = nil
         if let rootPID = processToStop?.processIdentifier {
             Self.terminateProcessTree(rootPID: rootPID)
         } else {
             processToStop?.terminate()
         }
-        process = nil
-        outputPipe = nil
-        errorPipe = nil
-        inputPipe = nil
         ioLock.lock()
         stdoutBuffer = ""
         ioLock.unlock()
@@ -368,17 +450,26 @@ final class PythonProcessManager: @unchecked Sendable {
     }
 
     private func sendLine(_ input: String) -> Bool {
-        guard let process = process, process.isRunning else {
-            Logger.shared.log("Cannot send input: Python process is not running", level: .error)
-            return false
-        }
         guard let data = (input + "\n").data(using: .utf8) else {
             Logger.shared.log("Failed to encode input text", level: .error)
             return false
         }
 
+        inputWriteLock.lock()
+        defer { inputWriteLock.unlock() }
+
+        stateLock.lock()
+        let process = self.process
+        let inputFileHandle = inputPipe?.fileHandleForWriting
+        stateLock.unlock()
+
+        guard let process, process.isRunning, let inputFileHandle else {
+            Logger.shared.log("Cannot send input: Python process is not running", level: .error)
+            return false
+        }
+
         do {
-            try inputPipe?.fileHandleForWriting.write(contentsOf: data)
+            try inputFileHandle.write(contentsOf: data)
             Logger.shared.log("Input sent to Python successfully", level: .debug)
             return true
         } catch {

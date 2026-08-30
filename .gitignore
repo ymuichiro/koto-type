@@ -224,3 +224,5 @@ artifacts/evaluations/
 appcast.xml
 KotoType/appcast.xml
 *.key
+
+.serena

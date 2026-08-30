@@ -120,4 +120,20 @@ final class LoggerTests: XCTestCase {
         )
         XCTAssertEqual(permissions.intValue & 0o777, LocalFileProtection.filePermissions)
     }
+
+    func testConcurrentLoggingKeepsEachFileEntryIntact() throws {
+        let logger = Logger.shared
+        let marker = "logger-concurrency-" + UUID().uuidString + "-"
+        let entryCount = 64
+
+        DispatchQueue.concurrentPerform(iterations: entryCount) { index in
+            logger.log("\(marker)\(index)", level: .debug)
+        }
+
+        let contents = try String(contentsOf: URL(fileURLWithPath: logger.logPath), encoding: .utf8)
+        let matchingEntries = contents
+            .components(separatedBy: .newlines)
+            .filter { $0.contains(marker) }
+        XCTAssertEqual(matchingEntries.count, entryCount)
+    }
 }

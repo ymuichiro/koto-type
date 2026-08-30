@@ -102,6 +102,8 @@ sudo port install ffmpeg
 - Python 3.13
 - [uv](https://github.com/astral-sh/uv) package manager
 
+> **Compatibility note:** The current release is built and validated on macOS 26 or later. macOS 14 and 15 may work through the CPU-only path, and that path is tested separately in CI, but it is not part of the official release support and is not guaranteed. The Swift package declares macOS 13 as its source-level deployment target, but that does not guarantee compatibility of the packaged runtime dependencies.
+
 #### Installation Steps
 
 1. Clone the repository
@@ -462,7 +464,10 @@ swift run
 # Using Makefile (recommended)
 make install-deps
 
-# Or run directly
+# Or run directly (Apple Silicon with MLX acceleration)
+uv sync --extra mlx --extra dev
+
+# CPU-only environment (for example, macOS 14/15 compatibility checks)
 uv sync --extra dev
 ```
 
