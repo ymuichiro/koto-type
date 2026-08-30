@@ -1,11 +1,12 @@
 import Foundation
 import os.log
 
-final class Logger {
-    nonisolated(unsafe) static let shared = Logger()
+final class Logger: @unchecked Sendable {
+    static let shared = Logger()
     
     private let logger: OSLog
     private let logFile: URL
+    private let fileWriteLock = NSLock()
     private var fileHandle: FileHandle?
 
     private static let quotedAbsolutePathRegex = try! NSRegularExpression(
@@ -110,7 +111,9 @@ final class Logger {
         let logMessage = "[\(timestamp)] [\(level.rawValue)] \(safeMessage)\n"
         
         if let data = logMessage.data(using: .utf8) {
+            fileWriteLock.lock()
             fileHandle?.write(data)
+            fileWriteLock.unlock()
         }
         
         // Never mark logs as public to avoid exposing sensitive values in unified logging.

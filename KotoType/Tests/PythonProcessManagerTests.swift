@@ -319,6 +319,70 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(Set(descendants), Set([101, 102]))
     }
 
+    func testConcurrentHealthCheckRequestsRemainLineDelimited() throws {
+        let fileManager = FileManager.default
+        let scriptURL = fileManager.temporaryDirectory
+            .appendingPathComponent("koto-type-echo-\(UUID().uuidString).py")
+        let script = """
+        import sys
+
+        for line in sys.stdin:
+            print(line.rstrip("\\n"), flush=True)
+        """
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        defer { try? fileManager.removeItem(at: scriptURL) }
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let pythonPath = packageRoot
+            .deletingLastPathComponent()
+            .appendingPathComponent(".venv/bin/python")
+        guard fileManager.isExecutableFile(atPath: pythonPath.path) else {
+            throw XCTSkip("The repository virtualenv Python executable is unavailable")
+        }
+
+        let runtime = makeRuntime(
+            currentDirectoryPath: packageRoot.path,
+            bundlePath: packageRoot.appendingPathComponent(".build/debug/KotoType").path,
+            bundleResourcePath: nil,
+            existingPaths: [scriptURL.path, pythonPath.path],
+            uvPath: nil
+        )
+        let manager = PythonProcessManager(runtime: runtime)
+        let outputLock = NSLock()
+        var received: [String] = []
+        let requestCount = 24
+        let outputReceived = expectation(description: "echo backend returns every request")
+        outputReceived.expectedFulfillmentCount = requestCount
+        manager.outputReceived = { line in
+            outputLock.lock()
+            received.append(line)
+            outputLock.unlock()
+            outputReceived.fulfill()
+        }
+
+        manager.startPython(scriptPath: scriptURL.path)
+        XCTAssertTrue(manager.isRunning())
+
+        let messages = (0..<requestCount).map { index in
+            "__KOTOTYPE_HEALTHCHECK__:\(index):\(String(repeating: "x", count: 12_000))"
+        }
+        let expected = Set(messages)
+        let sendFailures = LockedInt()
+        DispatchQueue.concurrentPerform(iterations: requestCount) { index in
+            if !manager.sendInput(messages[index]) {
+                sendFailures.increment()
+            }
+        }
+
+        wait(for: [outputReceived], timeout: 10)
+        manager.stop()
+
+        XCTAssertEqual(sendFailures.value, 0)
+        XCTAssertEqual(Set(received), expected)
+    }
+
     private func makeRuntime(
         currentDirectoryPath: String,
         bundlePath: String,
@@ -336,5 +400,23 @@ final class PythonProcessManagerTests: XCTestCase {
                 return uvPath
             }
         )
+    }
+}
+
+private final class LockedInt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
+    }
+
+    var value: Int {
+        lock.lock()
+        let current = storage
+        lock.unlock()
+        return current
     }
 }

@@ -208,7 +208,11 @@ final class MultiProcessManager: @unchecked Sendable {
         segmentContextByProcess[processIndex] = assignedContext
         processLock.unlock()
         
-        guard let manager = processes[processIndex] else {
+        processLock.lock()
+        let manager = processes[processIndex]
+        processLock.unlock()
+
+        guard let manager else {
             Logger.shared.log("MultiProcessManager: process \(processIndex) not found", level: .error)
             handleProcessFailure(processIndex: processIndex, context: assignedContext, reason: "manager_not_found")
             return
