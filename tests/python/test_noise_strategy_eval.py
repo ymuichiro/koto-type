@@ -18,8 +18,19 @@ class NoiseStrategyEvalTests(unittest.TestCase):
         )
         cer = evaluate_noise_strategies.character_error_rate("確認します", "確認した")
         if cer is None:
-            raise AssertionError("character_error_rate returned None for a non-empty reference")
+            raise AssertionError(
+                "character_error_rate returned None for a non-empty reference"
+            )
         self.assertAlmostEqual(cer, 0.4)
+
+    def test_nonverbal_proxies_are_deterministic_and_nonempty(self):
+        cough = evaluate_noise_strategies.synthetic_cough_proxy(1.0)
+        laughter = evaluate_noise_strategies.synthetic_laughter_proxy(1.0)
+
+        self.assertEqual(len(cough), 16_000)
+        self.assertEqual(len(laughter), 16_000)
+        self.assertGreater(float(abs(cough).max()), 0.0)
+        self.assertGreater(float(abs(laughter).max()), 0.0)
 
     def test_summary_orders_false_insertions_before_latency(self):
         activity = evaluate_noise_strategies.whisper_server.AudioActivityStats(

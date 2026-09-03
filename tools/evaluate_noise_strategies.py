@@ -238,11 +238,42 @@ def synthetic_office_noise(
     return noise if peak <= 0.98 else noise * (0.98 / peak)
 
 
+def synthetic_cough_proxy(
+    duration_seconds: float, sample_rate: int = 16000
+) -> np.ndarray:
+    rng = np.random.default_rng(seed=101)
+    sample_count = int(duration_seconds * sample_rate)
+    audio = np.zeros(sample_count, dtype=np.float32)
+    start = min(sample_count, int(0.35 * sample_rate))
+    length = min(int(0.22 * sample_rate), sample_count - start)
+    if length > 0:
+        envelope = np.exp(-np.linspace(0.0, 5.0, length, dtype=np.float32))
+        audio[start : start + length] = rng.normal(0.0, 0.32, length) * envelope
+    return audio
+
+
+def synthetic_laughter_proxy(
+    duration_seconds: float, sample_rate: int = 16000
+) -> np.ndarray:
+    rng = np.random.default_rng(seed=102)
+    sample_count = int(duration_seconds * sample_rate)
+    audio = np.zeros(sample_count, dtype=np.float32)
+    burst_length = int(0.09 * sample_rate)
+    for start in range(int(0.3 * sample_rate), sample_count, int(0.18 * sample_rate)):
+        length = min(burst_length, sample_count - start)
+        if length <= 0:
+            continue
+        envelope = np.hanning(length).astype(np.float32)
+        audio[start : start + length] += rng.normal(0.0, 0.20, length) * envelope
+    return audio
+
+
 def ensure_dataset(work_dir: Path) -> list[EvalCase]:
     dataset_dir = work_dir / "dataset"
     source_dir = dataset_dir / "sources"
     target_path = source_dir / "target_ja.wav"
     long_target_path = source_dir / "target_long_ja.wav"
+    short_ack_path = source_dir / "short_ack_ja.wav"
     background_jp_path = source_dir / "background_jp.wav"
     background_en_path = source_dir / "background_en.wav"
 
@@ -250,6 +281,7 @@ def ensure_dataset(work_dir: Path) -> list[EvalCase]:
     long_target_text = (
         "ただし今回は例外として扱います。設定を保存してから、もう一度確認します"
     )
+    short_ack_text = "はい"
     background_jp_text = "来週の予定について、あとで田中さんに確認してください"
     background_en_text = (
         "Please review the design document before the afternoon meeting"
@@ -259,15 +291,16 @@ def ensure_dataset(work_dir: Path) -> list[EvalCase]:
         synthesize_speech(target_text, "Kyoko", target_path)
     if not long_target_path.exists():
         synthesize_speech(long_target_text, "Kyoko", long_target_path)
+    if not short_ack_path.exists():
+        synthesize_speech(short_ack_text, "Kyoko", short_ack_path)
     if not background_jp_path.exists():
-        synthesize_speech(
-            background_jp_text, "Kyoko", background_jp_path
-        )
+        synthesize_speech(background_jp_text, "Kyoko", background_jp_path)
     if not background_en_path.exists():
         synthesize_speech(background_en_text, "Samantha", background_en_path)
 
     target_audio, sample_rate = read_wav_mono(target_path)
     long_target_audio, _ = read_wav_mono(long_target_path)
+    short_ack_audio, _ = read_wav_mono(short_ack_path)
     background_jp, _ = read_wav_mono(background_jp_path)
     background_en, _ = read_wav_mono(background_en_path)
 
@@ -356,6 +389,39 @@ def ensure_dataset(work_dir: Path) -> list[EvalCase]:
         "",
         scale_to_peak_dbfs(keyboard_only, -18.0),
         "keyboard and air-conditioner style non-speech noise only",
+    )
+    add_case(
+        "steady_noise_only",
+        "steadyNoise",
+        "",
+        scale_to_peak_dbfs(
+            np.sin(2 * np.pi * 180 * np.arange(sample_rate * 3) / sample_rate).astype(
+                np.float32
+            ),
+            -20.0,
+        ),
+        "steady tone proxy only; measures non-speech false insertion",
+    )
+    add_case(
+        "cough_proxy_only",
+        "cough",
+        "",
+        synthetic_cough_proxy(3.0, sample_rate),
+        "synthetic cough-like burst proxy only; not a human cough recording",
+    )
+    add_case(
+        "laughter_proxy_only",
+        "laughter",
+        "",
+        synthetic_laughter_proxy(3.0, sample_rate),
+        "synthetic laughter-like burst proxy only; not a human laughter recording",
+    )
+    add_case(
+        "short_ack_ja",
+        "shortAcknowledgement",
+        short_ack_text,
+        short_ack_audio,
+        "short Japanese acknowledgement; measures dropped utterance separately",
     )
     add_case(
         "silence",

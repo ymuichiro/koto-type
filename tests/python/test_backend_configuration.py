@@ -32,7 +32,9 @@ class DecodeProfileTests(unittest.TestCase):
         self.assertEqual(high.best_of, 10)
         self.assertEqual(high.vad_threshold, 0.5)
 
-    def test_build_mlx_decode_profile_uses_temperature_fallback_without_beam_search(self):
+    def test_build_mlx_decode_profile_uses_temperature_fallback_without_beam_search(
+        self,
+    ):
         low = whisper_server.build_mlx_decode_profile("low")
         medium = whisper_server.build_mlx_decode_profile("medium")
         high = whisper_server.build_mlx_decode_profile("high")
@@ -49,6 +51,56 @@ class DecodeProfileTests(unittest.TestCase):
         self.assertEqual(high.temperature, (0.0, 0.2, 0.4))
         self.assertIsNone(high.beam_size)
         self.assertIsNone(high.best_of)
+
+
+class ConfidenceGateTests(unittest.TestCase):
+    def test_suppresses_punctuation_only_text_before_metric_checks(self):
+        decision = whisper_server.evaluate_transcription_confidence_gate(
+            ".",
+            [
+                whisper_server.TranscriptionSegmentMetrics(
+                    avg_logprob=-0.1,
+                    compression_ratio=0.1,
+                    no_speech_prob=0.01,
+                )
+            ],
+        )
+
+        self.assertTrue(decision.should_suppress)
+        self.assertEqual(decision.reason, "contentless_text")
+
+    def test_keeps_unicode_transcription_text(self):
+        decision = whisper_server.evaluate_transcription_confidence_gate(
+            "ご視聴ありがとうございました。",
+            [
+                whisper_server.TranscriptionSegmentMetrics(
+                    avg_logprob=-0.1,
+                    compression_ratio=0.1,
+                    no_speech_prob=0.01,
+                )
+            ],
+        )
+
+        self.assertFalse(decision.should_suppress)
+
+
+class TranscriptionLanguageNormalizationTests(unittest.TestCase):
+    def test_normalizes_locale_and_unknown_language_values(self):
+        self.assertEqual(
+            whisper_server.normalize_transcription_language(" JA-jp "), "ja"
+        )
+        self.assertEqual(whisper_server.normalize_transcription_language("en_US"), "en")
+        self.assertEqual(whisper_server.normalize_transcription_language("xx"), "auto")
+        self.assertEqual(whisper_server.normalize_transcription_language(None), "auto")
+
+    def test_normalizes_detected_language_for_output(self):
+        self.assertEqual(
+            whisper_server.select_output_language("transcribe", "en", "ja-JP"),
+            "ja",
+        )
+        self.assertIsNone(
+            whisper_server.select_output_language("transcribe", "en", "unknown")
+        )
 
 
 class ParseRequestLineTests(unittest.TestCase):
@@ -73,6 +125,20 @@ class ParseRequestLineTests(unittest.TestCase):
     def test_parse_request_line_treats_auto_language_as_none(self):
         payload = whisper_server.parse_request_line(
             '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":"auto","quality_preset":"medium","gpu_acceleration_enabled":false}'
+        )
+
+        self.assertIsNone(payload["request"].language)
+
+    def test_parse_request_line_normalizes_locale_language_to_primary_code(self):
+        payload = whisper_server.parse_request_line(
+            '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":" ja-JP ","quality_preset":"medium","gpu_acceleration_enabled":false}'
+        )
+
+        self.assertEqual(payload["request"].language, "ja")
+
+    def test_parse_request_line_treats_unknown_language_as_auto(self):
+        payload = whisper_server.parse_request_line(
+            '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":"xx","quality_preset":"medium","gpu_acceleration_enabled":false}'
         )
 
         self.assertIsNone(payload["request"].language)
@@ -165,7 +231,11 @@ class ParseRequestLineTests(unittest.TestCase):
         with redirect_stdout(output):
             whisper_server.emit_managed_model(status, request_id=17)
 
-        payload = output.getvalue().removeprefix(whisper_server.CONTROL_MESSAGE_PREFIX).strip()
+        payload = (
+            output.getvalue()
+            .removeprefix(whisper_server.CONTROL_MESSAGE_PREFIX)
+            .strip()
+        )
         self.assertEqual(json.loads(payload)["request_id"], 17)
 
 
@@ -246,13 +316,17 @@ class FakeBackendManager(whisper_server.BackendManager):
     def _download_cpu_model(self):
         whisper_server.ensure_private_directory(self.cpu_model_dir)
         for file_name in ("config.json", "model.bin", "tokenizer.json"):
-            with open(f"{self.cpu_model_dir}/{file_name}", "w", encoding="utf-8") as handle:
+            with open(
+                f"{self.cpu_model_dir}/{file_name}", "w", encoding="utf-8"
+            ) as handle:
                 handle.write("ok")
 
     def _download_mlx_model(self):
         whisper_server.ensure_private_directory(self.mlx_model_dir)
         for file_name in ("config.json", "weights.safetensors"):
-            with open(f"{self.mlx_model_dir}/{file_name}", "w", encoding="utf-8") as handle:
+            with open(
+                f"{self.mlx_model_dir}/{file_name}", "w", encoding="utf-8"
+            ) as handle:
                 handle.write("ok")
 
 
@@ -448,11 +522,66 @@ class RecordingOptionsBackendManager(whisper_server.BackendManager):
 
 
 class ConditionOnPreviousTextTests(unittest.TestCase):
+    def test_cpu_transcription_normalizes_locale_language_before_whisper(self):
+        manager = RecordingOptionsBackendManager()
+        captured_kwargs = {}
+
+        def fake_transcribe_with_vad_fallback(
+            *, model, transcribe_kwargs, vad_parameters, log
+        ):
+            captured_kwargs.update(transcribe_kwargs)
+            return [], type("Info", (), {"language": "ja"})()
+
+        with patch.object(
+            whisper_server,
+            "transcribe_with_vad_fallback",
+            side_effect=fake_transcribe_with_vad_fallback,
+        ):
+            manager._transcribe_with_cpu(
+                "/tmp/test.wav",
+                "ja-JP",
+                "medium",
+                "prompt",
+            )
+
+        self.assertEqual(captured_kwargs["language"], "ja")
+
+    def test_cpu_auto_language_detection_logs_probability(self):
+        manager = RecordingOptionsBackendManager()
+        logs = []
+        manager.log = logs.append
+
+        def fake_transcribe_with_vad_fallback(
+            *, model, transcribe_kwargs, vad_parameters, log
+        ):
+            return [], type(
+                "Info", (), {"language": "en", "language_probability": 0.42}
+            )()
+
+        with patch.object(
+            whisper_server,
+            "transcribe_with_vad_fallback",
+            side_effect=fake_transcribe_with_vad_fallback,
+        ):
+            manager._transcribe_with_cpu(
+                "/tmp/test.wav",
+                None,
+                "medium",
+                "prompt",
+            )
+
+        self.assertIn(
+            "Auto language detection: language=en, probability=0.420",
+            logs,
+        )
+
     def test_cpu_transcription_disables_condition_on_previous_text(self):
         manager = RecordingOptionsBackendManager()
         captured_kwargs = {}
 
-        def fake_transcribe_with_vad_fallback(*, model, transcribe_kwargs, vad_parameters, log):
+        def fake_transcribe_with_vad_fallback(
+            *, model, transcribe_kwargs, vad_parameters, log
+        ):
             captured_kwargs.update(transcribe_kwargs)
             return [], type("Info", (), {"language": "ja"})()
 
@@ -543,7 +672,9 @@ class RequestSpecificTaskSelectionTests(unittest.TestCase):
             translation_target_language=target_language,
         )
 
-        def fake_transcribe_with_vad_fallback(*, model, transcribe_kwargs, vad_parameters, log):
+        def fake_transcribe_with_vad_fallback(
+            *, model, transcribe_kwargs, vad_parameters, log
+        ):
             captured_kwargs.update(transcribe_kwargs)
             return [], type("Info", (), {"language": "ja"})()
 
@@ -559,7 +690,9 @@ class RequestSpecificTaskSelectionTests(unittest.TestCase):
                 prompt,
                 request_mode="translate",
                 translation_target_language=target_language,
-                whisper_task=whisper_server.select_whisper_task("translate", target_language),
+                whisper_task=whisper_server.select_whisper_task(
+                    "translate", target_language
+                ),
             )
 
         return captured_kwargs, prompt
@@ -587,7 +720,9 @@ class RequestSpecificTaskSelectionTests(unittest.TestCase):
             prompt,
             request_mode="translate",
             translation_target_language=target_language,
-            whisper_task=whisper_server.select_whisper_task("translate", target_language),
+            whisper_task=whisper_server.select_whisper_task(
+                "translate", target_language
+            ),
         )
         return captured_kwargs, prompt
 
@@ -602,7 +737,9 @@ class RequestSpecificTaskSelectionTests(unittest.TestCase):
         self.assertIn("Output only the translated text in en.", cpu_prompt)
         self.assertIn("Output only the translated text in en.", mlx_prompt)
 
-    def test_translate_to_non_english_uses_transcribe_task_with_translation_prompt(self):
+    def test_translate_to_non_english_uses_transcribe_task_with_translation_prompt(
+        self,
+    ):
         cpu_kwargs, cpu_prompt = self.capture_cpu_kwargs(target_language="de")
         mlx_kwargs, mlx_prompt = self.capture_mlx_kwargs(target_language="de")
 
@@ -629,7 +766,8 @@ class ActiveClipRetryTests(unittest.TestCase):
                     value = 0
                     if amplitude > 0:
                         value = int(
-                            amplitude * math.sin(2.0 * math.pi * 440.0 * index / sample_rate)
+                            amplitude
+                            * math.sin(2.0 * math.pi * 440.0 * index / sample_rate)
                         )
                     wav_file.writeframesraw(value.to_bytes(2, "little", signed=True))
 
