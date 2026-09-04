@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-asr-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight test-real-audio-preflight-unit test-real-audio-capture test-secret-scan typecheck-all test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-asr-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight test-real-audio-preflight-unit test-real-audio-capture test-secret-scan test-process-activity typecheck-all test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -29,6 +29,7 @@ help:
 	@echo "  make test-real-audio-preflight-unit - 実マイクpreflight判定のユニットテスト"
 	@echo "  make test-real-audio-capture - 入力デバイス確認後にAVAudioEngine録音器をスモークテスト"
 	@echo "  make test-secret-scan - 秘密情報パターン検査を実行"
+	@echo "  make test-process-activity - プロセスツリーのCPU/RSS測定ツールの回帰テスト"
 	@echo "  make typecheck-all  - MLX依存を含むPython/テスト/ツール全体をTy検査"
 	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
@@ -119,6 +120,10 @@ test-secret-scan:
 	$(PYTHON) tools/scan_secrets.py
 	$(PYTHON) tools/scan_secrets.py tools/scan_secrets.py $(PYTHON_TEST_DIR)/test_secret_scan.py .github/workflows/secret-scan.yml
 
+test-process-activity:
+	@echo "プロセスツリー測定ツールの回帰テストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_measure_process_activity.py
+
 typecheck-all:
 	@echo "MLX依存を含むPython/テスト/ツール全体をTy検査中..."
 	uv sync --extra mlx --extra dev
@@ -128,7 +133,7 @@ test-logging-privacy:
 	@echo "ログプライバシーのユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_logging_privacy.py
 
-test-all: test-audio-preprocess test-backend-config test-logging-privacy test-asr-benchmark test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight-unit test-secret-scan
+test-all: test-audio-preprocess test-backend-config test-logging-privacy test-asr-benchmark test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight-unit test-secret-scan test-process-activity
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 

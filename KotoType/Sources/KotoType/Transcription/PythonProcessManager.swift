@@ -8,6 +8,18 @@ struct PythonLaunchCommand: Equatable {
     let mode: String
 }
 
+private struct BackendProcessGroupReadyMessage: Decodable {
+    let type: String
+    let processID: Int32
+    let processGroupID: Int32
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case processID = "process_id"
+        case processGroupID = "process_group_id"
+    }
+}
+
 final class PythonProcessManager: @unchecked Sendable {
     static let controlMessagePrefix = "__KOTOTYPE_CONTROL__:"
     private static let healthCheckRequestPrefix = "__KOTOTYPE_HEALTHCHECK__:"
@@ -30,6 +42,7 @@ final class PythonProcessManager: @unchecked Sendable {
     private let inputWriteLock = NSLock()
     private var processGeneration: UInt64 = 0
     private var isStoppingProcess = false
+    private var processGroupID: Int32?
     private var outputReceivedHandler: ((String) -> Void)?
     private var processTerminatedHandler: ((Int32) -> Void)?
     private let runtime: Runtime
@@ -107,6 +120,7 @@ final class PythonProcessManager: @unchecked Sendable {
         errorPipe = newErrorPipe
         inputPipe = newInputPipe
         isStoppingProcess = false
+        processGroupID = nil
         stateLock.unlock()
 
         newProcess.executableURL = URL(fileURLWithPath: launchCommand.executablePath)
@@ -154,6 +168,20 @@ final class PythonProcessManager: @unchecked Sendable {
 
                 for line in lines {
                     guard self.isCurrentGeneration(generation) else { return }
+                    if let handshake = Self.parseBackendProcessGroupHandshake(from: line) {
+                        self.stateLock.lock()
+                        if generation == self.processGeneration,
+                           !self.isStoppingProcess,
+                           Self.processGroupMatches(
+                               launchedProcessID: self.process?.processIdentifier ?? 0,
+                               backendProcessID: handshake.processID,
+                               groupID: handshake.processGroupID
+                           ) {
+                            self.processGroupID = handshake.processGroupID
+                        }
+                        self.stateLock.unlock()
+                        continue
+                    }
                     Logger.shared.log(
                         "Python stdout line received (length=\(line.count))",
                         level: .debug
@@ -315,7 +343,9 @@ final class PythonProcessManager: @unchecked Sendable {
         let outputPipeToStop = outputPipe
         let errorPipeToStop = errorPipe
         let processToStop = process
+        let processGroupToStop = processGroupID
         process = nil
+        processGroupID = nil
         outputPipe = nil
         errorPipe = nil
         inputPipe = nil
@@ -324,9 +354,12 @@ final class PythonProcessManager: @unchecked Sendable {
 
         outputPipeToStop?.fileHandleForReading.readabilityHandler = nil
         errorPipeToStop?.fileHandleForReading.readabilityHandler = nil
-        if let rootPID = processToStop?.processIdentifier {
+        if let processGroupToStop {
+            Self.terminateProcessGroup(groupID: processGroupToStop)
+        } else if let rootPID = processToStop?.processIdentifier,
+                  processToStop?.isRunning == true {
             Self.terminateProcessTree(rootPID: rootPID)
-        } else {
+        } else if processToStop?.isRunning == true {
             processToStop?.terminate()
         }
         ioLock.lock()
@@ -406,6 +439,65 @@ final class PythonProcessManager: @unchecked Sendable {
 
     static func shouldHandleTermination(activeProcess: Process?, terminatedProcess: Process) -> Bool {
         activeProcess === terminatedProcess
+    }
+
+    static func parseBackendProcessGroupID(from output: String) -> Int32? {
+        parseBackendProcessGroupHandshake(from: output)?.processGroupID
+    }
+
+    private static func parseBackendProcessGroupHandshake(
+        from output: String
+    ) -> (processID: Int32, processGroupID: Int32)? {
+        guard let message = decodeControlMessage(BackendProcessGroupReadyMessage.self, from: output),
+              message.type == "backend_process_group_ready",
+              message.processID > 0,
+              message.processGroupID > 1 else {
+            return nil
+        }
+        return (message.processID, message.processGroupID)
+    }
+
+    private static func processGroupMatches(
+        launchedProcessID: Int32,
+        backendProcessID: Int32,
+        groupID: Int32
+    ) -> Bool {
+        guard launchedProcessID > 0, backendProcessID > 0, groupID > 1,
+              getpgid(backendProcessID) == groupID else {
+            return false
+        }
+        return processIsDescendantOrSelf(
+            processID: backendProcessID,
+            ancestorProcessID: launchedProcessID
+        )
+    }
+
+    private static func processIsDescendantOrSelf(
+        processID: Int32,
+        ancestorProcessID: Int32
+    ) -> Bool {
+        var currentProcessID = processID
+        var visited: Set<Int32> = []
+        for _ in 0..<64 {
+            if currentProcessID == ancestorProcessID { return true }
+            guard visited.insert(currentProcessID).inserted,
+                  let parentProcessID = parentProcessID(of: currentProcessID),
+                  parentProcessID > 0,
+                  parentProcessID != currentProcessID else {
+                return false
+            }
+            currentProcessID = parentProcessID
+        }
+        return false
+    }
+
+    private static func parentProcessID(of processID: Int32) -> Int32? {
+        var processInfo = proc_bsdinfo()
+        let expectedSize = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        guard proc_pidinfo(processID, PROC_PIDTBSDINFO, 0, &processInfo, expectedSize) == expectedSize else {
+            return nil
+        }
+        return Int32(processInfo.pbi_ppid)
     }
 
     private static func decodeControlMessage<T: Decodable>(_ type: T.Type, from output: String) -> T? {
@@ -521,6 +613,13 @@ final class PythonProcessManager: @unchecked Sendable {
         signalProcesses(processTree.reversed(), signal: SIGTERM)
         usleep(300_000)
         signalProcesses(processTree.reversed(), signal: SIGKILL)
+    }
+
+    private static func terminateProcessGroup(groupID: Int32) {
+        guard groupID > 1 else { return }
+        _ = Darwin.kill(-groupID, SIGTERM)
+        usleep(300_000)
+        _ = Darwin.kill(-groupID, SIGKILL)
     }
 
     private static func signalProcesses<S: Sequence>(_ pids: S, signal: Int32) where S.Element == Int32 {
