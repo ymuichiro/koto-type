@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 from tools import evaluate_noise_strategies
 from tools import check_benchmark_regression
@@ -31,6 +33,37 @@ class NoiseStrategyEvalTests(unittest.TestCase):
         self.assertEqual(len(laughter), 16_000)
         self.assertGreater(float(abs(cough).max()), 0.0)
         self.assertGreater(float(abs(laughter).max()), 0.0)
+
+    def test_cpu_result_payload_preserves_text_and_confidence_metrics(self):
+        result = evaluate_noise_strategies.cpu_result_payload(
+            [
+                SimpleNamespace(
+                    text=" はい ",
+                    avg_logprob=-0.2,
+                    compression_ratio=1.1,
+                    no_speech_prob=0.03,
+                )
+            ]
+        )
+
+        self.assertEqual(result["text"], "はい")
+        self.assertEqual(
+            result["segments"],
+            [
+                {
+                    "avg_logprob": -0.2,
+                    "compression_ratio": 1.1,
+                    "no_speech_prob": 0.03,
+                }
+            ],
+        )
+
+    def test_cpu_backend_uses_managed_model_default(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(
+                evaluate_noise_strategies.default_model("cpu"),
+                evaluate_noise_strategies.whisper_server.default_managed_cpu_model_path(),
+            )
 
     def test_summary_orders_false_insertions_before_latency(self):
         activity = evaluate_noise_strategies.whisper_server.AudioActivityStats(
