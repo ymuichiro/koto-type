@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import importlib
 import json
 import os
 import platform
@@ -18,12 +19,15 @@ from pathlib import Path
 
 import numpy as np
 
-from python import whisper_server
-
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from python import whisper_server  # noqa: E402 - support direct tools/ execution
+
+
 DEFAULT_WORK_DIR = REPO_ROOT / "artifacts" / "evaluations" / "noise_preprocess_issue_72"
-DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
+DEFAULT_MLX_MODEL = "mlx-community/whisper-large-v3-turbo"
 DEFAULT_STRATEGIES = [
     "none",
     "ffmpeg_current",
@@ -558,6 +562,21 @@ def collect_segment_metrics(result: dict) -> list[SegmentMetrics]:
     return metrics
 
 
+def cpu_result_payload(segments) -> dict:
+    segments = list(segments)
+    return {
+        "text": " ".join(getattr(segment, "text", "") for segment in segments).strip(),
+        "segments": [
+            {
+                "avg_logprob": getattr(segment, "avg_logprob", None),
+                "compression_ratio": getattr(segment, "compression_ratio", None),
+                "no_speech_prob": getattr(segment, "no_speech_prob", None),
+            }
+            for segment in segments
+        ],
+    }
+
+
 def gate_hypothesis(
     text: str,
     metrics: list[SegmentMetrics],
@@ -583,11 +602,37 @@ def gate_hypothesis(
     return text, None
 
 
-def warm_model(model: str) -> None:
-    import mlx_whisper
+def default_model(backend: str) -> str:
+    if backend == "cpu":
+        return os.environ.get(
+            "KOTOTYPE_CPU_MODEL_DIR", whisper_server.default_managed_cpu_model_path()
+        )
+    return DEFAULT_MLX_MODEL
+
+
+def load_model(backend: str, model: str):
+    if backend == "cpu":
+        from faster_whisper import WhisperModel
+
+        return WhisperModel(
+            model,
+            device="cpu",
+            compute_type="int8",
+            local_files_only=True,
+        )
+    return None
+
+
+def warm_model(backend: str, model: str, loaded_model) -> None:
+    fixture = REPO_ROOT / "assets" / "audio" / "test_speech_ja.wav"
+    if backend == "cpu":
+        transcribe_audio(fixture, backend, model, loaded_model)
+        return
+
+    mlx_whisper = importlib.import_module("mlx_whisper")
 
     mlx_whisper.transcribe(
-        str(REPO_ROOT / "assets" / "audio" / "test_speech_ja.wav"),
+        str(fixture),
         path_or_hf_repo=model,
         language="ja",
         task="transcribe",
@@ -596,10 +641,36 @@ def warm_model(model: str) -> None:
     )
 
 
-def transcribe_audio(audio_path: Path, model: str) -> tuple[dict, float]:
-    import mlx_whisper
-
+def transcribe_audio(
+    audio_path: Path, backend: str, model: str, loaded_model
+) -> tuple[dict, float]:
     started_at = time.perf_counter()
+    if backend == "cpu":
+        profile = whisper_server.build_cpu_decode_profile("medium")
+        segments, _ = whisper_server.transcribe_with_vad_fallback(
+            model=loaded_model,
+            transcribe_kwargs={
+                "audio": str(audio_path),
+                "language": "ja",
+                "task": "transcribe",
+                "temperature": profile.temperature,
+                "beam_size": profile.beam_size,
+                "best_of": profile.best_of,
+                "word_timestamps": False,
+                "condition_on_previous_text": whisper_server.DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
+                "initial_prompt": None,
+                "no_speech_threshold": whisper_server.DEFAULT_NO_SPEECH_THRESHOLD,
+                "compression_ratio_threshold": whisper_server.DEFAULT_COMPRESSION_RATIO_THRESHOLD,
+            },
+            vad_parameters=whisper_server.build_vad_parameters(
+                profile.vad_threshold or 0.5
+            ),
+            log=lambda _message: None,
+        )
+        return cpu_result_payload(segments), time.perf_counter() - started_at
+
+    mlx_whisper = importlib.import_module("mlx_whisper")
+
     result = mlx_whisper.transcribe(
         str(audio_path),
         path_or_hf_repo=model,
@@ -617,13 +688,15 @@ def transcribe_audio(audio_path: Path, model: str) -> tuple[dict, float]:
 def evaluate(
     cases: list[EvalCase],
     strategies: list[str],
+    backend: str,
     model: str,
     output_dir: Path,
     repetitions: int = 1,
 ) -> list[EvalResult]:
     processed_dir = output_dir / "processed"
     results = []
-    warm_model(model)
+    loaded_model = load_model(backend, model)
+    warm_model(backend, model, loaded_model)
 
     for run_index in range(repetitions):
         for case in cases:
@@ -634,7 +707,7 @@ def evaluate(
                     processed_dir,
                 )
                 result, transcribe_seconds = transcribe_audio(
-                    processed_audio_path, model
+                    processed_audio_path, backend, model, loaded_model
                 )
                 hypothesis = str(result.get("text", "")).strip()
                 metrics = collect_segment_metrics(result)
@@ -684,7 +757,7 @@ def evaluate(
     return results
 
 
-def benchmark_metadata(model: str, repetitions: int) -> dict:
+def benchmark_metadata(backend: str, model: str, repetitions: int) -> dict:
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=REPO_ROOT,
@@ -699,7 +772,7 @@ def benchmark_metadata(model: str, repetitions: int) -> dict:
         "platform": platform.platform(),
         "machine": platform.machine(),
         "python": platform.python_version(),
-        "backend": "mlx",
+        "backend": backend,
         "model": model,
         "quality_preset": "temperature-0",
         "repetitions": repetitions,
@@ -839,7 +912,8 @@ def write_markdown_report(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--backend", choices=("mlx", "cpu"), default="mlx")
+    parser.add_argument("--model")
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument(
         "--strategies",
@@ -857,15 +931,16 @@ def main() -> None:
     cases = ensure_dataset(args.work_dir)
     output_dir = args.work_dir / "runs" / datetime.now().strftime("%Y%m%d_%H%M%S")
     repetitions = max(1, args.repetitions)
-    results = evaluate(cases, strategies, args.model, output_dir, repetitions)
+    model = args.model or default_model(args.backend)
+    results = evaluate(cases, strategies, args.backend, model, output_dir, repetitions)
     summary_rows = summarize(results)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "results.json").write_text(
         json.dumps(
             {
-                "metadata": benchmark_metadata(args.model, repetitions),
-                "model": args.model,
+                "metadata": benchmark_metadata(args.backend, model, repetitions),
+                "model": model,
                 "strategies": strategies,
                 "summary": summary_rows,
                 "results": [result_to_dict(result) for result in results],
