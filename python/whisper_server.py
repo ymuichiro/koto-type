@@ -43,31 +43,28 @@ DEFAULT_ACTIVE_REGION_MIN_TRIM_SAVED_SECONDS = 0.25
 DEFAULT_FAST_AUDIO_MAX_DURATION_SECONDS = 3.0
 DEFAULT_FAST_AUDIO_MIN_ACTIVE_RATIO = 0.65
 DEFAULT_FAST_AUDIO_MIN_PEAK_DBFS = -18.0
+TRANSCRIPTION_LANGUAGE_CODE_PATTERN = re.compile(r"^[a-z]{2,3}$")
+SUPPORTED_TRANSCRIPTION_LANGUAGE_CODES = frozenset(
+    """
+    af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr
+    gl gu ha haw he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln lo lt lv
+    mg mi mk ml mn mr ms mt my ne nl nn no oc pa pl ps pt ro ru sa sd si sk sl sn so
+    sq sr su sv sw ta te tg th tk tl tr tt uk ur uz vi yi yo yue zh
+    """.split()
+)
 TRANSLATION_TARGET_LANGUAGE_PATTERN = re.compile(r"^[a-z0-9-]{1,10}$")
-QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(
-    r'(["\'])(/(?!/)[^"\']*)\1'
-)
-SMART_QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(
-    r'([“‘])(/(?!/)[^”’]*)([”’])'
-)
-QUOTED_FILE_URL_PATTERN = re.compile(
-    r'(["\'])(file://(?:localhost)?/(?!/)[^"\']*)\1'
-)
+QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(r'(["\'])(/(?!/)[^"\']*)\1')
+SMART_QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(r"([“‘])(/(?!/)[^”’]*)([”’])")
+QUOTED_FILE_URL_PATTERN = re.compile(r'(["\'])(file://(?:localhost)?/(?!/)[^"\']*)\1')
 SMART_QUOTED_FILE_URL_PATTERN = re.compile(
-    r'([“‘])(file://(?:localhost)?/(?!/)[^”’]*)([”’])'
+    r"([“‘])(file://(?:localhost)?/(?!/)[^”’]*)([”’])"
 )
-UNQUOTED_FILE_URL_PATTERN = re.compile(
-    r'file://(?:localhost)?/(?!/)[^\s,;)"\'“”‘’]+'
-)
-ABSOLUTE_PATH_PATTERN = re.compile(
-    r"(^|[\s:(=“‘])/(?!/)[^\s,;)\"'“”‘’]+"
-)
+UNQUOTED_FILE_URL_PATTERN = re.compile(r'file://(?:localhost)?/(?!/)[^\s,;)"\'“”‘’]+')
+ABSOLUTE_PATH_PATTERN = re.compile(r"(^|[\s:(=“‘])/(?!/)[^\s,;)\"'“”‘’]+")
 
 
 def sanitize_log_message(message: str) -> str:
-    quoted_file_url_sanitized = QUOTED_FILE_URL_PATTERN.sub(
-        r"\1<path>\1", message
-    )
+    quoted_file_url_sanitized = QUOTED_FILE_URL_PATTERN.sub(r"\1<path>\1", message)
     smart_quoted_file_url_sanitized = SMART_QUOTED_FILE_URL_PATTERN.sub(
         r"\1<path>\3", quoted_file_url_sanitized
     )
@@ -116,7 +113,9 @@ class MlxWhisperModule(Protocol):
 
 
 def default_dictionary_path():
-    return os.path.expanduser("~/Library/Application Support/koto-type/user_dictionary.json")
+    return os.path.expanduser(
+        "~/Library/Application Support/koto-type/user_dictionary.json"
+    )
 
 
 def default_application_support_directory():
@@ -277,7 +276,9 @@ def mutate_server_state(state_path, lock_path, mutator):
     with server_state_lock(lock_path):
         state = load_server_state(state_path)
         state["active_pids"] = [pid for pid in state["active_pids"] if pid_exists(pid)]
-        state["loading_pids"] = [pid for pid in state["loading_pids"] if pid_exists(pid)]
+        state["loading_pids"] = [
+            pid for pid in state["loading_pids"] if pid_exists(pid)
+        ]
         result = mutator(state)
         save_server_state(state_path, state)
         return result
@@ -290,8 +291,14 @@ def register_server_pid(state_path, lock_path, pid, max_active_servers):
 
         active_count = len(state["active_pids"])
         if active_count > max_active_servers:
-            state["active_pids"] = [active_pid for active_pid in state["active_pids"] if active_pid != pid]
-            state["loading_pids"] = [loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid]
+            state["active_pids"] = [
+                active_pid for active_pid in state["active_pids"] if active_pid != pid
+            ]
+            state["loading_pids"] = [
+                loading_pid
+                for loading_pid in state["loading_pids"]
+                if loading_pid != pid
+            ]
             return False, active_count - 1
         return True, active_count
 
@@ -300,8 +307,12 @@ def register_server_pid(state_path, lock_path, pid, max_active_servers):
 
 def unregister_server_pid(state_path, lock_path, pid):
     def mutator(state):
-        state["active_pids"] = [active_pid for active_pid in state["active_pids"] if active_pid != pid]
-        state["loading_pids"] = [loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid]
+        state["active_pids"] = [
+            active_pid for active_pid in state["active_pids"] if active_pid != pid
+        ]
+        state["loading_pids"] = [
+            loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid
+        ]
         return None
 
     mutate_server_state(state_path, lock_path, mutator)
@@ -322,7 +333,9 @@ def try_acquire_model_load_slot(state_path, lock_path, pid, max_parallel_model_l
 
 def release_model_load_slot(state_path, lock_path, pid):
     def mutator(state):
-        state["loading_pids"] = [loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid]
+        state["loading_pids"] = [
+            loading_pid for loading_pid in state["loading_pids"] if loading_pid != pid
+        ]
         return None
 
     mutate_server_state(state_path, lock_path, mutator)
@@ -452,7 +465,9 @@ def _scan_wav_activity_cached(
 
             total_windows += 1
             total_samples += frame_count
-            samples = np.frombuffer(frames, dtype="<i2").reshape(-1, channel_count)[:, 0]
+            samples = np.frombuffer(frames, dtype="<i2").reshape(-1, channel_count)[
+                :, 0
+            ]
             samples64 = samples.astype(np.float64)
             window_peak = int(np.max(np.abs(samples64)))
             squared_sum = float(np.dot(samples64, samples64))
@@ -705,24 +720,36 @@ def normalize_engine_transcription_result(result):
     if isinstance(result, tuple) and len(result) >= 2:
         return TranscriptionEngineResult(
             text=str(result[0] or "").strip(),
-            detected_language=result[1],
+            detected_language=normalize_detected_transcription_language(result[1]),
         )
     raise TypeError(f"Unsupported transcription result: {type(result).__name__}")
 
 
 def evaluate_transcription_confidence_gate(text, segment_metrics):
-    if not str(text or "").strip():
+    normalized_text = str(text or "").strip()
+    if not normalized_text:
         return TranscriptionGateDecision(False)
+
+    if not any(character.isalnum() for character in normalized_text):
+        return TranscriptionGateDecision(True, "contentless_text")
 
     if not segment_metrics:
         return TranscriptionGateDecision(False)
 
     max_no_speech = max(
-        (metric.no_speech_prob for metric in segment_metrics if metric.no_speech_prob is not None),
+        (
+            metric.no_speech_prob
+            for metric in segment_metrics
+            if metric.no_speech_prob is not None
+        ),
         default=None,
     )
     min_avg_logprob = min(
-        (metric.avg_logprob for metric in segment_metrics if metric.avg_logprob is not None),
+        (
+            metric.avg_logprob
+            for metric in segment_metrics
+            if metric.avg_logprob is not None
+        ),
         default=None,
     )
     max_compression = max(
@@ -747,7 +774,10 @@ def evaluate_transcription_confidence_gate(text, segment_metrics):
             True,
             f"avg_logprob={min_avg_logprob:.3f}",
         )
-    if max_compression is not None and max_compression >= DEFAULT_COMPRESSION_RATIO_THRESHOLD:
+    if (
+        max_compression is not None
+        and max_compression >= DEFAULT_COMPRESSION_RATIO_THRESHOLD
+    ):
         return TranscriptionGateDecision(
             True,
             f"compression_ratio={max_compression:.3f}",
@@ -816,7 +846,9 @@ def tighten_directory_tree_permissions(root_path):
     for current_root, directory_names, file_names in os.walk(root_path):
         tighten_file_permissions(current_root, mode=0o700)
         for directory_name in directory_names:
-            tighten_file_permissions(os.path.join(current_root, directory_name), mode=0o700)
+            tighten_file_permissions(
+                os.path.join(current_root, directory_name), mode=0o700
+            )
         for file_name in file_names:
             tighten_file_permissions(os.path.join(current_root, file_name), mode=0o600)
 
@@ -854,7 +886,9 @@ def cleanup_temporary_audio_files(paths, log):
             os.remove(path)
             log("Removed temporary audio file")
         except OSError as error:
-            log(f"Failed to remove temporary audio file (error_type={type(error).__name__})")
+            log(
+                f"Failed to remove temporary audio file (error_type={type(error).__name__})"
+            )
 
 
 def cleanup_transcription_audio_path(audio_path, original_audio_path, log):
@@ -893,16 +927,22 @@ def audio_preprocess(
         preserve_input_format = is_standard_pcm16_mono_wav(input_path)
         skip_denoise = should_skip_denoise(input_path)
         if preserve_input_format:
-            log("Input is already 16kHz mono PCM16; skipping resampling and channel conversion")
+            log(
+                "Input is already 16kHz mono PCM16; skipping resampling and channel conversion"
+            )
         if skip_denoise:
             log("Short clear audio detected; skipping denoise filter")
-        filter_candidates = build_audio_filter_chain_candidates(skip_denoise=skip_denoise)
+        filter_candidates = build_audio_filter_chain_candidates(
+            skip_denoise=skip_denoise
+        )
 
         for index, filter_chain in enumerate(filter_candidates):
             if index == 0:
                 log(f"Audio preprocess filter chain: {filter_chain}")
             else:
-                log(f"Retry preprocess with fallback filter chain #{index}: {filter_chain}")
+                log(
+                    f"Retry preprocess with fallback filter chain #{index}: {filter_chain}"
+                )
             try:
                 run_preprocess_with_filter(
                     ffmpeg_module=ffmpeg_module,
@@ -1093,6 +1133,7 @@ def post_process_text(text, language="ja", auto_punctuation=True):
         return text
 
     if language == "ja":
+
         def normalize_japanese_punctuation_sequence(value):
             value = re.sub(r"、+([。！？])", r"\1", value)
             value = re.sub(r"。{2,}", "。", value)
@@ -1101,7 +1142,9 @@ def post_process_text(text, language="ja", auto_punctuation=True):
             value = re.sub(r"、{2,}", "、", value)
             return value
 
-        text = text.translate(str.maketrans({",": "、", ".": "。", "!": "！", "?": "？"}))
+        text = text.translate(
+            str.maketrans({",": "、", ".": "。", "!": "！", "?": "？"})
+        )
         text = re.sub(r"\s*([、。！？])\s*", r"\1", text)
         text = normalize_japanese_punctuation_sequence(text)
 
@@ -1122,7 +1165,9 @@ def post_process_text(text, language="ja", auto_punctuation=True):
 
         text = normalize_japanese_punctuation_sequence(text)
     else:
-        text = text.translate(str.maketrans({"、": ",", "。": ".", "！": "!", "？": "?"}))
+        text = text.translate(
+            str.maketrans({"、": ",", "。": ".", "！": "!", "？": "?"})
+        )
         text = re.sub(r"\s+([,.!?])", r"\1", text)
         text = re.sub(r",{2,}", ",", text)
         text = re.sub(r"([!?])\1+", r"\1", text)
@@ -1148,6 +1193,45 @@ def normalize_request_mode(value):
     return DEFAULT_REQUEST_MODE
 
 
+def normalize_transcription_language(value):
+    normalized = str(value or "").strip().lower()
+    if not normalized or normalized == "auto":
+        return "auto"
+
+    primary_code = re.split(r"[-_]", normalized, maxsplit=1)[0]
+    if (
+        TRANSCRIPTION_LANGUAGE_CODE_PATTERN.fullmatch(primary_code)
+        and primary_code in SUPPORTED_TRANSCRIPTION_LANGUAGE_CODES
+    ):
+        return primary_code
+    return "auto"
+
+
+def normalize_detected_transcription_language(value):
+    normalized = normalize_transcription_language(value)
+    return None if normalized == "auto" else normalized
+
+
+def resolve_whisper_language(value):
+    normalized = normalize_transcription_language(value)
+    return None if normalized == "auto" else normalized
+
+
+def log_auto_language_detection(log, language, probability):
+    if probability is None:
+        formatted_probability = "unavailable"
+    else:
+        try:
+            formatted_probability = f"{float(probability):.3f}"
+        except (TypeError, ValueError):
+            formatted_probability = "unavailable"
+
+    log(
+        "Auto language detection: "
+        f"language={language or 'unknown'}, probability={formatted_probability}"
+    )
+
+
 def normalize_translation_target_language(value):
     normalized = str(value or "").strip().lower()
     if TRANSLATION_TARGET_LANGUAGE_PATTERN.fullmatch(normalized):
@@ -1157,7 +1241,9 @@ def normalize_translation_target_language(value):
 
 def select_whisper_task(mode, translation_target_language):
     normalized_mode = normalize_request_mode(mode)
-    normalized_target = normalize_translation_target_language(translation_target_language)
+    normalized_target = normalize_translation_target_language(
+        translation_target_language
+    )
     if normalized_mode == "translate" and normalized_target == "en":
         return "translate"
     return DEFAULT_TASK
@@ -1166,7 +1252,7 @@ def select_whisper_task(mode, translation_target_language):
 def select_output_language(mode, translation_target_language, detected_language):
     if normalize_request_mode(mode) == "translate":
         return normalize_translation_target_language(translation_target_language)
-    return detected_language
+    return normalize_detected_transcription_language(detected_language)
 
 
 @dataclass(frozen=True)
@@ -1273,9 +1359,15 @@ class ManagedModelStatus:
 def build_cpu_decode_profile(quality_preset):
     preset = normalize_quality_preset(quality_preset)
     profiles = {
-        "low": DecodeProfile(temperature=0.0, beam_size=1, best_of=1, vad_threshold=0.5),
-        "medium": DecodeProfile(temperature=0.0, beam_size=5, best_of=5, vad_threshold=0.5),
-        "high": DecodeProfile(temperature=0.0, beam_size=10, best_of=10, vad_threshold=0.5),
+        "low": DecodeProfile(
+            temperature=0.0, beam_size=1, best_of=1, vad_threshold=0.5
+        ),
+        "medium": DecodeProfile(
+            temperature=0.0, beam_size=5, best_of=5, vad_threshold=0.5
+        ),
+        "high": DecodeProfile(
+            temperature=0.0, beam_size=10, best_of=10, vad_threshold=0.5
+        ),
     }
     return profiles[preset]
 
@@ -1387,7 +1479,10 @@ def parse_request_line(raw_line):
     if not stripped:
         return None
     if stripped.startswith(HEALTHCHECK_REQUEST_PREFIX):
-        return {"kind": "healthcheck", "token": stripped[len(HEALTHCHECK_REQUEST_PREFIX) :]}
+        return {
+            "kind": "healthcheck",
+            "token": stripped[len(HEALTHCHECK_REQUEST_PREFIX) :],
+        }
 
     payload = json.loads(stripped)
     request_type = payload.get("type")
@@ -1408,14 +1503,18 @@ def parse_request_line(raw_line):
             "kind": "model_management",
             "request": ModelManagementRequest(
                 action=action,
-                model_kind=None if action == "status_all" else normalize_model_kind(model_kind),
-                request_id=normalize_model_management_request_id(payload.get("request_id")),
+                model_kind=None
+                if action == "status_all"
+                else normalize_model_kind(model_kind),
+                request_id=normalize_model_management_request_id(
+                    payload.get("request_id")
+                ),
             ),
         }
     if request_type != "transcription_request":
         raise ValueError(f"Unsupported request type: {request_type}")
 
-    language = str(payload.get("language", "auto")).strip() or "auto"
+    language = normalize_transcription_language(payload.get("language"))
     actual_language = None if language == "auto" else language
     screenshot_context = payload.get("screenshot_context")
     if screenshot_context is not None:
@@ -1536,9 +1635,8 @@ class BackendManager:
         config_path = os.path.join(self.mlx_model_dir, "config.json")
         safetensors_path = os.path.join(self.mlx_model_dir, "weights.safetensors")
         npz_path = os.path.join(self.mlx_model_dir, "weights.npz")
-        return (
-            os.path.isfile(config_path)
-            and (os.path.isfile(safetensors_path) or os.path.isfile(npz_path))
+        return os.path.isfile(config_path) and (
+            os.path.isfile(safetensors_path) or os.path.isfile(npz_path)
         )
 
     def _download_cpu_model(self):
@@ -1566,7 +1664,10 @@ class BackendManager:
         tighten_directory_tree_permissions(self.mlx_model_dir)
 
     def _is_apple_silicon(self):
-        return sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+        return sys.platform == "darwin" and platform.machine().lower() in {
+            "arm64",
+            "aarch64",
+        }
 
     def _wait_for_model_load_slot(self):
         wait_started = time.time()
@@ -1622,7 +1723,9 @@ class BackendManager:
             import importlib
 
             self.mlx_core = cast(MlxCoreModule, importlib.import_module("mlx.core"))
-            self.mlx_whisper = cast(MlxWhisperModule, importlib.import_module("mlx_whisper"))
+            self.mlx_whisper = cast(
+                MlxWhisperModule, importlib.import_module("mlx_whisper")
+            )
             self.mlx_transcribe_module = cast(
                 MlxTranscribeModule, importlib.import_module("mlx_whisper.transcribe")
             )
@@ -1765,7 +1868,9 @@ class BackendManager:
                 compute_type="int8",
                 local_files_only=True,
             )
-            self.log("CPU model loaded (backend=faster-whisper, device=cpu, compute_type=int8)")
+            self.log(
+                "CPU model loaded (backend=faster-whisper, device=cpu, compute_type=int8)"
+            )
             return model
 
         self.cpu_model = self._run_with_model_load_slot(_load)
@@ -1815,7 +1920,9 @@ class BackendManager:
             )
             elapsed = time.perf_counter() - load_started_at
             self.log(f"MLX model warmup completed in {elapsed:.2f} seconds")
-            self.log(f"MLX model loaded (backend=mlx-whisper, model={DEFAULT_MLX_MODEL_ID})")
+            self.log(
+                f"MLX model loaded (backend=mlx-whisper, model={DEFAULT_MLX_MODEL_ID})"
+            )
 
         self._run_with_model_load_slot(_load)
         self.mlx_model_loaded = True
@@ -1832,11 +1939,12 @@ class BackendManager:
         whisper_task=DEFAULT_TASK,
     ):
         model = self._ensure_cpu_model()
+        whisper_language = resolve_whisper_language(language)
         profile = build_cpu_decode_profile(quality_preset)
         vad_parameters = build_vad_parameters(profile.vad_threshold or 0.5)
         transcribe_kwargs = {
             "audio": audio_path,
-            "language": language,
+            "language": whisper_language,
             "task": whisper_task,
             "temperature": profile.temperature,
             "beam_size": profile.beam_size,
@@ -1849,7 +1957,7 @@ class BackendManager:
         }
         self.log(
             "CPU transcription parameters: "
-            f"language={language}, "
+            f"language={whisper_language}, "
             f"mode={request_mode}, "
             f"translation_target_language={translation_target_language}, "
             f"whisper_task={whisper_task}, "
@@ -1867,7 +1975,17 @@ class BackendManager:
             log=self.log,
         )
         text = " ".join(getattr(segment, "text", "") for segment in segments).strip()
-        detected_language = info.language if language is None else language
+        detected_language = (
+            normalize_detected_transcription_language(info.language)
+            if whisper_language is None
+            else whisper_language
+        )
+        if whisper_language is None:
+            log_auto_language_detection(
+                self.log,
+                detected_language,
+                getattr(info, "language_probability", None),
+            )
         return TranscriptionEngineResult(
             text=text,
             detected_language=detected_language,
@@ -1886,20 +2004,21 @@ class BackendManager:
         whisper_task=DEFAULT_TASK,
     ):
         self._ensure_mlx_model()
+        whisper_language = resolve_whisper_language(language)
         profile = build_mlx_decode_profile(quality_preset)
         mlx_whisper = self.mlx_whisper
         if mlx_whisper is None:
             raise RuntimeError("mlx runtime unavailable")
         transcribe_kwargs = build_mlx_transcribe_kwargs(
             model_path=self.mlx_model_dir,
-            language=language,
+            language=whisper_language,
             profile=profile,
             initial_prompt=initial_prompt,
             whisper_task=whisper_task,
         )
         self.log(
             "MLX transcription parameters: "
-            f"language={language}, "
+            f"language={whisper_language}, "
             f"mode={request_mode}, "
             f"translation_target_language={translation_target_language}, "
             f"whisper_task={whisper_task}, "
@@ -1917,7 +2036,17 @@ class BackendManager:
             log=self.log,
         )
         text = str(result.get("text", "")).strip()
-        detected_language = result.get("language") if language is None else language
+        detected_language = (
+            normalize_detected_transcription_language(result.get("language"))
+            if whisper_language is None
+            else whisper_language
+        )
+        if whisper_language is None:
+            log_auto_language_detection(
+                self.log,
+                detected_language,
+                result.get("language_probability"),
+            )
         return TranscriptionEngineResult(
             text=text,
             detected_language=detected_language,
@@ -1937,7 +2066,10 @@ class BackendManager:
             f"whisper_task={whisper_task}, "
             f"preferred_backend={status.effective_backend}"
         )
-        if status.effective_backend == "cpu" and status.fallback_reason == "gpu_disabled_in_settings":
+        if (
+            status.effective_backend == "cpu"
+            and status.fallback_reason == "gpu_disabled_in_settings"
+        ):
             engine_result = normalize_engine_transcription_result(
                 self._transcribe_with_cpu(
                     audio_path,
@@ -2119,7 +2251,7 @@ def generate_initial_prompt(
             )
         ]
 
-    normalized_language = str(language or "").strip().lower()
+    normalized_language = normalize_transcription_language(language)
     if normalized_mode != "translate" and normalized_language == "ja":
         prompt_parts.append(
             "Japanese ending fidelity: preserve spoken sentence-final particles and "
@@ -2133,7 +2265,9 @@ def generate_initial_prompt(
         )
 
     if use_context:
-        words_for_prompt = user_words if user_words is not None else load_user_dictionary()
+        words_for_prompt = (
+            user_words if user_words is not None else load_user_dictionary()
+        )
         normalized_words = normalize_user_words(words_for_prompt)
         if normalized_words:
             word_list = ", ".join(normalized_words[:20])
@@ -2174,14 +2308,26 @@ def main():
 
     state_path = default_server_state_path()
     lock_path = default_server_state_lock_path()
-    cpu_model_dir = os.environ.get("KOTOTYPE_CPU_MODEL_DIR", default_managed_cpu_model_path())
-    mlx_model_dir = os.environ.get("KOTOTYPE_MLX_MODEL_DIR", default_managed_mlx_model_path())
-    model_cache_dir = os.environ.get("KOTOTYPE_MODEL_CACHE_DIR", default_managed_model_cache_path())
+    cpu_model_dir = os.environ.get(
+        "KOTOTYPE_CPU_MODEL_DIR", default_managed_cpu_model_path()
+    )
+    mlx_model_dir = os.environ.get(
+        "KOTOTYPE_MLX_MODEL_DIR", default_managed_mlx_model_path()
+    )
+    model_cache_dir = os.environ.get(
+        "KOTOTYPE_MODEL_CACHE_DIR", default_managed_model_cache_path()
+    )
     current_pid = os.getpid()
     parent_pid = parse_int(os.environ.get("KOTOTYPE_PARENT_PID"), 0)
-    max_active_servers = max(1, parse_int(os.environ.get("KOTOTYPE_MAX_ACTIVE_SERVERS"), 1))
-    max_parallel_model_loads = max(1, parse_int(os.environ.get("KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"), 1))
-    model_load_wait_timeout = max(1, parse_int(os.environ.get("KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"), 120))
+    max_active_servers = max(
+        1, parse_int(os.environ.get("KOTOTYPE_MAX_ACTIVE_SERVERS"), 1)
+    )
+    max_parallel_model_loads = max(
+        1, parse_int(os.environ.get("KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"), 1)
+    )
+    model_load_wait_timeout = max(
+        1, parse_int(os.environ.get("KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"), 120)
+    )
 
     registered, active_count = register_server_pid(
         state_path=state_path,
@@ -2197,8 +2343,12 @@ def main():
         return
 
     def cleanup_server_state():
-        release_model_load_slot(state_path=state_path, lock_path=lock_path, pid=current_pid)
-        unregister_server_pid(state_path=state_path, lock_path=lock_path, pid=current_pid)
+        release_model_load_slot(
+            state_path=state_path, lock_path=lock_path, pid=current_pid
+        )
+        unregister_server_pid(
+            state_path=state_path, lock_path=lock_path, pid=current_pid
+        )
 
     atexit.register(cleanup_server_state)
 
@@ -2416,7 +2566,9 @@ def main():
                     output_language,
                     auto_punctuation=request.auto_punctuation,
                 )
-                log(f"Post-processed transcription length: {len(transcription)} characters")
+                log(
+                    f"Post-processed transcription length: {len(transcription)} characters"
+                )
 
                 emit_backend_status(backend_status)
                 print(transcription, file=sys.stdout)

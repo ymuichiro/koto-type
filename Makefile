@@ -1,4 +1,4 @@
-.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight test-real-audio-preflight-unit test-real-audio-capture typecheck-all test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
+.PHONY: help run-app run-server test-transcription test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-benchmark test-asr-benchmark test-smoke-server test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight test-real-audio-preflight-unit test-real-audio-capture test-secret-scan typecheck-all test-all build-server build-app build-all install-deps install-deps-mlx clean view-log capture-artifacts
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -28,6 +28,7 @@ help:
 	@echo "  make test-real-audio-preflight - 実マイクE2Eの入力デバイス事前確認"
 	@echo "  make test-real-audio-preflight-unit - 実マイクpreflight判定のユニットテスト"
 	@echo "  make test-real-audio-capture - 入力デバイス確認後にAVAudioEngine録音器をスモークテスト"
+	@echo "  make test-secret-scan - 秘密情報パターン検査を実行"
 	@echo "  make typecheck-all  - MLX依存を含むPython/テスト/ツール全体をTy検査"
 	@echo "  make test-all       - Pythonユニットテストを実行"
 	@echo ""
@@ -67,6 +68,10 @@ test-noise-eval:
 
 test-benchmark:
 	$(PYTHON) -m tools.evaluate_noise_strategies --strategies ffmpeg_office_gate --repetitions 5
+
+test-asr-benchmark:
+	@echo "ASRベンチマーク設定・成果物のユニットテストを実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_asr_benchmark.py
 
 check-benchmark:
 	@test -n "$(BASELINE)" -a -n "$(CANDIDATE)" || (echo "BASELINE and CANDIDATE are required" && exit 2)
@@ -108,6 +113,12 @@ test-real-audio-capture: test-real-audio-preflight
 	@echo "AVAudioEngine録音器の実入力スモークテストを実行中..."
 	cd KotoType && swift test --filter RealtimeRecorderTests
 
+test-secret-scan:
+	@echo "秘密情報パターン検査を実行中..."
+	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_secret_scan.py
+	$(PYTHON) tools/scan_secrets.py
+	$(PYTHON) tools/scan_secrets.py tools/scan_secrets.py $(PYTHON_TEST_DIR)/test_secret_scan.py .github/workflows/secret-scan.yml
+
 typecheck-all:
 	@echo "MLX依存を含むPython/テスト/ツール全体をTy検査中..."
 	uv sync --extra mlx --extra dev
@@ -117,7 +128,7 @@ test-logging-privacy:
 	@echo "ログプライバシーのユニットテストを実行中..."
 	$(PYTHON_UNITTEST) $(PYTHON_TEST_DIR)/test_logging_privacy.py
 
-test-all: test-audio-preprocess test-backend-config test-logging-privacy test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight-unit
+test-all: test-audio-preprocess test-backend-config test-logging-privacy test-asr-benchmark test-noise-eval test-release-smoke-script test-release-workflow test-user-dictionary test-ending-fidelity test-public-docs test-real-audio-preflight-unit test-secret-scan
 	@echo ""
 	@echo "✓ すべてのテスト完了"
 

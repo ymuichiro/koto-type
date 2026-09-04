@@ -19,7 +19,21 @@ This note is used to capture local benchmark results for standalone ASR experime
 - Short audio defaults to `assets/audio/test_speech_ja.wav`
 - Long audio defaults to a generated 300-second WAV derived from the short audio sample
 - Results are written to `artifacts/benchmarks/asr_benchmark_results.json`
+- Results keep case names and durations but omit local audio/repository paths; failed worker details are reduced to a path-safe summary
 - `mlx-whisper` does not currently support beam search, so the shared benchmark uses greedy decoding
+
+## Language detection comparison
+
+The benchmark keeps the historical explicit-Japanese default and accepts `--language auto` for a controlled comparison:
+
+```bash
+uv run python scripts/benchmark_asr_models.py \
+  --language auto \
+  --short-audio assets/audio/test_speech_ja.wav \
+  --warm-runs 3
+```
+
+With `auto`, the benchmark passes `language=None` to the backend and records requested and detected language plus probability. Run the same audio and decode settings with `--language ja`; compare detection, transcript length, and warm latency together. A short repeated clip is a diagnostic signal only and is not sufficient to generalize automatic-language accuracy to other speakers, languages, or recording conditions.
 
 ## Latest local run
 

@@ -200,6 +200,35 @@ final class MultiProcessManagerTests: XCTestCase {
         XCTAssertEqual(manager.getPendingSegmentCount(), 0)
     }
 
+    func testProcessFileForwardsNormalizedSelectedLanguage() {
+        let completion = expectation(description: "segment completes")
+        var created: [MockMultiProcessPythonManager] = []
+
+        let manager = MultiProcessManager {
+            let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+            mock.onSend = { instance, _ in
+                instance.outputReceived?("日本語")
+            }
+            created.append(mock)
+            return mock
+        }
+        manager.segmentComplete = { index, _ in
+            if index == 15 {
+                completion.fulfill()
+            }
+        }
+
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/japanese.wav"),
+            index: 15,
+            settings: AppSettings(language: "ja-JP")
+        )
+
+        wait(for: [completion], timeout: 2.0)
+        XCTAssertEqual(created[0].receivedLanguages, ["ja"])
+    }
+
     func testOneHundredSegmentsEnqueueWithoutMainQueuePolling() {
         let manager = MultiProcessManager {
             MockMultiProcessPythonManager(sendSucceeds: true)
@@ -629,6 +658,7 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
     var onSendDetailed: ((MockMultiProcessPythonManager, String, RecordingRequestMode, String, String?) -> Void)?
     var onSendBackendProbe: ((MockMultiProcessPythonManager, Bool, Bool) -> Void)?
     private(set) var receivedModes: [RecordingRequestMode] = []
+    private(set) var receivedLanguages: [String] = []
     private(set) var receivedTranslationTargetLanguages: [String] = []
 
     init(sendSucceeds: Bool) {
@@ -651,6 +681,7 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
         translationTargetLanguage: String,
         screenshotContext: String?
     ) -> Bool {
+        receivedLanguages.append(language)
         receivedModes.append(mode)
         receivedTranslationTargetLanguages.append(translationTargetLanguage)
         onSend?(self, text)

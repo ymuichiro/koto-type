@@ -32,7 +32,16 @@ struct AppSettings: Codable, Equatable {
     static let defaultRecordingCompletionTimeout: Double = 600.0
     static let minimumRecordingCompletionTimeout: Double = 30.0
     static let maximumRecordingCompletionTimeout: Double = 3_600.0
+    static let defaultTranscriptionLanguage = "auto"
     static let defaultTranslationTargetLanguage = "en"
+    static let supportedTranscriptionLanguageCodes: Set<String> = Set(
+        """
+        auto af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr
+        gl gu ha haw he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln lo lt lv
+        mg mi mk ml mn mr ms mt my ne nl nn no oc pa pl ps pt ro ru sa sd si sk sl sn so
+        sq sr su sv sw ta te tg th tk tl tr tt uk ur uz vi yi yo yue zh
+        """.split(separator: " ").map(String.init)
+    )
 
     var hotkeyConfig: HotkeyConfiguration
     var translationHotkeyConfig: HotkeyConfiguration
@@ -48,18 +57,18 @@ struct AppSettings: Codable, Equatable {
     init(
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
         translationHotkeyConfig: HotkeyConfiguration = .unset,
-        language: String = "auto",
+        language: String = AppSettings.defaultTranscriptionLanguage,
         translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
         autoPunctuation: Bool = true,
         transcriptionQualityPreset: TranscriptionQualityPreset = .high,
         gpuAccelerationEnabled: Bool = true,
-        keepBackendReadyInBackground: Bool = true,
+        keepBackendReadyInBackground: Bool = false,
         launchAtLogin: Bool = false,
         recordingCompletionTimeout: Double = AppSettings.defaultRecordingCompletionTimeout
     ) {
         self.hotkeyConfig = hotkeyConfig
         self.translationHotkeyConfig = translationHotkeyConfig
-        self.language = language
+        self.language = Self.normalizedTranscriptionLanguage(language)
         self.translationTargetLanguage = Self.normalizedTranslationTargetLanguage(
             translationTargetLanguage
         )
@@ -81,7 +90,10 @@ struct AppSettings: Codable, Equatable {
         translationHotkeyConfig =
             try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .translationHotkeyConfig)
             ?? .unset
-        language = try container.decodeIfPresent(String.self, forKey: .language) ?? "auto"
+        language = Self.normalizedTranscriptionLanguage(
+            try container.decodeIfPresent(String.self, forKey: .language)
+                ?? Self.defaultTranscriptionLanguage
+        )
         translationTargetLanguage = Self.normalizedTranslationTargetLanguage(
             try container.decodeIfPresent(String.self, forKey: .translationTargetLanguage)
                 ?? Self.defaultTranslationTargetLanguage
@@ -112,6 +124,25 @@ struct AppSettings: Codable, Equatable {
             max(value, minimumRecordingCompletionTimeout),
             maximumRecordingCompletionTimeout
         )
+    }
+
+    static func normalizedTranscriptionLanguage(_ value: String) -> String {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard !normalized.isEmpty, normalized != defaultTranscriptionLanguage else {
+            return defaultTranscriptionLanguage
+        }
+
+        let primaryCode = normalized.split { character in
+            character == "-" || character == "_"
+        }.first.map(String.init) ?? normalized
+        guard supportedTranscriptionLanguageCodes.contains(primaryCode) else {
+            return defaultTranscriptionLanguage
+        }
+
+        return primaryCode
     }
 
     private static func normalizedTranslationTargetLanguage(_ value: String) -> String {
@@ -168,11 +199,13 @@ final class SettingsManager: @unchecked Sendable {
 
     func load() -> AppSettings {
         Logger.shared.log("SettingsManager.load: trying to load from \(settingsURL.path)")
-        guard let data = try? Data(contentsOf: settingsURL),
-            let settings = try? JSONDecoder().decode(AppSettings.self, from: data)
-        else {
+        guard let data = try? Data(contentsOf: settingsURL) else {
             Logger.shared.log("No saved settings found, returning defaults")
             return AppSettings()
+        }
+        guard let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
+            Logger.shared.log("Saved settings could not be decoded, preserving legacy backend readiness")
+            return AppSettings(keepBackendReadyInBackground: true)
         }
         Logger.shared.log(
             "SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), language=\(settings.language), translationTargetLanguage=\(settings.translationTargetLanguage), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"

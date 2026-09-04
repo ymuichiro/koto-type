@@ -246,6 +246,9 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                Text("If you mainly speak Japanese, choose Japanese to avoid automatic language misclassification in short or noisy clips.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -697,9 +700,9 @@ struct SettingsView: View {
 
     private var backendReadinessDescription: String {
         if draft.keepBackendReadyInBackground {
-            return "Recommended. KotoType keeps the realtime transcription worker alive and preloads the selected model after launch for the fastest first dictation."
+            return "KotoType keeps the realtime transcription worker alive and preloads the selected model after launch for the fastest first dictation."
         }
-        return "Uses less background CPU and memory, but KotoType starts the realtime worker on demand and shuts it down again after use."
+        return "Recommended. Uses less background CPU and memory, but KotoType starts the realtime worker on demand and shuts it down again after use."
     }
 
     private var displayedModelStatuses: [ManagedTranscriptionModelStatus] {

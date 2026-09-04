@@ -16,7 +16,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .high)
         XCTAssertTrue(settings.gpuAccelerationEnabled)
-        XCTAssertTrue(settings.keepBackendReadyInBackground)
+        XCTAssertFalse(settings.keepBackendReadyInBackground)
         XCTAssertFalse(settings.launchAtLogin)
         XCTAssertEqual(
             settings.recordingCompletionTimeout,

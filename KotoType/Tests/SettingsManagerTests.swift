@@ -44,7 +44,7 @@ final class SettingsManagerTests: XCTestCase {
     func testDefaultSettings() {
         let settings = settingsManager.load()
 
-        XCTAssertEqual(settings.language, "auto")
+        XCTAssertEqual(settings.language, AppSettings.defaultTranscriptionLanguage)
         XCTAssertEqual(settings.translationHotkeyConfig, .unset)
         XCTAssertEqual(
             settings.translationTargetLanguage,
@@ -53,12 +53,47 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertTrue(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .high)
         XCTAssertTrue(settings.gpuAccelerationEnabled)
-        XCTAssertTrue(settings.keepBackendReadyInBackground)
+        XCTAssertFalse(settings.keepBackendReadyInBackground)
         XCTAssertFalse(settings.launchAtLogin)
         XCTAssertEqual(
             settings.recordingCompletionTimeout,
             AppSettings.defaultRecordingCompletionTimeout
         )
+    }
+
+    func testCorruptSavedSettingsPreserveLegacyBackendReadiness() throws {
+        try Data("not-json".utf8).write(to: settingsURL)
+
+        XCTAssertTrue(settingsManager.load().keepBackendReadyInBackground)
+    }
+
+    func testTranscriptionLanguageNormalizesLocaleAndInvalidValues() {
+        XCTAssertEqual(AppSettings.normalizedTranscriptionLanguage(" JA-jp "), "ja")
+        XCTAssertEqual(AppSettings.normalizedTranscriptionLanguage("en_US"), "en")
+        XCTAssertEqual(AppSettings.normalizedTranscriptionLanguage("haw"), "haw")
+        XCTAssertEqual(
+            AppSettings.normalizedTranscriptionLanguage("xx"),
+            AppSettings.defaultTranscriptionLanguage
+        )
+        XCTAssertEqual(
+            AppSettings.normalizedTranscriptionLanguage("Japanese"),
+            AppSettings.defaultTranscriptionLanguage
+        )
+        XCTAssertEqual(
+            AppSettings.normalizedTranscriptionLanguage(" "),
+            AppSettings.defaultTranscriptionLanguage
+        )
+    }
+
+    func testLoadNormalizesLegacyTranscriptionLanguageLocale() throws {
+        let json = """
+        {
+          "language": " ja-JP "
+        }
+        """.data(using: .utf8)!
+        try json.write(to: settingsURL)
+
+        XCTAssertEqual(settingsManager.load().language, "ja")
     }
 
     func testSaveAndLoadUserFacingSettings() {

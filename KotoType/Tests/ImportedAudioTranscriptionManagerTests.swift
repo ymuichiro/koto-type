@@ -47,6 +47,24 @@ final class ImportedAudioTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(mock.stopCallCount, 1)
     }
 
+    func testTranscribeForwardsNormalizedSelectedLanguage() {
+        let mock = MockPythonProcessManager()
+        let manager = ImportedAudioTranscriptionManager(processManager: mock)
+        manager.configure(scriptPath: "/tmp/whisper_server.py")
+        let completionExpectation = expectation(description: "transcription completion")
+
+        manager.transcribe(
+            fileURL: URL(fileURLWithPath: "/tmp/audio.wav"),
+            settings: AppSettings(language: "ja-JP")
+        ) { _ in
+            completionExpectation.fulfill()
+        }
+
+        XCTAssertEqual(mock.lastLanguage, "ja")
+        mock.emitOutput("こんにちは")
+        wait(for: [completionExpectation], timeout: 1.0)
+    }
+
     func testBackendStatusControlMessageDoesNotCompleteUntilTranscriptArrives() {
         let mock = MockPythonProcessManager()
         let manager = ImportedAudioTranscriptionManager(processManager: mock)
