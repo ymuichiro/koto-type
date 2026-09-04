@@ -170,6 +170,22 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertNil(PythonProcessManager.parseBackendStatus(from: "hello world"))
     }
 
+    func testParseBackendProcessGroupIDAcceptsOnlyValidatedHandshake() {
+        let prefix = PythonProcessManager.controlMessagePrefix
+        XCTAssertEqual(
+            PythonProcessManager.parseBackendProcessGroupID(
+                from: prefix + "{\"type\":\"backend_process_group_ready\",\"process_id\":12,\"process_group_id\":34}"
+            ),
+            34
+        )
+        XCTAssertNil(
+            PythonProcessManager.parseBackendProcessGroupID(
+                from: prefix + "{\"type\":\"backend_process_group_ready\",\"process_id\":0,\"process_group_id\":34}"
+            )
+        )
+        XCTAssertNil(PythonProcessManager.parseBackendProcessGroupID(from: "transcript"))
+    }
+
     func testParseBackendPreparationProgressDecodesControlMessage() {
         let output =
             PythonProcessManager.controlMessagePrefix

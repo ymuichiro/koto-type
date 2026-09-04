@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import wave
 from contextlib import redirect_stdout
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from python import whisper_server
 
@@ -100,6 +100,40 @@ class TranscriptionLanguageNormalizationTests(unittest.TestCase):
         )
         self.assertIsNone(
             whisper_server.select_output_language("transcribe", "en", "unknown")
+        )
+
+
+class ProcessGroupTests(unittest.TestCase):
+    def test_establish_backend_process_group_prefers_new_session(self):
+        log = Mock()
+        with (
+            patch.object(whisper_server.os, "setsid") as setsid,
+            patch.object(whisper_server.os, "setpgid") as setpgid,
+        ):
+            mode = whisper_server.establish_backend_process_group(log)
+
+        self.assertEqual(mode, "setsid")
+        setsid.assert_called_once_with()
+        setpgid.assert_not_called()
+
+    def test_process_group_handshake_uses_current_process_identifiers(self):
+        with (
+            patch.object(whisper_server.os, "getpid", return_value=12),
+            patch.object(whisper_server.os, "getpgrp", return_value=34),
+            patch("sys.stdout", new=io.StringIO()) as output,
+        ):
+            whisper_server.emit_backend_process_group_ready()
+
+        payload = json.loads(
+            output.getvalue().split(whisper_server.CONTROL_MESSAGE_PREFIX, 1)[1]
+        )
+        self.assertEqual(
+            payload,
+            {
+                "type": "backend_process_group_ready",
+                "process_id": 12,
+                "process_group_id": 34,
+            },
         )
 
 

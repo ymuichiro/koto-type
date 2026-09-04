@@ -9,6 +9,7 @@ import platform
 import re
 import signal
 import shutil
+import tempfile
 import time
 import sys
 import threading
@@ -193,7 +194,79 @@ def pid_exists(pid):
     return True
 
 
-def start_parent_watchdog(parent_pid, log, cleanup, interval_seconds=1.0):
+def establish_backend_process_group(log):
+    """Isolate backend descendants so the app can stop them after root exit."""
+    try:
+        os.setsid()
+        return "setsid"
+    except OSError as error:
+        try:
+            os.setpgid(0, 0)
+            return "setpgid"
+        except OSError as fallback_error:
+            log(
+                "Backend process group setup unavailable "
+                f"(error_type={type(error).__name__}, fallback_error_type={type(fallback_error).__name__})"
+            )
+            return None
+
+
+def terminate_backend_process_group(group_id, log, grace_seconds=0.3):
+    """Stop backend descendants after the app that owns this group disappears."""
+    if group_id <= 1:
+        return False
+
+    try:
+        os.killpg(group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        log("Backend process group termination denied (error_type=PermissionError)")
+        return False
+    except OSError as error:
+        log(
+            "Backend process group termination failed "
+            f"(error_type={type(error).__name__})"
+        )
+        return False
+
+    time.sleep(grace_seconds)
+    try:
+        os.killpg(group_id, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        log(
+            "Backend process group force termination denied (error_type=PermissionError)"
+        )
+    except OSError as error:
+        log(
+            "Backend process group force termination failed "
+            f"(error_type={type(error).__name__})"
+        )
+    return True
+
+
+def emit_backend_process_group_ready():
+    payload = json.dumps(
+        {
+            "type": "backend_process_group_ready",
+            "process_id": os.getpid(),
+            "process_group_id": os.getpgrp(),
+        },
+        ensure_ascii=False,
+    )
+    print(f"{CONTROL_MESSAGE_PREFIX}{payload}", file=sys.stdout)
+    sys.stdout.flush()
+
+
+def start_parent_watchdog(
+    parent_pid,
+    log,
+    cleanup,
+    interval_seconds=1.0,
+    process_group_id=None,
+):
     if parent_pid <= 0:
         return None
 
@@ -207,7 +280,10 @@ def start_parent_watchdog(parent_pid, log, cleanup, interval_seconds=1.0):
             try:
                 cleanup()
             finally:
+                if process_group_id is not None:
+                    terminate_backend_process_group(process_group_id, log)
                 os._exit(0)
+            return
 
     thread = threading.Thread(
         target=_watch,
@@ -250,11 +326,39 @@ def load_server_state(path):
 
 
 def save_server_state(path, state):
-    import json
-
     state["updated_at"] = datetime.now().isoformat()
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False)
+    parent_directory = os.path.dirname(os.path.abspath(path))
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        dir=parent_directory,
+        prefix=f".{os.path.basename(path)}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as state_file:
+            file_descriptor = None
+            json.dump(state, state_file, ensure_ascii=False)
+            state_file.flush()
+            os.fsync(state_file.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, path)
+    except BaseException:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+    sync_directory(parent_directory)
+
+
+def sync_directory(path):
+    """Flush a directory entry after an atomic replacement."""
+    directory_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 @contextmanager
@@ -2305,6 +2409,11 @@ def generate_initial_prompt(
 def main():
     log_file, log = setup_logging()
     log("=== Server started ===")
+    process_group_mode = establish_backend_process_group(log)
+    process_group_id = os.getpgrp() if process_group_mode else None
+    if process_group_mode:
+        log(f"Backend process group established (mode={process_group_mode})")
+        emit_backend_process_group_ready()
 
     state_path = default_server_state_path()
     lock_path = default_server_state_lock_path()
@@ -2366,6 +2475,7 @@ def main():
         parent_pid=parent_pid,
         log=log,
         cleanup=cleanup_server_state,
+        process_group_id=process_group_id,
     )
     backend_manager = BackendManager(
         state_path=state_path,
