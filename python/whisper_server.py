@@ -9,6 +9,7 @@ import platform
 import re
 import signal
 import shutil
+import tempfile
 import time
 import sys
 import threading
@@ -920,8 +921,11 @@ def audio_preprocess(
 
     output_path = None
     try:
-        base, _ = os.path.splitext(input_path)
-        output_path = f"{base}_processed.wav"
+        temporary_fd, output_path = tempfile.mkstemp(
+            prefix="kototype-processed-",
+            suffix=".wav",
+        )
+        os.close(temporary_fd)
 
         log("Preprocessing audio")
         preserve_input_format = is_standard_pcm16_mono_wav(input_path)
@@ -1134,6 +1138,18 @@ def post_process_text(text, language="ja", auto_punctuation=True):
 
     if language == "ja":
 
+        protected_punctuation = []
+
+        def protect_ascii_punctuation(value):
+            protected_punctuation.append(value.group(0))
+            return f"\x00{len(protected_punctuation) - 1}\x00"
+
+        text = re.sub(
+            r"(?<=[A-Za-z0-9])[.,](?=[A-Za-z0-9])",
+            protect_ascii_punctuation,
+            text,
+        )
+
         def normalize_japanese_punctuation_sequence(value):
             value = re.sub(r"、+([。！？])", r"\1", value)
             value = re.sub(r"。{2,}", "。", value)
@@ -1147,6 +1163,8 @@ def post_process_text(text, language="ja", auto_punctuation=True):
         )
         text = re.sub(r"\s*([、。！？])\s*", r"\1", text)
         text = normalize_japanese_punctuation_sequence(text)
+        for index, punctuation in enumerate(protected_punctuation):
+            text = text.replace(f"\x00{index}\x00", punctuation)
 
         if text:
             if re.search(r"(?:でしょうか|ませんか|か)[。！？!?]$", text):

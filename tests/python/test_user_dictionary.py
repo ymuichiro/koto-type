@@ -294,6 +294,24 @@ class UserDictionaryTests(unittest.TestCase):
         self.assertNotIn("a. b@example. com", processed)
         self.assertTrue(processed.endswith("."))
 
+    def test_post_process_text_japanese_preserves_numbers_and_domains(self):
+        cases = {
+            "体温は37.5度です。": "体温は37.5度です。",
+            "金額は1,000円です。": "金額は1,000円です。",
+            "example.comを開きます。": "example.comを開きます。",
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(
+                    whisper_server.post_process_text(
+                        text,
+                        language="ja",
+                        auto_punctuation=True,
+                    ),
+                    expected,
+                )
+
     def test_main_guard_calls_freeze_support_before_main(self):
         source = (PROJECT_ROOT / "python" / "whisper_server.py").read_text(
             encoding="utf-8"

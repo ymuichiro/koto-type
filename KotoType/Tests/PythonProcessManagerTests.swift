@@ -94,39 +94,74 @@ final class PythonProcessManagerTests: XCTestCase {
     }
 
     func testExtractOutputLinesHandlesChunkBoundaries() {
-        var buffer = ""
+        var buffer = Data()
 
-        let lines1 = PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: "hel")
+        let lines1 = PythonProcessManager.extractOutputLines(
+            buffer: &buffer,
+            chunk: Data("hel".utf8)
+        )
         XCTAssertTrue(lines1.isEmpty)
-        XCTAssertEqual(buffer, "hel")
+        XCTAssertEqual(buffer, Data("hel".utf8))
 
-        let lines2 = PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: "lo\nwor")
+        let lines2 = PythonProcessManager.extractOutputLines(
+            buffer: &buffer,
+            chunk: Data("lo\nwor".utf8)
+        )
         XCTAssertEqual(lines2, ["hello"])
-        XCTAssertEqual(buffer, "wor")
+        XCTAssertEqual(buffer, Data("wor".utf8))
 
-        let lines3 = PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: "ld\n")
+        let lines3 = PythonProcessManager.extractOutputLines(
+            buffer: &buffer,
+            chunk: Data("ld\n".utf8)
+        )
         XCTAssertEqual(lines3, ["world"])
-        XCTAssertEqual(buffer, "")
+        XCTAssertTrue(buffer.isEmpty)
     }
 
     func testExtractOutputLinesHandlesMultipleAndEmptyLines() {
-        var buffer = ""
+        var buffer = Data()
 
-        let lines1 = PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: "one\ntwo\n\nthr")
+        let lines1 = PythonProcessManager.extractOutputLines(
+            buffer: &buffer,
+            chunk: Data("one\ntwo\n\nthr".utf8)
+        )
         XCTAssertEqual(lines1, ["one", "two", ""])
-        XCTAssertEqual(buffer, "thr")
+        XCTAssertEqual(buffer, Data("thr".utf8))
 
-        let lines2 = PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: "ee\r\n")
+        let lines2 = PythonProcessManager.extractOutputLines(
+            buffer: &buffer,
+            chunk: Data("ee\r\n".utf8)
+        )
         XCTAssertEqual(lines2, ["three"])
-        XCTAssertEqual(buffer, "")
+        XCTAssertTrue(buffer.isEmpty)
     }
 
     func testExtractOutputLinesPreservesWhitespaceInsideLine() {
-        var buffer = ""
+        var buffer = Data()
 
-        let lines = PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: "  padded text  \n")
+        let lines = PythonProcessManager.extractOutputLines(
+            buffer: &buffer,
+            chunk: Data("  padded text  \n".utf8)
+        )
         XCTAssertEqual(lines, ["  padded text  "])
-        XCTAssertEqual(buffer, "")
+        XCTAssertTrue(buffer.isEmpty)
+    }
+
+    func testExtractOutputLinesPreservesUTF8WhenReadSplitsCharacter() {
+        var buffer = Data()
+        let payload = Data("日本語の文字起こしです。\n".utf8)
+
+        let firstPart = Data(payload.prefix(2))
+        let secondPart = Data(payload.dropFirst(2))
+
+        XCTAssertTrue(
+            PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: firstPart).isEmpty
+        )
+        XCTAssertEqual(
+            PythonProcessManager.extractOutputLines(buffer: &buffer, chunk: secondPart),
+            ["日本語の文字起こしです。"]
+        )
+        XCTAssertTrue(buffer.isEmpty)
     }
 
     func testTerminationCallbackOnlyHandlesCurrentProcess() {
@@ -381,6 +416,58 @@ final class PythonProcessManagerTests: XCTestCase {
 
         XCTAssertEqual(sendFailures.value, 0)
         XCTAssertEqual(Set(received), expected)
+    }
+
+    func testActualPipePreservesLongJapaneseOutput() throws {
+        let fileManager = FileManager.default
+        let scriptURL = fileManager.temporaryDirectory
+            .appendingPathComponent("koto-type-output-" + UUID().uuidString + ".py")
+        let payload = String(repeating: "日本語の文字起こしです。", count: 2_000)
+        let script = """
+        print("日本語の文字起こしです。" * 2000, flush=True)
+        print("PIPE_DONE", flush=True)
+        """
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        defer { try? fileManager.removeItem(at: scriptURL) }
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let pythonPath = packageRoot
+            .deletingLastPathComponent()
+            .appendingPathComponent(".venv/bin/python")
+        guard fileManager.isExecutableFile(atPath: pythonPath.path) else {
+            throw XCTSkip("The repository virtualenv Python executable is unavailable")
+        }
+
+        let runtime = makeRuntime(
+            currentDirectoryPath: packageRoot.path,
+            bundlePath: packageRoot.appendingPathComponent(".build/debug/KotoType").path,
+            bundleResourcePath: nil,
+            existingPaths: [scriptURL.path, pythonPath.path],
+            uvPath: nil
+        )
+        let manager = PythonProcessManager(runtime: runtime)
+        let outputLock = NSLock()
+        var received: [String] = []
+        let done = expectation(description: "actual subprocess returns long Japanese output")
+        manager.outputReceived = { line in
+            outputLock.lock()
+            received.append(line)
+            outputLock.unlock()
+            if line == "PIPE_DONE" {
+                done.fulfill()
+            }
+        }
+
+        manager.startPython(scriptPath: scriptURL.path)
+        defer { manager.stop() }
+        wait(for: [done], timeout: 10)
+
+        outputLock.lock()
+        let transcript = received.first
+        outputLock.unlock()
+        XCTAssertEqual(transcript, payload)
     }
 
     private func makeRuntime(

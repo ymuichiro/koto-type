@@ -50,7 +50,8 @@ class AudioPreprocessTests(unittest.TestCase):
                 ffmpeg_module=fake_ffmpeg,
             )
 
-            self.assertTrue(output_path.endswith("_processed.wav"))
+            self.assertTrue(output_path.endswith(".wav"))
+            self.assertNotEqual(output_path, str(input_path))
             self.assertEqual(fake_ffmpeg.run_call_count, 1)
             self.assertEqual(
                 fake_ffmpeg.output_history[0],
@@ -76,7 +77,8 @@ class AudioPreprocessTests(unittest.TestCase):
                 ffmpeg_module=fake_ffmpeg,
             )
 
-            self.assertTrue(output_path.endswith("_processed.wav"))
+            self.assertTrue(output_path.endswith(".wav"))
+            self.assertNotEqual(output_path, str(input_path))
             self.assertEqual(fake_ffmpeg.run_call_count, 2)
             self.assertIn("afftdn", fake_ffmpeg.filter_history[0])
             self.assertNotIn("afftdn", fake_ffmpeg.filter_history[1])
@@ -132,7 +134,37 @@ class AudioPreprocessTests(unittest.TestCase):
             )
 
             self.assertEqual(output_path, str(input_path))
-            self.assertFalse((Path(temp_dir) / "input_processed.wav").exists())
+            self.assertTrue(input_path.exists())
+            self.assertEqual(list(Path(temp_dir).glob("*.wav")), [input_path])
+
+    def test_audio_preprocess_does_not_overwrite_or_cleanup_sibling_file(self):
+        fake_ffmpeg = FakeFFmpegModule(fail_on_denoise=False)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "meeting.wav"
+            sibling_path = Path(temp_dir) / "meeting_processed.wav"
+            input_path.write_bytes(b"input")
+            sibling_path.write_bytes(b"user-preserved")
+
+            output_path = whisper_server.audio_preprocess(
+                str(input_path),
+                lambda _: None,
+                ffmpeg_module=fake_ffmpeg,
+            )
+            output_bytes = Path(output_path).read_bytes()
+
+            self.assertNotEqual(Path(output_path).parent, input_path.parent)
+            self.assertEqual(sibling_path.read_bytes(), b"user-preserved")
+
+            whisper_server.cleanup_transcription_audio_path(
+                output_path,
+                str(input_path),
+                lambda _: None,
+            )
+
+            self.assertFalse(Path(output_path).exists())
+            self.assertEqual(sibling_path.read_bytes(), b"user-preserved")
+            self.assertEqual(output_bytes, b"processed")
 
     def test_build_vad_parameters_strict_mode_default(self):
         original_env = os.environ.get("KOTOTYPE_VAD_STRICT")
