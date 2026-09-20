@@ -84,6 +84,40 @@ class ConfidenceGateTests(unittest.TestCase):
         self.assertFalse(decision.should_suppress)
 
 
+class TranslationOutputValidationTests(unittest.TestCase):
+    def test_rejects_empty_translation_output(self):
+        self.assertEqual(
+            whisper_server.translation_output_rejection_reason("  ", "en"),
+            "empty_output",
+        )
+
+    def test_rejects_non_english_translation_target(self):
+        self.assertEqual(
+            whisper_server.translation_output_rejection_reason(
+                "Hallo, die Sitzung beginnt morgen.",
+                "de",
+            ),
+            "unsupported_target_language",
+        )
+
+    def test_rejects_source_language_text_for_english_translation(self):
+        self.assertEqual(
+            whisper_server.translation_output_rejection_reason(
+                "明日の会議は午前10時に始まります。",
+                "en",
+            ),
+            "untranslated_or_unsupported_output",
+        )
+
+    def test_accepts_ascii_english_translation(self):
+        self.assertIsNone(
+            whisper_server.translation_output_rejection_reason(
+                "The meeting starts tomorrow at 10 AM.",
+                "en",
+            )
+        )
+
+
 class TranscriptionLanguageNormalizationTests(unittest.TestCase):
     def test_normalizes_locale_and_unknown_language_values(self):
         self.assertEqual(

@@ -257,7 +257,7 @@ struct SettingsView: View {
                 TextField("en", text: $draft.translationTargetLanguage)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 180)
-                Text("Examples: en, ja, zh, pt-br. Up to 10 characters using lowercase letters, numbers, and hyphens.")
+                Text("The local Whisper model currently supports English translation only. Other target languages are rejected until a dedicated translation model is available.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

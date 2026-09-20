@@ -1273,6 +1273,29 @@ def select_output_language(mode, translation_target_language, detected_language)
     return normalize_detected_transcription_language(detected_language)
 
 
+def translation_output_rejection_reason(text, translation_target_language):
+    """Return why a translation result is unsafe to return, if applicable.
+
+    The bundled Whisper model only has a reliable translation contract for
+    English.  Until a dedicated multilingual translation model is integrated,
+    reject unsupported targets and non-ASCII output for English translation.
+    This deliberately favors an empty result over returning an untranslated
+    source transcript as if it were a translation.
+    """
+    normalized_text = str(text or "").strip()
+    if not normalized_text:
+        return "empty_output"
+
+    normalized_target = normalize_translation_target_language(
+        translation_target_language
+    )
+    if normalized_target != DEFAULT_TRANSLATION_TARGET_LANGUAGE:
+        return "unsupported_target_language"
+    if not normalized_text.isascii():
+        return "untranslated_or_unsupported_output"
+    return None
+
+
 @dataclass(frozen=True)
 class TranscriptionRequest:
     audio_path: str
@@ -2578,6 +2601,19 @@ def main():
                         f"the result ({gate_decision.reason})"
                     )
                     transcription = ""
+
+                if normalize_request_mode(request.mode) == "translate":
+                    rejection_reason = translation_output_rejection_reason(
+                        transcription,
+                        request.translation_target_language,
+                    )
+                    if rejection_reason is not None:
+                        log(
+                            "Suppressing translation output because the local "
+                            "Whisper translation contract rejected the result "
+                            f"(reason={rejection_reason})"
+                        )
+                        transcription = ""
 
                 transcription = post_process_text(
                     transcription,
