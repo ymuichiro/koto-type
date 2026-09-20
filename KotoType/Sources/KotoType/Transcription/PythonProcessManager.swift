@@ -24,7 +24,7 @@ final class PythonProcessManager: @unchecked Sendable {
     private var outputPipe: Pipe?
     private var errorPipe: Pipe?
     private var inputPipe: Pipe?
-    private var stdoutBuffer: String = ""
+    private var stdoutBuffer = Data()
     private let stateLock = NSLock()
     private let ioLock = NSLock()
     private let inputWriteLock = NSLock()
@@ -89,7 +89,7 @@ final class PythonProcessManager: @unchecked Sendable {
         let newInputPipe = Pipe()
 
         ioLock.lock()
-        stdoutBuffer = ""
+        stdoutBuffer = Data()
         ioLock.unlock()
 
         inputWriteLock.lock()
@@ -147,9 +147,9 @@ final class PythonProcessManager: @unchecked Sendable {
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             guard let self = self else { return }
             let data = handle.availableData
-            if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
+            if !data.isEmpty {
                 self.ioLock.lock()
-                let lines = Self.extractOutputLines(buffer: &self.stdoutBuffer, chunk: output)
+                let lines = Self.extractOutputLines(buffer: &self.stdoutBuffer, chunk: data)
                 self.ioLock.unlock()
 
                 for line in lines {
@@ -330,7 +330,7 @@ final class PythonProcessManager: @unchecked Sendable {
             processToStop?.terminate()
         }
         ioLock.lock()
-        stdoutBuffer = ""
+        stdoutBuffer = Data()
         ioLock.unlock()
     }
 
@@ -382,23 +382,26 @@ final class PythonProcessManager: @unchecked Sendable {
         return nil
     }
 
-    static func extractOutputLines(buffer: inout String, chunk: String) -> [String] {
+    static func extractOutputLines(buffer: inout Data, chunk: Data) -> [String] {
         guard !chunk.isEmpty else { return [] }
         buffer.append(chunk)
         var lines: [String] = []
 
-        while let newlineIndex = buffer.firstIndex(where: { $0.isNewline }) {
-            let line = String(buffer[..<newlineIndex])
-            var consumeEnd = buffer.index(after: newlineIndex)
-
-            if buffer[newlineIndex] == "\r",
-               consumeEnd < buffer.endIndex,
-               buffer[consumeEnd] == "\n" {
-                consumeEnd = buffer.index(after: consumeEnd)
+        while let newlineIndex = buffer.firstIndex(of: 0x0A) {
+            var lineEnd = newlineIndex
+            if lineEnd > buffer.startIndex,
+               buffer[buffer.index(before: lineEnd)] == 0x0D {
+                lineEnd = buffer.index(before: lineEnd)
             }
 
-            lines.append(line)
-            buffer.removeSubrange(buffer.startIndex..<consumeEnd)
+            let lineData = buffer.subdata(in: buffer.startIndex..<lineEnd)
+            if let line = String(data: lineData, encoding: .utf8) {
+                lines.append(line)
+            }
+
+            buffer.removeSubrange(
+                buffer.startIndex..<buffer.index(after: newlineIndex)
+            )
         }
 
         return lines
