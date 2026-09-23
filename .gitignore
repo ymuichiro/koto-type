@@ -195,6 +195,8 @@ features/*/tests/
 test_*.py
 !tests/python/test_audio_preprocess.py
 !tests/python/test_backend_configuration.py
+!tests/python/test_transcription_response.py
+!tests/python/test_smoke_transcription_protocol.py
 !tests/python/test_noise_strategy_eval.py
 !tests/python/test_user_dictionary.py
 !tests/python/test_logging_privacy.py

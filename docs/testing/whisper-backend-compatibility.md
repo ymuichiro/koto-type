@@ -1,6 +1,10 @@
 # Whisper Backend Compatibility
 
-This note records runtime compatibility testing between the current CPU path and the MLX path before any app integration work.
+This historical note records runtime compatibility testing from 2026-04-23, before app integration. It is not a statement of current product capability.
+
+## Evidence correction (2026-09-22)
+
+The referenced `assets/audio/test_speech_ja.wav` contains a three-second 440 Hz tone, not Japanese speech. Its English language detection is **not evidence of misclassified Japanese**. Parameter acceptance, empty translation output, or prompt-generated words on this input do not establish transcription or translation quality. The observations below are retained as historical API compatibility results only; speech-quality decisions require licensed real-speech evaluation tracked in Issue #131.
 
 ## Scope
 
@@ -14,7 +18,7 @@ This note records runtime compatibility testing between the current CPU path and
 .venv/bin/python scripts/check_whisper_backend_compatibility.py
 ```
 
-## Latest local run
+## Historical local run
 
 - Date: 2026-04-23
 - Host: Apple M4 Pro, 24 GB RAM, macOS 26.3.1
@@ -57,7 +61,7 @@ This note records runtime compatibility testing between the current CPU path and
 ### Shared with caveats
 
 - `language=None`
-  Both backends accepted it, but the sample auto-detected as English. This is a quality caveat, not a backend mismatch.
+  Both backends accepted it, but the tone was labeled English. There is no spoken language in this sample to classify correctly.
 - `best_of`
   The runtime accepted it on MLX, but MLX removes `best_of` when `temperature == 0.0`. That means it is not a stable cross-backend control for deterministic decoding.
 - `task="translate"`
@@ -119,5 +123,5 @@ These should move out of the shared request contract and into backend presets or
   The current CPU path uses built-in VAD parameters. MLX does not accept these options, so silence handling cannot be treated as a shared backend toggle.
 - Medium: semantic drift in `best_of`
   The parameter is accepted by both runtimes, but not with identical behavior in deterministic decoding.
-- Medium: auto language detection quality
-  Runtime compatibility exists, but the short sample misdetected language on both backends. Presets should not rely on auto-detect quality without broader evaluation.
+- Unmeasured: auto language detection quality
+  Runtime compatibility exists, but the tone cannot measure speech-language accuracy. Presets should not rely on auto-detect quality without broader real-speech evaluation.

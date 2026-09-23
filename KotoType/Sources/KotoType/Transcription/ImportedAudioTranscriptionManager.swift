@@ -6,6 +6,7 @@ enum ImportedAudioTranscriptionError: Error, Equatable {
     case scriptPathNotConfigured
     case sendFailed
     case processTerminated(status: Int32)
+    case backendError(String)
 }
 
 protocol PythonProcessManaging: AnyObject {
@@ -21,7 +22,8 @@ protocol PythonProcessManaging: AnyObject {
         gpuAccelerationEnabled: Bool,
         mode: RecordingRequestMode,
         translationTargetLanguage: String,
-        screenshotContext: String?
+        screenshotContext: String?,
+        requestID: String
     ) -> Bool
     func sendBackendProbe(gpuAccelerationEnabled: Bool, preloadModel: Bool) -> Bool
     func isRunning() -> Bool
@@ -36,14 +38,12 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
 
     private var scriptPath: String = ""
     private var pendingCompletion: ((Result<String, ImportedAudioTranscriptionError>) -> Void)?
+    private var pendingRequestID: String?
 
     init(processManager: any PythonProcessManaging = PythonProcessManager()) {
         self.processManager = processManager
         processManager.outputReceived = { [weak self] output in
             self?.handleOutput(output)
-        }
-        processManager.processTerminated = { [weak self] status in
-            self?.handleTermination(status: status)
         }
     }
 
@@ -57,6 +57,7 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
         lock.lock()
         let completion = pendingCompletion
         pendingCompletion = nil
+        pendingRequestID = nil
         lock.unlock()
 
         completion?(.failure(.processUnavailable))
@@ -72,11 +73,17 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
         }
 
         let currentScriptPath = scriptPath
+        let requestID = UUID().uuidString
+        pendingRequestID = requestID
         pendingCompletion = completion
         lock.unlock()
 
+        processManager.processTerminated = { [weak self] status in
+            self?.finish(with: .failure(.processTerminated(status: status)), requestID: requestID)
+        }
+
         guard !currentScriptPath.isEmpty else {
-            finish(with: .failure(.scriptPathNotConfigured))
+            finish(with: .failure(.scriptPathNotConfigured), requestID: requestID)
             return
         }
 
@@ -85,7 +92,7 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
         }
 
         if !processManager.isRunning() {
-            finish(with: .failure(.processUnavailable))
+            finish(with: .failure(.processUnavailable), requestID: requestID)
             return
         }
 
@@ -97,11 +104,12 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
             gpuAccelerationEnabled: settings.gpuAccelerationEnabled,
             mode: .transcribe,
             translationTargetLanguage: AppSettings.defaultTranslationTargetLanguage,
-            screenshotContext: nil
+            screenshotContext: nil,
+            requestID: requestID
         )
 
         if !succeeded {
-            finish(with: .failure(.sendFailed))
+            finish(with: .failure(.sendFailed), requestID: requestID)
         }
     }
 
@@ -110,17 +118,21 @@ final class ImportedAudioTranscriptionManager: @unchecked Sendable {
             TranscriptionBackendStatusStore.publishFromAnyThread(status)
             return
         }
-        finish(with: .success(output))
+        guard let response = TranscriptionResponse.parse(output) else { return }
+        let result: Result<String, ImportedAudioTranscriptionError> = response.text.map { .success($0) }
+            ?? .failure(.backendError(response.error!))
+        finish(with: result, requestID: response.request_id)
     }
 
-    private func handleTermination(status: Int32) {
-        finish(with: .failure(.processTerminated(status: status)))
-    }
-
-    private func finish(with result: Result<String, ImportedAudioTranscriptionError>) {
+    private func finish(with result: Result<String, ImportedAudioTranscriptionError>, requestID: String) {
         lock.lock()
+        if pendingRequestID != requestID {
+            lock.unlock()
+            return
+        }
         let completion = pendingCompletion
         pendingCompletion = nil
+        pendingRequestID = nil
         lock.unlock()
 
         processManager.stop()

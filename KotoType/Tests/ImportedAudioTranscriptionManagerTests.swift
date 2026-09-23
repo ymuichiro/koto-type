@@ -3,6 +3,45 @@ import Foundation
 import XCTest
 
 final class ImportedAudioTranscriptionManagerTests: XCTestCase {
+    func testPreviousProcessTerminationCannotFailNextImport() {
+        let mock = MockPythonProcessManager()
+        let manager = ImportedAudioTranscriptionManager(processManager: mock)
+        manager.configure(scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        let first = expectation(description: "first import")
+        manager.transcribe(fileURL: URL(fileURLWithPath: "/tmp/first.wav"), settings: AppSettings()) { _ in first.fulfill() }
+        let lateTermination = mock.processTerminated
+        mock.emitOutput("first")
+        wait(for: [first], timeout: 1)
+
+        let second = expectation(description: "second import remains successful")
+        manager.transcribe(fileURL: URL(fileURLWithPath: "/tmp/second.wav"), settings: AppSettings()) { result in
+            XCTAssertEqual(result, .success("second"))
+            second.fulfill()
+        }
+        lateTermination?(1)
+        mock.emitOutput("second")
+        wait(for: [second], timeout: 1)
+    }
+
+    func testUncorrelatedOutputMustNotCompleteImportedAudio() {
+        let mock = MockPythonProcessManager()
+        let manager = ImportedAudioTranscriptionManager(processManager: mock)
+        let completion = expectation(description: "legacy line cannot complete an import")
+        completion.isInverted = true
+        manager.configure(scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        manager.transcribe(
+            fileURL: URL(fileURLWithPath: "/tmp/current-import.wav"),
+            settings: AppSettings()
+        ) { result in
+            if case .success = result { completion.fulfill() }
+        }
+
+        mock.outputReceived?("previous request text")
+        wait(for: [completion], timeout: 0.1)
+    }
+
     func testDoesNotStartProcessUntilTranscribeIsCalled() {
         let mock = MockPythonProcessManager()
         let manager = ImportedAudioTranscriptionManager(processManager: mock)
@@ -164,6 +203,7 @@ final class ImportedAudioTranscriptionManagerTests: XCTestCase {
 }
 
 private final class MockPythonProcessManager: PythonProcessManaging {
+    private var requestID = ""
     var outputReceived: ((String) -> Void)?
     var processTerminated: ((Int32) -> Void)?
 
@@ -197,8 +237,10 @@ private final class MockPythonProcessManager: PythonProcessManaging {
         gpuAccelerationEnabled: Bool,
         mode: RecordingRequestMode,
         translationTargetLanguage: String,
-        screenshotContext: String?
+        screenshotContext: String?,
+        requestID: String
     ) -> Bool {
+        self.requestID = requestID
         sendInputCallCount += 1
         lastInputText = text
         lastLanguage = language
@@ -228,7 +270,11 @@ private final class MockPythonProcessManager: PythonProcessManaging {
     }
 
     func emitOutput(_ output: String) {
-        outputReceived?(output)
+        if output.hasPrefix(PythonProcessManager.controlMessagePrefix) {
+            outputReceived?(output)
+        } else {
+            outputReceived?(transcriptionTestResponse(requestID: requestID, text: output))
+        }
     }
 
     func emitTermination(status: Int32) {

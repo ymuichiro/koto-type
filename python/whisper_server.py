@@ -114,12 +114,13 @@ class MlxWhisperModule(Protocol):
 
 
 def default_dictionary_path():
-    return os.path.expanduser(
-        "~/Library/Application Support/koto-type/user_dictionary.json"
-    )
+    return os.path.join(default_application_support_directory(), "user_dictionary.json")
 
 
 def default_application_support_directory():
+    configured = os.environ.get("KOTOTYPE_APPLICATION_SUPPORT_DIR", "").strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
     return os.path.expanduser("~/Library/Application Support/koto-type")
 
 
@@ -1137,7 +1138,6 @@ def post_process_text(text, language="ja", auto_punctuation=True):
         return text
 
     if language == "ja":
-
         protected_punctuation = []
 
         def protect_ascii_punctuation(value):
@@ -1303,6 +1303,7 @@ class TranscriptionRequest:
     auto_punctuation: bool
     quality_preset: str
     gpu_acceleration_enabled: bool
+    request_id: str = ""
     screenshot_context: str | None = None
     mode: str = DEFAULT_REQUEST_MODE
     translation_target_language: str = DEFAULT_TRANSLATION_TARGET_LANGUAGE
@@ -1515,6 +1516,29 @@ def emit_managed_model(model, request_id):
     sys.stdout.flush()
 
 
+def normalize_transcription_request_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,64}", value):
+        raise ValueError("A valid transcription request_id is required")
+    return value
+
+
+def emit_transcription_result(request_id, *, text=None, error=None):
+    normalize_transcription_request_id(request_id)
+    if (text is None) == (error is None):
+        raise ValueError("Exactly one of text or error is required")
+    payload = {"type": "transcription_result", "request_id": request_id}
+    payload["error" if error is not None else "text"] = (
+        error if error is not None else text
+    )
+    print(CONTROL_MESSAGE_PREFIX + json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+class InvalidTranscriptionRequest(ValueError):
+    def __init__(self, request_id):
+        super().__init__("Unsupported transcription request")
+        self.request_id = request_id
+
+
 def parse_request_line(raw_line):
     stripped = raw_line.strip()
     if not stripped:
@@ -1555,6 +1579,15 @@ def parse_request_line(raw_line):
     if request_type != "transcription_request":
         raise ValueError(f"Unsupported request type: {request_type}")
 
+    request_id = normalize_transcription_request_id(payload.get("request_id"))
+    # Reject unknown operations before touching audio or loading a model.
+    # Never reinterpret a caller's unsupported operation as transcription.
+    raw_mode = payload.get("mode", DEFAULT_REQUEST_MODE)
+    if not isinstance(raw_mode, str) or raw_mode.strip().lower() not in {
+        DEFAULT_REQUEST_MODE,
+        "translate",
+    }:
+        raise InvalidTranscriptionRequest(request_id)
     language = normalize_transcription_language(payload.get("language"))
     actual_language = None if language == "auto" else language
     screenshot_context = payload.get("screenshot_context")
@@ -1568,6 +1601,7 @@ def parse_request_line(raw_line):
     return {
         "kind": "transcription",
         "request": TranscriptionRequest(
+            request_id=request_id,
             audio_path=str(payload.get("audio_path", "")),
             language=actual_language,
             auto_punctuation=parse_bool(payload.get("auto_punctuation"), default=True),
@@ -2424,6 +2458,7 @@ def main():
     sys.stdout.flush()
 
     while True:
+        request_id = None
         try:
             line = sys.stdin.readline()
             if not line:
@@ -2476,6 +2511,7 @@ def main():
                 continue
 
             request = request_payload["request"]
+            request_id = request.request_id
             log(
                 f"Received: audio_path_len={len(request.audio_path)}, language={request.language or 'auto'}, "
                 f"mode={request.mode}, translation_target_language={request.translation_target_language}, "
@@ -2485,12 +2521,12 @@ def main():
 
             if not request.audio_path:
                 log("Empty audio path, skipping")
+                emit_transcription_result(request_id, error="invalid_audio")
                 continue
 
             if not os.path.exists(request.audio_path):
                 log("Error: input audio file not found")
-                print("", file=sys.stdout)
-                sys.stdout.flush()
+                emit_transcription_result(request_id, error="invalid_audio")
                 continue
 
             log(f"File exists, size: {os.path.getsize(request.audio_path)} bytes")
@@ -2533,8 +2569,10 @@ def main():
                         "for a reliable result"
                     )
                     emit_backend_status(backend_status)
-                    print("", file=sys.stdout)
-                    sys.stdout.flush()
+                    cleanup_transcription_audio_path(
+                        transcription_audio_path, request.audio_path, log
+                    )
+                    emit_transcription_result(request_id, error="insufficient_audio")
                     continue
             except Exception as activity_error:
                 log(
@@ -2600,7 +2638,11 @@ def main():
                         "Suppressing transcription because confidence gate rejected "
                         f"the result ({gate_decision.reason})"
                     )
-                    transcription = ""
+                    emit_backend_status(backend_status)
+                    emit_transcription_result(
+                        request_id, error="unreliable_transcription"
+                    )
+                    continue
 
                 if normalize_request_mode(request.mode) == "translate":
                     rejection_reason = translation_output_rejection_reason(
@@ -2613,7 +2655,11 @@ def main():
                             "Whisper translation contract rejected the result "
                             f"(reason={rejection_reason})"
                         )
-                        transcription = ""
+                        emit_backend_status(backend_status)
+                        emit_transcription_result(
+                            request_id, error="unsupported_translation_output"
+                        )
+                        continue
 
                 transcription = post_process_text(
                     transcription,
@@ -2625,8 +2671,7 @@ def main():
                 )
 
                 emit_backend_status(backend_status)
-                print(transcription, file=sys.stdout)
-                sys.stdout.flush()
+                emit_transcription_result(request_id, text=transcription)
                 log("Output flushed")
             finally:
                 cleanup_transcription_audio_path(
@@ -2635,10 +2680,12 @@ def main():
                     log,
                 )
 
+        except InvalidTranscriptionRequest as e:
+            emit_transcription_result(e.request_id, error="invalid_request")
         except Exception as e:
             log(f"Error (error_type={type(e).__name__})")
-            print("", file=sys.stdout)
-            sys.stdout.flush()
+            if request_id is not None:
+                emit_transcription_result(request_id, error="backend_error")
 
 
 if __name__ == "__main__":

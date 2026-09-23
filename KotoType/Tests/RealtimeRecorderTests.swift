@@ -11,6 +11,21 @@ final class RealtimeRecorderTests: XCTestCase {
     }
 
     override func tearDown() {
+        if let recorder, recorder.currentInputDeviceName != nil {
+            let stopExpectation = expectation(description: "Test recorder stopped")
+            recorder.stopRecording(discardPendingAudio: true) { _ in
+                stopExpectation.fulfill()
+            }
+            wait(for: [stopExpectation], timeout: 4.0)
+        }
+        if let recordingURL = recorder?.recordingURL,
+           FileManager.default.fileExists(atPath: recordingURL.path) {
+            do {
+                try FileManager.default.removeItem(at: recordingURL)
+            } catch {
+                XCTFail("Failed to remove temporary test recording")
+            }
+        }
         recorder = nil
         super.tearDown()
     }

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 
@@ -27,16 +28,39 @@ def wait_for_line(process, timeout_seconds):
     return None
 
 
-def wait_for_transcript_line(process, timeout_seconds):
+def wait_for_transcript_line(process, timeout_seconds, request_id):
     deadline = time.time() + timeout_seconds
 
     while time.time() < deadline:
-        line = wait_for_line(process, timeout_seconds=max(1, int(deadline - time.time())))
+        line = wait_for_line(
+            process, timeout_seconds=max(1, int(deadline - time.time()))
+        )
         if line is None:
             return None
-        if line.startswith("__KOTOTYPE_CONTROL__:"):
+        prefix = "__KOTOTYPE_CONTROL__:"
+        if not line.startswith(prefix):
             continue
-        return line
+        try:
+            response = json.loads(line[len(prefix) :])
+        except json.JSONDecodeError:
+            continue
+        if (
+            not isinstance(response, dict)
+            or response.get("type") != "transcription_result"
+        ):
+            continue
+        if response.get("request_id") != request_id:
+            continue
+        if "error" in response:
+            raise RuntimeError(
+                "whisper_server returned a failed transcription response"
+            )
+        text = response.get("text")
+        if not isinstance(text, str):
+            raise RuntimeError(
+                "whisper_server returned an invalid transcription response"
+            )
+        return text
 
     return None
 
@@ -64,11 +88,14 @@ def read_server_log_tail(log_path, max_lines=80):
     return "\n".join(log_path.read_text(encoding="utf-8").splitlines()[-max_lines:])
 
 
-def resolve_smoke_audio_path(project_root):
+def resolve_smoke_audio_path():
     configured_path = os.environ.get("KOTOTYPE_SMOKE_AUDIO_PATH", "").strip()
     if configured_path:
         return Path(configured_path).expanduser().resolve()
-    return project_root / "assets" / "audio" / "test_speech_ja.wav"
+    # The former default test_speech_ja.wav is a sine wave, not speech.
+    # Require an explicitly selected speech fixture instead of treating
+    # non-speech hallucinations as a successful transcription smoke test.
+    return None
 
 
 def resolve_smoke_language():
@@ -77,7 +104,9 @@ def resolve_smoke_language():
 
 def parse_smoke_arguments(arguments):
     healthcheck_only = "--healthcheck" in arguments
-    positional_arguments = [argument for argument in arguments if argument != "--healthcheck"]
+    positional_arguments = [
+        argument for argument in arguments if argument != "--healthcheck"
+    ]
     if len(positional_arguments) > 1:
         raise ValueError("Only one server binary path may be provided")
     server_binary = (
@@ -93,23 +122,31 @@ def main():
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
-    server_binary = configured_server_binary or (project_root / "dist" / "whisper_server")
-    test_audio = resolve_smoke_audio_path(project_root)
+    server_binary = configured_server_binary or (
+        project_root / "dist" / "whisper_server"
+    )
+    test_audio = resolve_smoke_audio_path()
     smoke_language = resolve_smoke_language()
     real_home = Path.home()
 
     if not server_binary.exists():
         print(f"Server binary not found: {server_binary}", file=sys.stderr)
         return 2
+    if not healthcheck_only and test_audio is None:
+        print(
+            "Set KOTOTYPE_SMOKE_AUDIO_PATH to a verified speech fixture",
+            file=sys.stderr,
+        )
+        return 2
     if not healthcheck_only and not test_audio.exists():
         print(f"Test audio not found: {test_audio}", file=sys.stderr)
         return 2
 
-    with tempfile.TemporaryDirectory() as tmp_home:
-        log_dir = Path(tmp_home) / "Library" / "Application Support" / "koto-type"
+    with tempfile.TemporaryDirectory() as tmp_support:
+        log_dir = Path(tmp_support)
         log_dir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
-        env["HOME"] = tmp_home
+        env["KOTOTYPE_APPLICATION_SUPPORT_DIR"] = tmp_support
         env["HF_HOME"] = str(real_home / ".cache" / "huggingface")
         env["HUGGINGFACE_HUB_CACHE"] = str(real_home / ".cache" / "huggingface" / "hub")
         env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
@@ -148,22 +185,33 @@ def main():
                 print("Whisper server healthcheck passed")
                 return 0
 
-            request = json.dumps(
-                {
-                    "type": "transcription_request",
-                    "audio_path": str(test_audio),
-                    "language": smoke_language,
-                    "auto_punctuation": True,
-                    "quality_preset": "medium",
-                    "gpu_acceleration_enabled": False,
-                },
-                ensure_ascii=False,
-            ) + "\n"
+            request_id = str(uuid.uuid4())
+            request = (
+                json.dumps(
+                    {
+                        "type": "transcription_request",
+                        "request_id": request_id,
+                        "audio_path": str(test_audio),
+                        "language": smoke_language,
+                        "auto_punctuation": True,
+                        "quality_preset": "medium",
+                        "gpu_acceleration_enabled": False,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
             stdin.write(request)
             stdin.flush()
             stdin.close()
 
-            line = wait_for_transcript_line(process, timeout_seconds=180)
+            try:
+                line = wait_for_transcript_line(
+                    process, timeout_seconds=180, request_id=request_id
+                )
+            except RuntimeError as error:
+                print(str(error), file=sys.stderr)
+                return 1
             if line is None:
                 stderr = read_available_stderr(process)
                 print("No response from whisper_server", file=sys.stderr)

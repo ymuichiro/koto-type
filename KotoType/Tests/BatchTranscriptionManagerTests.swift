@@ -111,6 +111,16 @@ final class BatchTranscriptionManagerTests: XCTestCase {
         XCTAssertNil(result, "Finalize should return nil when no segments")
     }
 
+    func testFinalizeCannotReturnPartialSentence() {
+        // No file I/O is needed to exercise completion bookkeeping.
+        manager.addSegment(url: URL(fileURLWithPath: "/tmp/first.wav"), index: 0)
+        manager.addSegment(url: URL(fileURLWithPath: "/tmp/second.wav"), index: 1)
+        manager.completeSegment(index: 0, text: "承認")
+        XCTAssertNil(manager.finalize(), "A missing ending must not turn a negation into approval")
+        manager.completeSegment(index: 1, text: "しません")
+        XCTAssertEqual(manager.finalize(), "承認しません")
+    }
+
     func testOutOfOrderCompletion() {
         let file1 = createTestAudioFile(index: 0)
         let file2 = createTestAudioFile(index: 1)

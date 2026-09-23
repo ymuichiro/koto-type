@@ -141,7 +141,7 @@ class ParseRequestLineTests(unittest.TestCase):
     def test_parse_request_line_decodes_json_request(self):
         payload = whisper_server.parse_request_line(
             """
-            {"type":"transcription_request","audio_path":"/tmp/test.wav","language":"ja","auto_punctuation":false,"quality_preset":"high","gpu_acceleration_enabled":true,"screenshot_context":"menu"}
+            {"type":"transcription_request","request_id":"fixture-request","audio_path":"/tmp/test.wav","language":"ja","auto_punctuation":false,"quality_preset":"high","gpu_acceleration_enabled":true,"screenshot_context":"menu"}
             """
         )
 
@@ -158,42 +158,40 @@ class ParseRequestLineTests(unittest.TestCase):
 
     def test_parse_request_line_treats_auto_language_as_none(self):
         payload = whisper_server.parse_request_line(
-            '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":"auto","quality_preset":"medium","gpu_acceleration_enabled":false}'
+            '{"type":"transcription_request","request_id":"fixture-request","audio_path":"/tmp/test.wav","language":"auto","quality_preset":"medium","gpu_acceleration_enabled":false}'
         )
 
         self.assertIsNone(payload["request"].language)
 
     def test_parse_request_line_normalizes_locale_language_to_primary_code(self):
         payload = whisper_server.parse_request_line(
-            '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":" ja-JP ","quality_preset":"medium","gpu_acceleration_enabled":false}'
+            '{"type":"transcription_request","request_id":"fixture-request","audio_path":"/tmp/test.wav","language":" ja-JP ","quality_preset":"medium","gpu_acceleration_enabled":false}'
         )
 
         self.assertEqual(payload["request"].language, "ja")
 
     def test_parse_request_line_treats_unknown_language_as_auto(self):
         payload = whisper_server.parse_request_line(
-            '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":"xx","quality_preset":"medium","gpu_acceleration_enabled":false}'
+            '{"type":"transcription_request","request_id":"fixture-request","audio_path":"/tmp/test.wav","language":"xx","quality_preset":"medium","gpu_acceleration_enabled":false}'
         )
 
         self.assertIsNone(payload["request"].language)
 
     def test_parse_request_line_normalizes_translate_mode_and_target_language(self):
         payload = whisper_server.parse_request_line(
-            '{"type":"transcription_request","audio_path":"/tmp/test.wav","language":"ja","mode":" Translate ","translation_target_language":" PT-BR "}'
+            '{"type":"transcription_request","request_id":"fixture-request","audio_path":"/tmp/test.wav","language":"ja","mode":" Translate ","translation_target_language":" PT-BR "}'
         )
 
         request = payload["request"]
         self.assertEqual(request.mode, "translate")
         self.assertEqual(request.translation_target_language, "pt-br")
 
-    def test_parse_request_line_defaults_invalid_translate_fields(self):
-        payload = whisper_server.parse_request_line(
-            '{"type":"transcription_request","audio_path":"/tmp/test.wav","mode":"summarize","translation_target_language":"EN_US"}'
-        )
-
-        request = payload["request"]
-        self.assertEqual(request.mode, "transcribe")
-        self.assertEqual(request.translation_target_language, "en")
+    def test_parse_request_line_rejects_unknown_operation_with_identity(self):
+        with self.assertRaises(whisper_server.InvalidTranscriptionRequest) as caught:
+            whisper_server.parse_request_line(
+                '{"type":"transcription_request","request_id":"fixture-request","audio_path":"/tmp/test.wav","mode":"summarize","translation_target_language":"EN_US"}'
+            )
+        self.assertEqual(caught.exception.request_id, "fixture-request")
 
     def test_parse_request_line_decodes_backend_probe_request(self):
         payload = whisper_server.parse_request_line(
