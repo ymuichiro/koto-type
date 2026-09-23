@@ -1,127 +1,19 @@
-# Whisper Backend Compatibility
+# Historical Whisper Backend Compatibility
 
-This historical note records runtime compatibility testing from 2026-04-23, before app integration. It is not a statement of current product capability.
+This is an archival summary of a direct-library probe run on 2026-04-23, before app integration. Its 296-line runner and raw JSON output were removed under Issue #132: the runner had no Make, CI, test, or product callsites; it called the libraries directly rather than KotoType's request path; and it included `task="translate"`, which the product no longer offers.
 
-## Evidence correction (2026-09-22)
+## Evidence limits
 
-The referenced `assets/audio/test_speech_ja.wav` contains a three-second 440 Hz tone, not Japanese speech. Its English language detection is **not evidence of misclassified Japanese**. Parameter acceptance, empty translation output, or prompt-generated words on this input do not establish transcription or translation quality. The observations below are retained as historical API compatibility results only; speech-quality decisions require licensed real-speech evaluation tracked in Issue #131.
+The input was `assets/audio/test_speech_ja.wav`, a three-second 440 Hz tone, not Japanese speech. Language detection as English, empty translation output, or prompt-generated text on that input says nothing about Japanese recognition or translation quality. The raw output also contained transcript previews and machine-local paths, so only the summarized compatibility facts are retained here.
 
-## Scope
+## Historical observations
 
-- Existing backend: `faster-whisper large-v3-turbo` on CPU with `int8`
-- Candidate backend: `mlx-community/whisper-large-v3-turbo`
-- Test method: script-based runtime checks using the current server-style parameters as the baseline
-
-## Commands
-
-```bash
-.venv/bin/python scripts/check_whisper_backend_compatibility.py
-```
-
-## Historical local run
-
-- Date: 2026-04-23
-- Host: Apple M4 Pro, 24 GB RAM, macOS 26.3.1
-- Input audio: `assets/audio/test_speech_ja.wav`
-- Raw output: `artifacts/benchmarks/whisper_backend_compatibility.json`
-
-## Compatibility matrix
-
-| Setting or case | faster-whisper CPU | MLX | Notes |
+| Option | faster-whisper CPU | MLX | Limit |
 | --- | --- | --- | --- |
-| `language="ja"` | OK | OK | Shared |
-| `language=None` | OK | OK | Shared, but both backends detected `en` on this 3-second sample |
-| `task="transcribe"` | OK | OK | Shared |
-| `task="translate"` | OK | OK | Runtime-compatible, but this short sample returned empty text on both backends |
-| `temperature=0.0` | OK | OK | Shared |
-| `word_timestamps=True` | OK | OK | Shared |
-| `initial_prompt` | OK | OK | Shared |
-| `no_speech_threshold=0.6` | OK | OK | Shared |
-| `compression_ratio_threshold=2.4` | OK | OK | Shared |
-| `beam_size=1` | OK | Error | MLX raises `NotImplementedError: Beam search decoder is not yet implemented` |
-| `beam_size=5` | OK | Error | Same limitation |
-| `best_of=5`, `temperature=0.0` | OK | OK | Runtime-compatible, but MLX drops `best_of` in the deterministic path |
-| `best_of=5`, `temperature=0.2` | OK | OK | Runtime-compatible |
-| `vad_filter=True` | OK | Error | MLX raises `TypeError` for unsupported `vad_filter` |
-| `vad_parameters={...}` | OK | Error | Same limitation through the unsupported VAD path |
-| Current server defaults as a whole | OK | Error | Fails on MLX because the current request shape includes built-in VAD and beam search |
+| `language`, `task="transcribe"`, temperature, timestamps, prompt, no-speech and compression thresholds | Accepted | Accepted | API acceptance only |
+| `task="translate"` | Accepted | Accepted | Product feature retired; output was empty on this non-speech input |
+| `beam_size` | Accepted | Unsupported | MLX raised `NotImplementedError` |
+| `vad_filter` / `vad_parameters` | Accepted | Unsupported | MLX raised `TypeError` |
+| `best_of` with deterministic decoding | Accepted | Accepted but ignored | Not equivalent behavior |
 
-## Result buckets
-
-### Shared as-is
-
-- `language`
-- `task`
-- `temperature`
-- `word_timestamps`
-- `initial_prompt`
-- `no_speech_threshold`
-- `compression_ratio_threshold`
-
-### Shared with caveats
-
-- `language=None`
-  Both backends accepted it, but the tone was labeled English. There is no spoken language in this sample to classify correctly.
-- `best_of`
-  The runtime accepted it on MLX, but MLX removes `best_of` when `temperature == 0.0`. That means it is not a stable cross-backend control for deterministic decoding.
-- `task="translate"`
-  Accepted by both, but this test did not validate output quality.
-
-### Not shared
-
-- `beam_size`
-  MLX does not currently implement beam search.
-- `vad_filter`
-  MLX does not expose faster-whisper-style built-in VAD.
-- `vad_parameters`
-  Same as above. This cannot remain a raw pass-through option if MLX is supported.
-
-## Design direction
-
-- Keep a backend-agnostic request shape at the app boundary
-- Add a backend capability layer in Python that maps or strips unsupported parameters
-- Treat VAD and decode strategy as backend-specific capabilities rather than assuming full 1:1 parity
-- Introduce backend presets if preserving the current raw parameter list creates fragile branching logic
-
-## Proposed preset direction
-
-### Shared request fields
-
-These can stay in a common request model because both backends can execute them:
-
-- `language`
-- `task`
-- `temperature`
-- `word_timestamps`
-- `initial_prompt`
-- `no_speech_threshold`
-- `compression_ratio_threshold`
-
-### Backend-only fields
-
-These should move out of the shared request contract and into backend presets or capability-specific mapping:
-
-- `beam_size`
-- `best_of`
-- `vad_filter`
-- `vad_parameters`
-
-### Preset sketch
-
-- `cpu_default`
-  Keep the current behavior: `beam_size=5`, `best_of=5`, built-in VAD enabled with the current thresholds.
-- `mlx_default`
-  Use MLX-compatible greedy decoding, omit `beam_size`, and do not pass built-in VAD arguments.
-- `shared_safe`
-  Use only the shared request fields. This is the interoperability baseline and the simplest fallback preset for tests.
-
-## Risk assessment
-
-- High: decode-strategy mismatch
-  The current CPU path relies on beam search by default, while MLX currently does not support it. This is the main incompatibility and the strongest reason to introduce backend presets.
-- High: VAD mismatch
-  The current CPU path uses built-in VAD parameters. MLX does not accept these options, so silence handling cannot be treated as a shared backend toggle.
-- Medium: semantic drift in `best_of`
-  The parameter is accepted by both runtimes, but not with identical behavior in deterministic decoding.
-- Unmeasured: auto language detection quality
-  Runtime compatibility exists, but the tone cannot measure speech-language accuracy. Presets should not rely on auto-detect quality without broader real-speech evaluation.
+These results describe old library versions and direct calls only. They are not a current compatibility guarantee, product-path test, or quality result. Reintroduce an executable matrix only when a dependency change or a reproducible product-path failure requires it.
