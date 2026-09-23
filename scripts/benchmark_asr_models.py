@@ -6,6 +6,7 @@ import math
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 import wave
 from dataclasses import asdict, dataclass
@@ -13,8 +14,6 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SHORT_AUDIO = REPO_ROOT / "assets" / "audio" / "test_speech_ja.wav"
-DEFAULT_LONG_AUDIO = REPO_ROOT / "assets" / "audio" / "test_speech_ja_300s.wav"
 DEFAULT_OUTPUT = REPO_ROOT / "artifacts" / "benchmarks" / "asr_benchmark_results.json"
 
 
@@ -410,8 +409,8 @@ def main() -> None:
     )
     parser.add_argument("--model-label")
     parser.add_argument("--audio-path", type=Path)
-    parser.add_argument("--short-audio", type=Path, default=DEFAULT_SHORT_AUDIO)
-    parser.add_argument("--long-audio", type=Path, default=DEFAULT_LONG_AUDIO)
+    parser.add_argument("--short-audio", type=Path)
+    parser.add_argument("--long-audio", type=Path)
     parser.add_argument("--long-seconds", type=int, default=300)
     parser.add_argument("--warm-runs", type=int, default=3)
     parser.add_argument("--language", choices=["auto", "ja"], default="ja")
@@ -419,16 +418,28 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.mode == "benchmark":
-        long_audio = ensure_long_audio(
-            args.short_audio, args.long_audio, args.long_seconds
-        )
-        benchmark(
-            args.short_audio,
-            long_audio,
-            args.warm_runs,
-            args.output,
-            args.language,
-        )
+        if args.short_audio is None:
+            parser.error(
+                "--short-audio is required; the bundled 440 Hz tone is not speech"
+            )
+        if not args.short_audio.is_file():
+            parser.error(f"short audio file does not exist: {args.short_audio}")
+        if args.long_audio is not None and not args.long_audio.is_file():
+            parser.error(f"long audio file does not exist: {args.long_audio}")
+
+        with tempfile.TemporaryDirectory(prefix="kototype-asr-benchmark-") as temp_dir:
+            long_audio = args.long_audio or ensure_long_audio(
+                args.short_audio,
+                Path(temp_dir) / "long.wav",
+                args.long_seconds,
+            )
+            benchmark(
+                args.short_audio,
+                long_audio,
+                args.warm_runs,
+                args.output,
+                args.language,
+            )
         return
 
     if not args.model_label or not args.audio_path:

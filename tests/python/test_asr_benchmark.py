@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr
+from io import StringIO
 import json
 import unittest
 import wave
@@ -35,6 +37,64 @@ class BenchmarkLanguageOptionTests(unittest.TestCase):
                 if key != "language"
             },
         )
+
+
+class BenchmarkInputTests(unittest.TestCase):
+    def test_benchmark_requires_explicit_audio_before_starting(self):
+        stderr = StringIO()
+        with (
+            patch("sys.argv", ["benchmark_asr_models.py"]),
+            patch.object(benchmark_asr_models, "benchmark") as benchmark,
+            redirect_stderr(stderr),
+        ):
+            with self.assertRaises(SystemExit) as raised:
+                benchmark_asr_models.main()
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--short-audio is required", stderr.getvalue())
+        self.assertFalse(benchmark.called)
+
+    def test_generated_long_audio_uses_temporary_repeated_speech(self):
+        with TemporaryDirectory() as temp_dir:
+            short_audio = Path(temp_dir) / "speech.wav"
+            with wave.open(str(short_audio), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(16_000)
+                wav_file.writeframes(b"\x00\x00" * 16_000)
+
+            observed = []
+
+            def inspect_generated_audio(_short_audio, long_audio, *_args):
+                observed.append(
+                    (
+                        long_audio,
+                        benchmark_asr_models.audio_duration_seconds(long_audio),
+                    )
+                )
+
+            with (
+                patch(
+                    "sys.argv",
+                    [
+                        "benchmark_asr_models.py",
+                        "--short-audio",
+                        str(short_audio),
+                        "--long-seconds",
+                        "2",
+                    ],
+                ),
+                patch.object(
+                    benchmark_asr_models,
+                    "benchmark",
+                    side_effect=inspect_generated_audio,
+                ),
+            ):
+                benchmark_asr_models.main()
+
+            self.assertEqual(observed[0][1], 2)
+            long_audio = observed[0][0]
+            self.assertFalse(long_audio.exists())
 
 
 class BenchmarkArtifactPrivacyTests(unittest.TestCase):
