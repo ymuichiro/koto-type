@@ -16,6 +16,7 @@
 |履歴・音声回復|TranscriptionHistoryManager、録音ファイル保護|認識失敗時の再試行とデータ喪失防止|維持。コード削減の対象にしない|
 |GPU/CPU切替とフォールバック|BackendManager、TranscriptionBackendStatus|利用環境と推論失敗への回復|維持。品質や状態の分岐を検証し、不要な重複だけを削減|
 |常駐・ヘルスチェック・再試行|MultiProcessManager、PythonProcessManager、バックグラウンド待機設定|初動速度と復帰の責務がある一方、複数の寿命管理が複雑|責務整理対象。推論後idle復帰・切断・再録音の検証なしに単純削除しない|
+|旧Whisper API互換性matrix|`scripts/check_whisper_backend_compatibility.py`、11条件、直接ライブラリ呼び出し|CI/Make/テスト/製品から参照されず、3秒440Hz純音・廃止済み翻訳taskを含む歴史的なAPI調査|実行コードとraw JSONを削除。要約だけ保持し、依存変更で必要になった場合に製品経路テストとして再導入|
 |更新・署名|AppUpdater、release.yml、appcast.xml|安全な配布・更新に不可欠|維持|
 
 翻訳モデルの根拠: https://github.com/openai/whisper#command-line-usage
@@ -67,6 +68,8 @@
 - 統合版の実モデル確認: CPU/MLX各1プロセスに「旧翻訳要求→固定FLEURS音声の通常認識→存在しない音声」を連続送信。各request_idに対して順にinvalid_request・46文字の成功・invalid_audioが返り、空行や旧形式の出力はなかった。拒否後も認識が継続し、選択backendと元音声SHA-256の不変を確認。`/tmp/kototype-goals-XdWea0/verify_integrated_protocol_live.py`、`integrated-{cpu,mlx}-protocol-live.json`に記録。精度全体の合格や回復ダイアログの動作証拠ではない。
 - 2026-09-23の参照棚卸しで、`BackendPreparationService` は製品Sourcesに生成箇所がなく、初期セットアップは `AppDelegate → MultiProcessManager` のbackend probeを使うと確認。旧クラスは別の `PythonProcessManager`・`scriptPath`・completion lock・timeoutを持ち、その専用3テストも実行されない製品経路を検証していた。クラス90行と専用テスト140行を削除し、実際の `MultiProcessManager` probeテストへ進捗Storeの更新検証を移した。`BackendPreparationProgress` と `BackendPreparationProgressStore`、実workerのprobe/timeout/fallbackは維持。公開機能・設定・依存・有効な再試行箇所は不変で、孤立していた状態所有箇所を1つ削減。
 - この削除後、`cd KotoType && swift test --filter MultiProcessManagerTests` は29件成功、`cd KotoType && swift test` は286件成功、`git diff --check` 成功。配布アプリの起動・設定画面・録音E2Eは未確認。
+- 2026-09-23の開発ツール棚卸しで、旧互換性matrixは296行・11条件で、Whisperライブラリを製品のstdio/前処理/gate経路を通さず直接呼び出していた。tracked raw JSONは16KBで、非音声の純音入力に対する transcript preview とローカルパスを含む。Make/CI/テスト/製品の参照がないこと、翻訳条件が製品から削除済みであることを確認し、runnerとraw artifactを削除。歴史的なAPI制約だけは本資料に残した。製品機能・設定・依存は変更していない。
+- 削除前後で `tests/python` は各129件成功。削除後の全repo参照検索でrunner名・artifact名の実行参照は残らず、Python lint/type checksと `git diff --check` も合格。旧依存matrixを再実行していない。実モデル品質や現行ライブラリのMLX互換性を証明する変更ではない。
 - 次の必須作業は状態所有者・再試行責務の棚卸し、説明と配布物の整合、全受入条件の検証。応答プロトコル変更との依存関係をPRで明記する。
 
 移動・分割だけを削減量に数えない。最終差分で製品LOC、公開機能、保存設定、依存、状態の所有者、再試行箇所を再集計する。元の6大ファイル合計は7,818行だが、別ファイルへ移した分を成果に含めない。
