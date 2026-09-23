@@ -5,38 +5,20 @@ import XCTest
 final class SettingsManagerTests: XCTestCase {
     var settingsManager: SettingsManager!
     var settingsURL: URL!
-    var originalSettingsData: Data?
+    var testDirectory: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
 
         let fileManager = FileManager.default
-        let appSupportURL = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        let settingsDir = appSupportURL.appendingPathComponent("koto-type")
-        try fileManager.createDirectory(at: settingsDir, withIntermediateDirectories: true)
-        settingsURL = settingsDir.appendingPathComponent("settings.json")
-        if fileManager.fileExists(atPath: settingsURL.path) {
-            originalSettingsData = try Data(contentsOf: settingsURL)
-            try fileManager.removeItem(at: settingsURL)
-        } else {
-            originalSettingsData = nil
-        }
-
-        settingsManager = SettingsManager.shared
+        testDirectory = fileManager.temporaryDirectory.appendingPathComponent("kototype-settings-\(UUID().uuidString)")
+        settingsURL = testDirectory.appendingPathComponent("settings.json")
+        settingsManager = SettingsManager(settingsURL: settingsURL)
     }
 
     override func tearDownWithError() throws {
-        let fileManager = FileManager.default
-        if let settingsURL {
-            if fileManager.fileExists(atPath: settingsURL.path) {
-                try fileManager.removeItem(at: settingsURL)
-            }
-            if let originalSettingsData {
-                try originalSettingsData.write(to: settingsURL)
-            }
+        if let testDirectory {
+            try FileManager.default.removeItem(at: testDirectory)
         }
         try super.tearDownWithError()
     }
@@ -45,11 +27,6 @@ final class SettingsManagerTests: XCTestCase {
         let settings = settingsManager.load()
 
         XCTAssertEqual(settings.language, AppSettings.defaultTranscriptionLanguage)
-        XCTAssertEqual(settings.translationHotkeyConfig, .unset)
-        XCTAssertEqual(
-            settings.translationTargetLanguage,
-            AppSettings.defaultTranslationTargetLanguage
-        )
         XCTAssertTrue(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .high)
         XCTAssertTrue(settings.gpuAccelerationEnabled)
@@ -59,6 +36,37 @@ final class SettingsManagerTests: XCTestCase {
             settings.recordingCompletionTimeout,
             AppSettings.defaultRecordingCompletionTimeout
         )
+    }
+
+    func testTranslationRemovalRoundTripsFileWithoutTouchingOtherData() throws {
+        let kept = AppSettings(
+            hotkeyConfig: HotkeyConfiguration(useCommand: false, useOption: true, useControl: true, useShift: false, keyCode: 49),
+            language: "ja", autoPunctuation: false, transcriptionQualityPreset: .medium,
+            gpuAccelerationEnabled: false, keepBackendReadyInBackground: false,
+            launchAtLogin: true, recordingCompletionTimeout: 480
+        )
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(kept)) as? [String: Any])
+        legacy["translationHotkeyConfig"] = "malformed retired shortcut"
+        legacy["translationTargetLanguage"] = ["unexpected": "object"]
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        try legacyData.write(to: settingsURL)
+        let protectedFiles = ["history.json", "user_dictionary.json", "shortcuts.json", "recording.wav"]
+        let sentinel = Data("unrelated user data must be unchanged".utf8)
+        for name in protectedFiles {
+            try sentinel.write(to: testDirectory.appendingPathComponent(name))
+        }
+        let loaded = settingsManager.load()
+        XCTAssertEqual(loaded, kept)
+        XCTAssertEqual(try Data(contentsOf: settingsURL), legacyData, "Loading must not rewrite the file")
+        settingsManager.save(loaded)
+        let reopened = SettingsManager(settingsURL: settingsURL)
+        XCTAssertEqual(reopened.load(), kept)
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: settingsURL)) as? [String: Any])
+        XCTAssertNil(saved["translationHotkeyConfig"])
+        XCTAssertNil(saved["translationTargetLanguage"])
+        for name in protectedFiles {
+            XCTAssertEqual(try Data(contentsOf: testDirectory.appendingPathComponent(name)), sentinel)
+        }
     }
 
     func testCorruptSavedSettingsPreserveLegacyBackendReadiness() throws {
@@ -109,19 +117,7 @@ final class SettingsManagerTests: XCTestCase {
                 shiftSide: .either,
                 keyCode: 0x31
             ),
-            translationHotkeyConfig: HotkeyConfiguration(
-                useCommand: true,
-                useOption: false,
-                useControl: true,
-                useShift: false,
-                commandSide: .right,
-                optionSide: .either,
-                controlSide: .left,
-                shiftSide: .either,
-                keyCode: 0x08
-            ),
             language: "en",
-            translationTargetLanguage: "PT-BR",
             autoPunctuation: false,
             transcriptionQualityPreset: .high,
             gpuAccelerationEnabled: false,
@@ -134,12 +130,7 @@ final class SettingsManagerTests: XCTestCase {
         let loadedSettings = settingsManager.load()
 
         XCTAssertEqual(loadedSettings.hotkeyConfig, modifiedSettings.hotkeyConfig)
-        XCTAssertEqual(
-            loadedSettings.translationHotkeyConfig,
-            modifiedSettings.translationHotkeyConfig
-        )
         XCTAssertEqual(loadedSettings.language, "en")
-        XCTAssertEqual(loadedSettings.translationTargetLanguage, "pt-br")
         XCTAssertFalse(loadedSettings.autoPunctuation)
         XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .high)
         XCTAssertFalse(loadedSettings.gpuAccelerationEnabled)
@@ -200,12 +191,7 @@ final class SettingsManagerTests: XCTestCase {
                 keyCode: 36
             )
         )
-        XCTAssertEqual(loadedSettings.translationHotkeyConfig, .unset)
         XCTAssertEqual(loadedSettings.language, "ja")
-        XCTAssertEqual(
-            loadedSettings.translationTargetLanguage,
-            AppSettings.defaultTranslationTargetLanguage
-        )
         XCTAssertFalse(loadedSettings.autoPunctuation)
         XCTAssertEqual(loadedSettings.transcriptionQualityPreset, .high)
         XCTAssertTrue(loadedSettings.gpuAccelerationEnabled)

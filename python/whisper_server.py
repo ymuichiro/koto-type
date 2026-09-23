@@ -28,8 +28,6 @@ MAX_MODEL_MANAGEMENT_REQUEST_ID = (1 << 64) - 1
 DEFAULT_CPU_MODEL_ID = "large-v3-turbo"
 DEFAULT_MLX_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
 DEFAULT_TASK = "transcribe"
-DEFAULT_REQUEST_MODE = "transcribe"
-DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en"
 DEFAULT_CONDITION_ON_PREVIOUS_TEXT = False
 DEFAULT_NO_SPEECH_THRESHOLD = 0.6
 DEFAULT_COMPRESSION_RATIO_THRESHOLD = 2.4
@@ -53,7 +51,6 @@ SUPPORTED_TRANSCRIPTION_LANGUAGE_CODES = frozenset(
     sq sr su sv sw ta te tg th tk tl tr tt uk ur uz vi yi yo yue zh
     """.split()
 )
-TRANSLATION_TARGET_LANGUAGE_PATTERN = re.compile(r"^[a-z0-9-]{1,10}$")
 QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(r'(["\'])(/(?!/)[^"\']*)\1')
 SMART_QUOTED_ABSOLUTE_PATH_PATTERN = re.compile(r"([“‘])(/(?!/)[^”’]*)([”’])")
 QUOTED_FILE_URL_PATTERN = re.compile(r'(["\'])(file://(?:localhost)?/(?!/)[^"\']*)\1')
@@ -595,13 +592,12 @@ def build_mlx_transcribe_kwargs(
     language,
     profile,
     initial_prompt,
-    whisper_task=DEFAULT_TASK,
     clip_timestamps=None,
 ):
     kwargs = {
         "path_or_hf_repo": model_path,
         "language": language,
-        "task": whisper_task,
+        "task": DEFAULT_TASK,
         "temperature": profile.temperature,
         "word_timestamps": False,
         "condition_on_previous_text": DEFAULT_CONDITION_ON_PREVIOUS_TEXT,
@@ -1204,13 +1200,6 @@ def normalize_quality_preset(value):
     return "medium"
 
 
-def normalize_request_mode(value):
-    normalized = str(value or "").strip().lower()
-    if normalized in {DEFAULT_REQUEST_MODE, "translate"}:
-        return normalized
-    return DEFAULT_REQUEST_MODE
-
-
 def normalize_transcription_language(value):
     normalized = str(value or "").strip().lower()
     if not normalized or normalized == "auto":
@@ -1250,52 +1239,6 @@ def log_auto_language_detection(log, language, probability):
     )
 
 
-def normalize_translation_target_language(value):
-    normalized = str(value or "").strip().lower()
-    if TRANSLATION_TARGET_LANGUAGE_PATTERN.fullmatch(normalized):
-        return normalized
-    return DEFAULT_TRANSLATION_TARGET_LANGUAGE
-
-
-def select_whisper_task(mode, translation_target_language):
-    normalized_mode = normalize_request_mode(mode)
-    normalized_target = normalize_translation_target_language(
-        translation_target_language
-    )
-    if normalized_mode == "translate" and normalized_target == "en":
-        return "translate"
-    return DEFAULT_TASK
-
-
-def select_output_language(mode, translation_target_language, detected_language):
-    if normalize_request_mode(mode) == "translate":
-        return normalize_translation_target_language(translation_target_language)
-    return normalize_detected_transcription_language(detected_language)
-
-
-def translation_output_rejection_reason(text, translation_target_language):
-    """Return why a translation result is unsafe to return, if applicable.
-
-    The bundled Whisper model only has a reliable translation contract for
-    English.  Until a dedicated multilingual translation model is integrated,
-    reject unsupported targets and non-ASCII output for English translation.
-    This deliberately favors an empty result over returning an untranslated
-    source transcript as if it were a translation.
-    """
-    normalized_text = str(text or "").strip()
-    if not normalized_text:
-        return "empty_output"
-
-    normalized_target = normalize_translation_target_language(
-        translation_target_language
-    )
-    if normalized_target != DEFAULT_TRANSLATION_TARGET_LANGUAGE:
-        return "unsupported_target_language"
-    if not normalized_text.isascii():
-        return "untranslated_or_unsupported_output"
-    return None
-
-
 @dataclass(frozen=True)
 class TranscriptionRequest:
     audio_path: str
@@ -1305,8 +1248,6 @@ class TranscriptionRequest:
     gpu_acceleration_enabled: bool
     request_id: str = ""
     screenshot_context: str | None = None
-    mode: str = DEFAULT_REQUEST_MODE
-    translation_target_language: str = DEFAULT_TRANSLATION_TARGET_LANGUAGE
 
 
 @dataclass(frozen=True)
@@ -1582,21 +1523,14 @@ def parse_request_line(raw_line):
     request_id = normalize_transcription_request_id(payload.get("request_id"))
     # Reject unknown operations before touching audio or loading a model.
     # Never reinterpret a caller's unsupported operation as transcription.
-    raw_mode = payload.get("mode", DEFAULT_REQUEST_MODE)
-    if not isinstance(raw_mode, str) or raw_mode.strip().lower() not in {
-        DEFAULT_REQUEST_MODE,
-        "translate",
-    }:
+    raw_mode = payload.get("mode", "transcribe")
+    if not isinstance(raw_mode, str) or raw_mode.strip().lower() != "transcribe":
         raise InvalidTranscriptionRequest(request_id)
     language = normalize_transcription_language(payload.get("language"))
     actual_language = None if language == "auto" else language
     screenshot_context = payload.get("screenshot_context")
     if screenshot_context is not None:
         screenshot_context = str(screenshot_context)
-    mode = normalize_request_mode(payload.get("mode"))
-    translation_target_language = normalize_translation_target_language(
-        payload.get("translation_target_language")
-    )
 
     return {
         "kind": "transcription",
@@ -1610,8 +1544,6 @@ def parse_request_line(raw_line):
                 payload.get("gpu_acceleration_enabled"), default=True
             ),
             screenshot_context=screenshot_context,
-            mode=mode,
-            translation_target_language=translation_target_language,
         ),
     }
 
@@ -2008,10 +1940,6 @@ class BackendManager:
         language,
         quality_preset,
         initial_prompt,
-        *,
-        request_mode=DEFAULT_REQUEST_MODE,
-        translation_target_language=DEFAULT_TRANSLATION_TARGET_LANGUAGE,
-        whisper_task=DEFAULT_TASK,
     ):
         model = self._ensure_cpu_model()
         whisper_language = resolve_whisper_language(language)
@@ -2020,7 +1948,7 @@ class BackendManager:
         transcribe_kwargs = {
             "audio": audio_path,
             "language": whisper_language,
-            "task": whisper_task,
+            "task": DEFAULT_TASK,
             "temperature": profile.temperature,
             "beam_size": profile.beam_size,
             "best_of": profile.best_of,
@@ -2033,9 +1961,6 @@ class BackendManager:
         self.log(
             "CPU transcription parameters: "
             f"language={whisper_language}, "
-            f"mode={request_mode}, "
-            f"translation_target_language={translation_target_language}, "
-            f"whisper_task={whisper_task}, "
             f"preset={quality_preset}, "
             f"beam_size={profile.beam_size}, "
             f"best_of={profile.best_of}, "
@@ -2073,10 +1998,6 @@ class BackendManager:
         language,
         quality_preset,
         initial_prompt,
-        *,
-        request_mode=DEFAULT_REQUEST_MODE,
-        translation_target_language=DEFAULT_TRANSLATION_TARGET_LANGUAGE,
-        whisper_task=DEFAULT_TASK,
     ):
         self._ensure_mlx_model()
         whisper_language = resolve_whisper_language(language)
@@ -2089,14 +2010,10 @@ class BackendManager:
             language=whisper_language,
             profile=profile,
             initial_prompt=initial_prompt,
-            whisper_task=whisper_task,
         )
         self.log(
             "MLX transcription parameters: "
             f"language={whisper_language}, "
-            f"mode={request_mode}, "
-            f"translation_target_language={translation_target_language}, "
-            f"whisper_task={whisper_task}, "
             f"preset={quality_preset}, "
             f"temperature={profile.temperature}, "
             f"beam_size={profile.beam_size}, "
@@ -2130,39 +2047,10 @@ class BackendManager:
 
     def transcribe_with_details(self, request, audio_path, initial_prompt):
         status = self._status_for_gpu_request(request.gpu_acceleration_enabled)
-        whisper_task = select_whisper_task(
-            request.mode,
-            request.translation_target_language,
-        )
         self.log(
             "Dispatching transcription request: "
-            f"mode={request.mode}, "
-            f"translation_target_language={request.translation_target_language}, "
-            f"whisper_task={whisper_task}, "
             f"preferred_backend={status.effective_backend}"
         )
-        if (
-            status.effective_backend == "cpu"
-            and status.fallback_reason == "gpu_disabled_in_settings"
-        ):
-            engine_result = normalize_engine_transcription_result(
-                self._transcribe_with_cpu(
-                    audio_path,
-                    request.language,
-                    request.quality_preset,
-                    initial_prompt,
-                    request_mode=request.mode,
-                    translation_target_language=request.translation_target_language,
-                    whisper_task=whisper_task,
-                )
-            )
-            return BackendTranscriptionResult(
-                text=engine_result.text,
-                detected_language=engine_result.detected_language,
-                status=status,
-                segment_metrics=engine_result.segment_metrics,
-            )
-
         if status.effective_backend == "cpu":
             engine_result = normalize_engine_transcription_result(
                 self._transcribe_with_cpu(
@@ -2170,9 +2058,6 @@ class BackendManager:
                     request.language,
                     request.quality_preset,
                     initial_prompt,
-                    request_mode=request.mode,
-                    translation_target_language=request.translation_target_language,
-                    whisper_task=whisper_task,
                 )
             )
             return BackendTranscriptionResult(
@@ -2189,9 +2074,6 @@ class BackendManager:
                     request.language,
                     request.quality_preset,
                     initial_prompt,
-                    request_mode=request.mode,
-                    translation_target_language=request.translation_target_language,
-                    whisper_task=whisper_task,
                 )
             )
             return BackendTranscriptionResult(
@@ -2211,9 +2093,6 @@ class BackendManager:
                     request.language,
                     request.quality_preset,
                     initial_prompt,
-                    request_mode=request.mode,
-                    translation_target_language=request.translation_target_language,
-                    whisper_task=whisper_task,
                 )
             )
             fallback_status = BackendStatus(
@@ -2292,8 +2171,6 @@ def generate_initial_prompt(
     use_context=True,
     user_words=None,
     screenshot_context=None,
-    mode=DEFAULT_REQUEST_MODE,
-    translation_target_language=DEFAULT_TRANSLATION_TARGET_LANGUAGE,
 ):
     language_hint_by_code = {
         "ja": "Japanese",
@@ -2304,30 +2181,16 @@ def generate_initial_prompt(
         "fr": "French",
         "de": "German",
     }
-    normalized_mode = normalize_request_mode(mode)
-    normalized_target_language = normalize_translation_target_language(
-        translation_target_language
-    )
-    if normalized_mode == "translate":
-        prompt_parts = [
-            (
-                "Translation only. Translate the spoken content into target language code "
-                f"{normalized_target_language}. Output only the translated text in "
-                f"{normalized_target_language}. Do not include the source transcript. "
-                "Do not summarize, explain, add notes, or add formatting."
-            )
-        ]
-    else:
-        prompt_parts = [
-            (
-                "Verbatim transcription. Preserve the original spoken wording and language as much as possible. "
-                "Keep code-switching, proper nouns, acronyms, product names, and technical terms in the form they "
-                "were spoken. Do not translate, summarize, or rewrite into another language."
-            )
-        ]
+    prompt_parts = [
+        (
+            "Verbatim transcription. Preserve the original spoken wording and language as much as possible. "
+            "Keep code-switching, proper nouns, acronyms, product names, and technical terms in the form they "
+            "were spoken. Do not translate, summarize, or rewrite into another language."
+        )
+    ]
 
     normalized_language = normalize_transcription_language(language)
-    if normalized_mode != "translate" and normalized_language == "ja":
+    if normalized_language == "ja":
         prompt_parts.append(
             "Japanese ending fidelity: preserve spoken sentence-final particles and "
             "interrogative endings exactly, including か, でしょうか, ませんか, ね, "
@@ -2346,33 +2209,20 @@ def generate_initial_prompt(
         normalized_words = normalize_user_words(words_for_prompt)
         if normalized_words:
             word_list = ", ".join(normalized_words[:20])
-            if normalized_mode == "translate":
-                prompt_parts.append(
-                    "User vocabulary hints: "
-                    f"{word_list}. Use these only as vocabulary hints for translating spoken terms."
-                )
-            else:
-                prompt_parts.append(
-                    "User vocabulary hints: "
-                    f"{word_list}. Use these only to improve recognition when they are spoken."
-                )
+            prompt_parts.append(
+                "User vocabulary hints: "
+                f"{word_list}. Use these only to improve recognition when they are spoken."
+            )
 
     if screenshot_context:
         normalized_screenshot_context = " ".join(str(screenshot_context).split())
         if normalized_screenshot_context:
             clipped_screenshot_context = normalized_screenshot_context[:250]
-            if normalized_mode == "translate":
-                prompt_parts.append(
-                    "Contextual vocabulary hints from the current screen: "
-                    f"{clipped_screenshot_context}. Use these only as vocabulary hints for translating spoken terms. "
-                    "Do not copy unrelated context. Translate only the spoken content into the target language."
-                )
-            else:
-                prompt_parts.append(
-                    "Contextual vocabulary hints from the current screen: "
-                    f"{clipped_screenshot_context}. Use these only to improve recognition of spoken terms. "
-                    "Do not copy unrelated context and do not translate the spoken language."
-                )
+            prompt_parts.append(
+                "Contextual vocabulary hints from the current screen: "
+                f"{clipped_screenshot_context}. Use these only to improve recognition of spoken terms. "
+                "Do not copy unrelated context and do not translate the spoken language."
+            )
 
     return " ".join(prompt_parts)
 
@@ -2514,7 +2364,6 @@ def main():
             request_id = request.request_id
             log(
                 f"Received: audio_path_len={len(request.audio_path)}, language={request.language or 'auto'}, "
-                f"mode={request.mode}, translation_target_language={request.translation_target_language}, "
                 f"quality_preset={request.quality_preset}, gpu_acceleration_enabled={request.gpu_acceleration_enabled}, "
                 f"auto_punctuation={request.auto_punctuation}, screenshot_context_len={len(request.screenshot_context) if request.screenshot_context else 0}"
             )
@@ -2586,21 +2435,10 @@ def main():
                 use_context=True,
                 user_words=user_words,
                 screenshot_context=request.screenshot_context,
-                mode=request.mode,
-                translation_target_language=request.translation_target_language,
-            )
-            whisper_task = select_whisper_task(
-                request.mode,
-                request.translation_target_language,
             )
 
             start_time = time.time()
-            log(
-                "Starting transcription with Whisper... "
-                f"mode={request.mode}, "
-                f"translation_target_language={request.translation_target_language}, "
-                f"whisper_task={whisper_task}"
-            )
+            log(f"Starting transcription with Whisper... whisper_task={DEFAULT_TASK}")
             try:
                 transcription_result = backend_manager.transcribe_with_details(
                     request=request,
@@ -2611,17 +2449,13 @@ def main():
                 detected_language = transcription_result.detected_language
                 backend_status = transcription_result.status
                 elapsed_time = time.time() - start_time
-                output_language = select_output_language(
-                    request.mode,
-                    request.translation_target_language,
-                    detected_language,
+                output_language = normalize_detected_transcription_language(
+                    detected_language
                 )
                 log(
                     "Transcription completed in "
                     f"{elapsed_time:.2f} seconds "
-                    f"(mode={request.mode}, "
-                    f"translation_target_language={request.translation_target_language}, "
-                    f"whisper_task={whisper_task}, "
+                    "("
                     f"detected language: {detected_language}, "
                     f"output_language={output_language}, "
                     f"backend={backend_status.effective_backend}, "
@@ -2643,23 +2477,6 @@ def main():
                         request_id, error="unreliable_transcription"
                     )
                     continue
-
-                if normalize_request_mode(request.mode) == "translate":
-                    rejection_reason = translation_output_rejection_reason(
-                        transcription,
-                        request.translation_target_language,
-                    )
-                    if rejection_reason is not None:
-                        log(
-                            "Suppressing translation output because the local "
-                            "Whisper translation contract rejected the result "
-                            f"(reason={rejection_reason})"
-                        )
-                        emit_backend_status(backend_status)
-                        emit_transcription_result(
-                            request_id, error="unsupported_translation_output"
-                        )
-                        continue
 
                 transcription = post_process_text(
                     transcription,

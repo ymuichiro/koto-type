@@ -33,7 +33,6 @@ struct AppSettings: Codable, Equatable {
     static let minimumRecordingCompletionTimeout: Double = 30.0
     static let maximumRecordingCompletionTimeout: Double = 3_600.0
     static let defaultTranscriptionLanguage = "auto"
-    static let defaultTranslationTargetLanguage = "en"
     static let supportedTranscriptionLanguageCodes: Set<String> = Set(
         """
         auto af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr
@@ -44,9 +43,7 @@ struct AppSettings: Codable, Equatable {
     )
 
     var hotkeyConfig: HotkeyConfiguration
-    var translationHotkeyConfig: HotkeyConfiguration
     var language: String
-    var translationTargetLanguage: String
     var autoPunctuation: Bool
     var transcriptionQualityPreset: TranscriptionQualityPreset
     var gpuAccelerationEnabled: Bool
@@ -56,9 +53,7 @@ struct AppSettings: Codable, Equatable {
 
     init(
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
-        translationHotkeyConfig: HotkeyConfiguration = .unset,
         language: String = AppSettings.defaultTranscriptionLanguage,
-        translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
         autoPunctuation: Bool = true,
         transcriptionQualityPreset: TranscriptionQualityPreset = .high,
         gpuAccelerationEnabled: Bool = true,
@@ -67,11 +62,7 @@ struct AppSettings: Codable, Equatable {
         recordingCompletionTimeout: Double = AppSettings.defaultRecordingCompletionTimeout
     ) {
         self.hotkeyConfig = hotkeyConfig
-        self.translationHotkeyConfig = translationHotkeyConfig
         self.language = Self.normalizedTranscriptionLanguage(language)
-        self.translationTargetLanguage = Self.normalizedTranslationTargetLanguage(
-            translationTargetLanguage
-        )
         self.autoPunctuation = autoPunctuation
         self.transcriptionQualityPreset = transcriptionQualityPreset
         self.gpuAccelerationEnabled = gpuAccelerationEnabled
@@ -87,16 +78,9 @@ struct AppSettings: Codable, Equatable {
         hotkeyConfig =
             try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .hotkeyConfig)
             ?? HotkeyConfiguration()
-        translationHotkeyConfig =
-            try container.decodeIfPresent(HotkeyConfiguration.self, forKey: .translationHotkeyConfig)
-            ?? .unset
         language = Self.normalizedTranscriptionLanguage(
             try container.decodeIfPresent(String.self, forKey: .language)
                 ?? Self.defaultTranscriptionLanguage
-        )
-        translationTargetLanguage = Self.normalizedTranslationTargetLanguage(
-            try container.decodeIfPresent(String.self, forKey: .translationTargetLanguage)
-                ?? Self.defaultTranslationTargetLanguage
         )
         autoPunctuation =
             try container.decodeIfPresent(Bool.self, forKey: .autoPunctuation) ?? true
@@ -145,22 +129,6 @@ struct AppSettings: Codable, Equatable {
         return primaryCode
     }
 
-    private static func normalizedTranslationTargetLanguage(_ value: String) -> String {
-        let normalized = value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        guard !normalized.isEmpty, normalized.count <= 10 else {
-            return defaultTranslationTargetLanguage
-        }
-
-        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
-        guard normalized.unicodeScalars.allSatisfy(allowedCharacters.contains) else {
-            return defaultTranslationTargetLanguage
-        }
-
-        return normalized
-    }
 }
 
 final class SettingsManager: @unchecked Sendable {
@@ -168,15 +136,20 @@ final class SettingsManager: @unchecked Sendable {
 
     private let settingsURL: URL
 
-    private init() {
+    private convenience init() {
         let fileManager = FileManager.default
         let appSupportURL = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first!
         let settingsDir = appSupportURL.appendingPathComponent("koto-type")
-        try? LocalFileProtection.ensurePrivateDirectory(at: settingsDir, fileManager: fileManager)
-        settingsURL = settingsDir.appendingPathComponent("settings.json")
+        self.init(settingsURL: settingsDir.appendingPathComponent("settings.json"))
+    }
+
+    init(settingsURL: URL) {
+        self.settingsURL = settingsURL
+        let fileManager = FileManager.default
+        try? LocalFileProtection.ensurePrivateDirectory(at: settingsURL.deletingLastPathComponent(), fileManager: fileManager)
         try? LocalFileProtection.tightenFilePermissionsIfPresent(
             at: settingsURL,
             fileManager: fileManager
@@ -186,7 +159,7 @@ final class SettingsManager: @unchecked Sendable {
     func save(_ settings: AppSettings) {
         Logger.shared.log("SettingsManager.save: saving to \(settingsURL.path)")
         Logger.shared.log(
-            "SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), language=\(settings.language), translationTargetLanguage=\(settings.translationTargetLanguage), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
+            "SettingsManager.save: hotkey=\(settings.hotkeyConfig.description), language=\(settings.language), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
         )
         do {
             let data = try JSONEncoder().encode(settings)
@@ -208,7 +181,7 @@ final class SettingsManager: @unchecked Sendable {
             return AppSettings(keepBackendReadyInBackground: true)
         }
         Logger.shared.log(
-            "SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), language=\(settings.language), translationTargetLanguage=\(settings.translationTargetLanguage), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
+            "SettingsManager.load: hotkey=\(settings.hotkeyConfig.description), language=\(settings.language), punctuation=\(settings.autoPunctuation), preset=\(settings.transcriptionQualityPreset.rawValue), gpu=\(settings.gpuAccelerationEnabled), keepBackendReady=\(settings.keepBackendReadyInBackground), launchAtLogin=\(settings.launchAtLogin), recordingCompletionTimeout=\(settings.recordingCompletionTimeout)"
         )
         return settings
     }

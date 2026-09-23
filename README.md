@@ -49,6 +49,13 @@ Hold your hotkey, speak, release, and KotoType transcribes your speech and inser
 - **First-Time Setup**: Comprehensive setup wizard for permissions and dependencies
 - **Open Source**: Fully open-source under MIT License
 
+### Transcription scope (unreleased)
+
+KotoType transcribes speech in its original language; it does not provide translation.
+The translation hotkey and target-language setting have been removed from this development version.
+Old translation settings are ignored without resetting your other settings, history, or dictionary.
+Use the regular recording hotkey for transcription; it does not replace translation.
+
 ## Installation
 
 ### Quick Start (3 Steps)

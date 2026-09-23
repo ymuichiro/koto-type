@@ -126,8 +126,6 @@ final class MultiProcessManager: @unchecked Sendable {
         settings: AppSettings,
         sessionID: Int? = nil,
         screenshotContext: String? = nil,
-        mode: RecordingRequestMode = .transcribe,
-        translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
         retryCount: Int = 0,
         processingTimeout: TimeInterval? = nil,
         expectedLifecycleID: UUID? = nil
@@ -156,8 +154,6 @@ final class MultiProcessManager: @unchecked Sendable {
             url: url,
             index: index,
             settings: settings,
-            mode: mode,
-            translationTargetLanguage: translationTargetLanguage,
             retryCount: retryCount,
             sessionID: sessionID,
             processingTimeout: max(0.1, processingTimeout ?? segmentProcessingTimeoutSeconds)
@@ -245,8 +241,6 @@ final class MultiProcessManager: @unchecked Sendable {
             autoPunctuation: assignedContext.settings.autoPunctuation,
             qualityPreset: assignedContext.settings.transcriptionQualityPreset,
             gpuAccelerationEnabled: assignedContext.settings.gpuAccelerationEnabled,
-            mode: assignedContext.mode,
-            translationTargetLanguage: assignedContext.translationTargetLanguage,
             screenshotContext: screenshotContext,
             requestID: assignedContext.requestID
         )
@@ -494,8 +488,6 @@ final class MultiProcessManager: @unchecked Sendable {
                     settings: context.settings,
                     sessionID: context.sessionID,
                     screenshotContext: nil,
-                    mode: context.mode,
-                    translationTargetLanguage: context.translationTargetLanguage,
                     retryCount: nextRetry,
                     processingTimeout: context.processingTimeout,
                     expectedLifecycleID: context.lifecycleID
@@ -956,8 +948,6 @@ final class MultiProcessManager: @unchecked Sendable {
             autoPunctuation: false,
             qualityPreset: .medium,
             gpuAccelerationEnabled: false,
-            mode: .transcribe,
-            translationTargetLanguage: AppSettings.defaultTranslationTargetLanguage,
             screenshotContext: nil,
             requestID: UUID().uuidString
         )
@@ -1121,8 +1111,6 @@ private struct SegmentContext {
     let url: URL
     let index: Int
     let settings: AppSettings
-    let mode: RecordingRequestMode
-    let translationTargetLanguage: String
     let retryCount: Int
     let sessionID: Int?
     let processingTimeout: TimeInterval

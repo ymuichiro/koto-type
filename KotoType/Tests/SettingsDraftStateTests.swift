@@ -44,7 +44,7 @@ final class SettingsDraftStateTests: XCTestCase {
         XCTAssertEqual(saved, edited)
     }
 
-    func testSnapshotReflectsTranslationShortcutAndTargetLanguageChanges() {
+    func testSnapshotReflectsTranscriptionShortcutChanges() {
         let baseline = SettingsDraft(
             settings: AppSettings(),
             dictionaryWords: [],
@@ -52,22 +52,20 @@ final class SettingsDraftStateTests: XCTestCase {
         ).snapshot
         let edited = SettingsDraft(
             settings: AppSettings(
-                translationHotkeyConfig: HotkeyConfiguration(
+                hotkeyConfig: HotkeyConfiguration(
                     useCommand: true,
                     useOption: false,
                     useControl: true,
                     useShift: false,
                     keyCode: 0x08
-                ),
-                translationTargetLanguage: "PT-BR"
+                )
             ),
             dictionaryWords: [],
             voiceShortcuts: []
         ).snapshot
 
         XCTAssertNotEqual(baseline, edited)
-        XCTAssertEqual(edited.settings.translationHotkeyConfig.keyCode, 0x08)
-        XCTAssertEqual(edited.settings.translationTargetLanguage, "pt-br")
+        XCTAssertEqual(edited.settings.hotkeyConfig.keyCode, 0x08)
     }
 
     @MainActor

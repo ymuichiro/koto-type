@@ -72,7 +72,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             draftBridge: draftBridge,
             onHotkeyChanged: { settings in
                 Logger.shared.log(
-                    "SettingsWindowController: Posting hotkey settings notification: transcription=\(settings.hotkeyConfig.description), translation=\(settings.translationHotkeyConfig.description)"
+                    "SettingsWindowController: Posting hotkey settings notification: transcription=\(settings.hotkeyConfig.description)"
                 )
                 NotificationCenter.default.post(
                     name: .hotkeySettingsChanged,

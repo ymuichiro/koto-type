@@ -202,34 +202,6 @@ struct SettingsView: View {
                 }
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Translation shortcut")
-                    .font(.subheadline)
-
-                HotkeyRecorderView(initialConfig: draft.translationHotkeyConfig) { config in
-                    draft.translationHotkeyConfig = config
-                }
-                .frame(height: 40)
-
-                HStack(spacing: 12) {
-                    Text("Current shortcut: \(hotkeyDescription(for: draft.translationHotkeyConfig))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Button("Disable") {
-                        draft.translationHotkeyConfig = .unset
-                    }
-                    .disabled(!draft.translationHotkeyConfig.isSet)
-                }
-            }
-
-            if let hotkeyValidationMessage {
-                Text(hotkeyValidationMessage)
-                    .font(.caption)
-                    .foregroundColor(.red)
-            }
         }
     }
 
@@ -247,17 +219,6 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.menu)
                 Text("If you mainly speak Japanese, choose Japanese to avoid automatic language misclassification in short or noisy clips.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Translation target language")
-                    .font(.subheadline)
-                TextField("en", text: $draft.translationTargetLanguage)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 180)
-                Text("The local Whisper model currently supports English translation only. Other target languages are rejected until a dedicated translation model is available.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -657,7 +618,6 @@ struct SettingsView: View {
             Button("Save") {
                 _ = applySettings()
             }
-            .disabled(!canSaveSettings)
             .keyboardShortcut(.defaultAction)
             Button("Cancel") {
                 isPresented = false
@@ -765,20 +725,11 @@ struct SettingsView: View {
     }
 
     private func applySettings() -> Bool {
-        guard canSaveSettings else {
-            Logger.shared.log(
-                "SettingsView.applySettings blocked by validation: \(hotkeyValidationMessage ?? "unknown")",
-                level: .warning
-            )
-            return false
-        }
-
         draft.dictionaryWords = draft.normalizedDictionaryWords
         draft.voiceShortcuts = draft.normalizedVoiceShortcuts
         let settings = draft.appSettings
-        draft.translationTargetLanguage = settings.translationTargetLanguage
         Logger.shared.log(
-            "SettingsView.applySettings called: transcriptionHotkey=\(settings.hotkeyConfig.description), translationHotkey=\(settings.translationHotkeyConfig.description), translationTargetLanguage=\(settings.translationTargetLanguage)"
+            "SettingsView.applySettings called: transcriptionHotkey=\(settings.hotkeyConfig.description)"
         )
         _ = LaunchAtLoginManager.setEnabled(draft.launchAtLogin)
         SettingsManager.shared.save(settings)
@@ -949,29 +900,6 @@ struct SettingsView: View {
 
     private var hotkeyConfig: HotkeyConfiguration {
         draft.hotkeyConfig
-    }
-
-    private var canSaveSettings: Bool {
-        hotkeyValidationMessage == nil
-    }
-
-    private var hotkeyValidationMessage: String? {
-        Self.hotkeyValidationMessage(
-            transcriptionHotkey: draft.hotkeyConfig,
-            translationHotkey: draft.translationHotkeyConfig
-        )
-    }
-
-    static func hotkeyValidationMessage(
-        transcriptionHotkey: HotkeyConfiguration,
-        translationHotkey: HotkeyConfiguration
-    ) -> String? {
-        guard translationHotkey.isSet,
-            translationHotkey == transcriptionHotkey
-        else {
-            return nil
-        }
-        return "Translation shortcut must differ from transcription."
     }
 
     private func hotkeyDescription(for configuration: HotkeyConfiguration) -> String {
