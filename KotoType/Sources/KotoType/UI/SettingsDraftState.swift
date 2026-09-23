@@ -9,6 +9,7 @@ struct SettingsDraft: Equatable {
     var keepBackendReadyInBackground: Bool
     var launchAtLogin: Bool
     var recordingCompletionTimeout: Double
+    var modelStorageDirectoryPath: String?
     var dictionaryWords: [String]
     var voiceShortcuts: [VoiceShortcut]
 
@@ -25,6 +26,7 @@ struct SettingsDraft: Equatable {
         keepBackendReadyInBackground = settings.keepBackendReadyInBackground
         launchAtLogin = settings.launchAtLogin
         recordingCompletionTimeout = settings.recordingCompletionTimeout
+        modelStorageDirectoryPath = settings.modelStorageDirectoryPath
         self.dictionaryWords = dictionaryWords
         self.voiceShortcuts = voiceShortcuts
     }
@@ -46,7 +48,8 @@ struct SettingsDraft: Equatable {
             gpuAccelerationEnabled: gpuAccelerationEnabled,
             keepBackendReadyInBackground: keepBackendReadyInBackground,
             launchAtLogin: launchAtLogin,
-            recordingCompletionTimeout: recordingCompletionTimeout
+            recordingCompletionTimeout: recordingCompletionTimeout,
+            modelStorageDirectoryPath: modelStorageDirectoryPath
         )
     }
 

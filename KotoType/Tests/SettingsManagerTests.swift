@@ -36,6 +36,7 @@ final class SettingsManagerTests: XCTestCase {
             settings.recordingCompletionTimeout,
             AppSettings.defaultRecordingCompletionTimeout
         )
+        XCTAssertNil(settings.modelStorageDirectoryPath)
     }
 
     func testTranslationRemovalRoundTripsFileWithoutTouchingOtherData() throws {
@@ -123,7 +124,8 @@ final class SettingsManagerTests: XCTestCase {
             gpuAccelerationEnabled: false,
             keepBackendReadyInBackground: false,
             launchAtLogin: true,
-            recordingCompletionTimeout: 480.0
+            recordingCompletionTimeout: 480.0,
+            modelStorageDirectoryPath: "/tmp/kototype-models"
         )
 
         settingsManager.save(modifiedSettings)
@@ -137,6 +139,7 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertFalse(loadedSettings.keepBackendReadyInBackground)
         XCTAssertTrue(loadedSettings.launchAtLogin)
         XCTAssertEqual(loadedSettings.recordingCompletionTimeout, 480.0)
+        XCTAssertEqual(loadedSettings.modelStorageDirectoryPath, "/tmp/kototype-models")
     }
 
     func testSaveUsesOwnerOnlyPermissions() throws {

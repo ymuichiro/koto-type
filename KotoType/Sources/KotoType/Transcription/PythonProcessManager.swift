@@ -117,7 +117,8 @@ final class PythonProcessManager: @unchecked Sendable {
         newProcess.currentDirectoryURL = URL(fileURLWithPath: launchCommand.workingDirectory)
         var environment = Self.runtimeEnvironment(
             base: ProcessInfo.processInfo.environment,
-            bundlePath: runtime.bundlePath()
+            bundlePath: runtime.bundlePath(),
+            settings: SettingsManager.shared.load()
         )
         environment["KOTOTYPE_PARENT_PID"] = "\(ProcessInfo.processInfo.processIdentifier)"
         newProcess.environment = environment
@@ -573,9 +574,19 @@ extension PythonProcessManager.Runtime {
 }
 
 extension PythonProcessManager {
-    static func runtimeEnvironment(base: [String: String], bundlePath: String) -> [String: String] {
+    static func runtimeEnvironment(
+        base: [String: String],
+        bundlePath: String,
+        settings: AppSettings = AppSettings()
+    ) -> [String: String] {
         var environment = base
-        environment.merge(KotoTypeStoragePaths.managedModelEnvironment()) { _, new in new }
+        environment.merge(
+            KotoTypeStoragePaths.managedModelEnvironment(
+                storageRootURL: KotoTypeStoragePaths.modelStorageRoot(
+                    directoryPath: settings.modelStorageDirectoryPath
+                )
+            )
+        ) { _, new in new }
         if bundlePath.hasSuffix(".app") {
             // Distribution runtime safety: never allow multi-server / multi-load overrides.
             environment["KOTOTYPE_MAX_ACTIVE_SERVERS"] = "1"

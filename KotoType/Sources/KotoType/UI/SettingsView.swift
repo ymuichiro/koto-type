@@ -65,6 +65,7 @@ struct SettingsView: View {
     )
     @State private var isRefreshingStorage = false
     @State private var activeModelOperation: ManagedTranscriptionModelKind?
+    @State private var modelStorageDirectoryIssue: String?
     @State private var storageActionMessage: String?
     @State private var storageActionMessageIsError = false
     @State private var pendingStorageConfirmation: StorageConfirmationAction?
@@ -136,6 +137,7 @@ struct SettingsView: View {
         }
         .onChange(of: draft) { _ in
             updateDraftBridge()
+            refreshModelStorageDirectoryIssue()
         }
         .alert(item: $pendingStorageConfirmation) { action in
             Alert(
@@ -521,6 +523,39 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Model storage folder")
+                    .font(.subheadline)
+                Text(
+                    "Downloaded CPU and MLX models and their caches are stored in KotoType subfolders here. "
+                        + "Changing this folder does not move existing files; they remain in the previous folder."
+                )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(draft.modelStorageDirectoryPath ?? KotoTypeStoragePaths.applicationSupportDirectory().path)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+                if let modelStorageDirectoryIssue {
+                    Label(modelStorageDirectoryIssue, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 10) {
+                    Button("Choose Folder…") {
+                        chooseModelStorageDirectory()
+                    }
+                    if draft.modelStorageDirectoryPath != nil {
+                        Button("Use Default") {
+                            draft.modelStorageDirectoryPath = nil
+                            storageActionMessage = "Save settings to use the default model storage folder."
+                            storageActionMessageIsError = false
+                        }
+                    }
+                }
+            }
+
             storageCard(
                 title: "Transcription history",
                 detail: "\(storageSnapshot.historyEntryCount) entr\(storageSnapshot.historyEntryCount == 1 ? "y" : "ies") • \(KotoTypeStoragePaths.formattedByteCount(storageSnapshot.historyByteCount))",
@@ -574,7 +609,10 @@ struct SettingsView: View {
                                     }
                                 }
                             }
-                            .disabled(isStorageBusy && activeModelOperation != status.kind)
+                            .disabled(
+                                (isStorageBusy && activeModelOperation != status.kind)
+                                    || modelStorageDirectoryIssue != nil
+                            )
                         }
                     }
                 }
@@ -738,6 +776,9 @@ struct SettingsView: View {
         onHotkeyChanged(settings)
         onSettingsChanged?()
         draftBridge?.markSaved(snapshot: draft.snapshot)
+        Task {
+            await refreshStorageSnapshot()
+        }
         return true
     }
 
@@ -828,6 +869,32 @@ struct SettingsView: View {
         }
     }
 
+    private func chooseModelStorageDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Model Storage Folder"
+        panel.message = "KotoType creates its model and cache folders inside the selected folder."
+        panel.prompt = "Choose"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(
+            fileURLWithPath: draft.modelStorageDirectoryPath
+                ?? KotoTypeStoragePaths.applicationSupportDirectory().path,
+            isDirectory: true
+        )
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard KotoTypeStoragePaths.modelStorageDirectoryAvailability(directoryPath: url.path) == .available else {
+            storageActionMessage = "Choose a writable folder that already exists."
+            storageActionMessageIsError = true
+            return
+        }
+
+        draft.modelStorageDirectoryPath = url.standardizedFileURL.path
+        storageActionMessage = "Save settings to use the selected model storage folder."
+        storageActionMessageIsError = false
+    }
+
     private func dictionaryImportMessage(from result: UserDictionaryCSVImportResult) -> String {
         var message = "Imported \(result.importedCount) terms."
         if result.duplicateCount > 0 {
@@ -913,6 +980,7 @@ struct SettingsView: View {
 
     @MainActor
     private func refreshStorageSnapshot() async {
+        refreshModelStorageDirectoryIssue()
         isRefreshingStorage = true
         let snapshot = await storageManagementService.snapshot()
         storageSnapshot = snapshot
@@ -948,6 +1016,12 @@ struct SettingsView: View {
 
     @MainActor
     private func downloadModel(_ kind: ManagedTranscriptionModelKind) async {
+        if let issue = refreshModelStorageDirectoryIssue() {
+            storageActionMessage = issue
+            storageActionMessageIsError = true
+            return
+        }
+
         activeModelOperation = kind
         let result = await storageManagementService.downloadModel(kind)
         activeModelOperation = nil
@@ -959,6 +1033,27 @@ struct SettingsView: View {
             storageActionMessageIsError = true
         }
         await refreshStorageSnapshot()
+    }
+
+    @MainActor
+    @discardableResult
+    private func refreshModelStorageDirectoryIssue() -> String? {
+        let availability = KotoTypeStoragePaths.modelStorageDirectoryAvailability(
+            directoryPath: draft.modelStorageDirectoryPath
+        )
+        let issue: String?
+        switch availability {
+        case .usesDefault, .available:
+            issue = nil
+        case .missing:
+            issue = "The selected model storage folder is missing. Choose a new writable folder or use the default, then save settings."
+        case .notDirectory:
+            issue = "The selected model storage path is not a folder. Choose a writable folder or use the default, then save settings."
+        case .notWritable:
+            issue = "The selected model storage folder is not writable. Choose another folder or use the default, then save settings."
+        }
+        modelStorageDirectoryIssue = issue
+        return issue
     }
 
     private func modelDetailText(for status: ManagedTranscriptionModelStatus) -> String {

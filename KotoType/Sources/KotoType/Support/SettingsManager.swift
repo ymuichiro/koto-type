@@ -50,6 +50,7 @@ struct AppSettings: Codable, Equatable {
     var keepBackendReadyInBackground: Bool
     var launchAtLogin: Bool
     var recordingCompletionTimeout: Double
+    var modelStorageDirectoryPath: String?
 
     init(
         hotkeyConfig: HotkeyConfiguration = HotkeyConfiguration(),
@@ -59,7 +60,8 @@ struct AppSettings: Codable, Equatable {
         gpuAccelerationEnabled: Bool = true,
         keepBackendReadyInBackground: Bool = false,
         launchAtLogin: Bool = false,
-        recordingCompletionTimeout: Double = AppSettings.defaultRecordingCompletionTimeout
+        recordingCompletionTimeout: Double = AppSettings.defaultRecordingCompletionTimeout,
+        modelStorageDirectoryPath: String? = nil
     ) {
         self.hotkeyConfig = hotkeyConfig
         self.language = Self.normalizedTranscriptionLanguage(language)
@@ -70,6 +72,9 @@ struct AppSettings: Codable, Equatable {
         self.launchAtLogin = launchAtLogin
         self.recordingCompletionTimeout = Self.normalizedRecordingCompletionTimeout(
             recordingCompletionTimeout
+        )
+        self.modelStorageDirectoryPath = Self.normalizedModelStorageDirectoryPath(
+            modelStorageDirectoryPath
         )
     }
 
@@ -97,6 +102,9 @@ struct AppSettings: Codable, Equatable {
             try container.decodeIfPresent(Double.self, forKey: .recordingCompletionTimeout)
                 ?? Self.defaultRecordingCompletionTimeout
         )
+        modelStorageDirectoryPath = Self.normalizedModelStorageDirectoryPath(
+            try container.decodeIfPresent(String.self, forKey: .modelStorageDirectoryPath)
+        )
     }
 
     private static func normalizedRecordingCompletionTimeout(_ value: Double) -> Double {
@@ -108,6 +116,13 @@ struct AppSettings: Codable, Equatable {
             max(value, minimumRecordingCompletionTimeout),
             maximumRecordingCompletionTimeout
         )
+    }
+
+    private static func normalizedModelStorageDirectoryPath(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let path = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
     }
 
     static func normalizedTranscriptionLanguage(_ value: String) -> String {

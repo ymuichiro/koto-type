@@ -1499,8 +1499,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             currentSettings.keepBackendReadyInBackground != previousSettings.keepBackendReadyInBackground
         let gpuAccelerationChanged =
             currentSettings.gpuAccelerationEnabled != previousSettings.gpuAccelerationEnabled
+        let modelStorageDirectoryChanged =
+            currentSettings.modelStorageDirectoryPath != previousSettings.modelStorageDirectoryPath
 
-        guard keepBackendReadyChanged || gpuAccelerationChanged else {
+        guard keepBackendReadyChanged || gpuAccelerationChanged || modelStorageDirectoryChanged else {
             return
         }
 
