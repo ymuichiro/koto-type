@@ -49,10 +49,10 @@
 - 遅延再試行/復旧の世代越境を発見。変更前の再現テストでは、再初期化後に古い音声が新workerへ送られ、古い復旧タイマーが新workerを停止した。initialize/stopでlifecycleIDを更新し、遅延処理の受付時に一致を確認することで両方を防止した。この安全性追加は#131へ帰属し、#132の削減には計上しない。
 - この表は所有者の現状整理。watchdogと再初期化の並行実行、録音停止/即再録音、回復ダイアログを含む配布アプリの状態遷移検証は未完了。全競合を解消したという意味ではない。
 
-### 中間計測（2026-09-22、未コミット差分）
+### 確定差分（#133統合後のmainを基準）
 
 - #131統合前のmain比較: Swiftは追加67行／削除280行、純減213行。Pythonは追加26行／削除200行、純減174行。製品コード合計の純減387行で、テスト削除や資料は含めない。Pythonには先行したCPU重複分岐の削除も含む。
-- #131統合後の簡素化差分: quality作業ツリーを依存元として`git diff --no-index --numstat`でSourcesとwhisper_server.pyを比較。当初Swift純減213行＋Python純減183行＝396行減。設定テストを実データから分離するinitializer追加後はSwift純減208行、計391行減。#131の安全性追加を削減と混同しない。両方とも未コミットなので、PR起票時に確定した親commitで再集計する。
+- #131統合後の簡素化差分は、#133のmerge commit `e2b6e4d` を親として確定。製品Sourcesと`python/whisper_server.py`は追加100行・削除491行、純減391行。#131の安全性追加を削減と混同しない。全差分は25ファイル、追加353行・削除864行（テスト・資料を含む）。
 - 廃止した保存設定は翻訳先と翻訳ホットキーの2項目。翻訳機能全体の撤去はまだ未完了。依存の削減は0。
 - AppDelegateの`pressedRecordingModes`は宣言・insert・removeの3参照のみで読み取りがなく、録音可否や停止判定に使われないため削除。sessionとworker contextのmode保存、およびimport・retry・sendInputのmode引数も撤去。Python送信時だけ固定の`transcribe`を明示する。ホットキーのモード辞書・列挙ループ・アクション配列・RecordingRequestMode型も削除し、ひとつのHotkeyStateに押下状態と直前の修飾キーを集約した。
 - 設定移行・HotkeyConfiguration・import・workerの関連48テストが合格。その後の書き込み専用集合削除はSwift buildとdiff --checkが成功。実キー入力・マイク・配布物での証拠ではない。
@@ -62,7 +62,7 @@
 - CPUのGPU無効時専用分岐と一般CPU分岐の本体がAST比較で完全一致することを確認し、前者を削除。設定によるGPU無効・ランタイム非対応は同じCPU経路で元のstatusを返す。MLX推論失敗後のCPU fallbackは維持。削除前のbackend関連43テスト、削除後のPython全123テスト、ruff・tyが合格。これは実モデル精度改善の証拠ではなく、同じ実行処理を一箇所にした削減。
 - Python翻訳撤去は一時ファイルの候補で先に検証。言語7種類×context有無×辞書2種類×画面context4種類の112通りで、通常文字起こし用プロンプトが変更前と文字列一致。旧translate・未知mode・不正型の計8種類の拒否テストは変更前に失敗し、反映後に合格。既存の翻訳提供を前提とするテストは削除し、CPU/MLXのtaskがtranscribe固定になる確認へ置換した。Python全116テスト、ruff、tyが合格。これは音声精度を改善した証拠ではない。
 - 実モデル回帰確認: 固定FLEURS `fleurs-00.wav`をmain基準版とcleanupのstdin→前処理→推論→後処理へ入力。CPU/MLXそれぞれ1回ずつ、両版の46文字の出力が一致し、返されたeffectiveBackendが指定と一致、元音声SHA-256が不変だった。辞書は空、言語ja、通常transcribe。ローカル実行スクリプト`/tmp/kototype-goals-XdWea0/verify_cleanup_live.py`と`cleanup-{cpu,mlx}-live-comparison.json`に記録。1件の回帰スモークであり、30件×3回の品質評価・配布アプリ・実マイクの代替ではない。PR前に検証資材を再現可能な形で整理する。
-- #131統合は共通のmain基準と両作業ツリーの3方向比較で実施。requestIDを維持しつつmode/translationTargetLanguageを復活させないよう競合を解消した。品質PRを依存元とする別の簡素化PRを予定し、共有変更を二重計上しない。PR・コミットはまだ作成していない。
+- #131統合は共通のmain基準と両作業ツリーの3方向比較で実施。requestIDを維持しつつmode/translationTargetLanguageを復活させないよう競合を解消した。品質PR #133はmerge commit `e2b6e4d` としてmainへ統合済み。簡素化commit `f5589d7` はそのcommitを親とし、共有変更を重複計上しない。Issue #132はPR・CI・配布アプリ確認だけでは閉じず、全受入条件が終わるまでOPENを維持する。
 - 統合後のPython全127テスト、要求解析と実stdin応答の重点20テスト、ruff/tyが合格。Swiftビルドと応答・音声保存・batch・worker・import・hotkeyの関連49テストも合格。実マイク・目的アプリへの挿入・配布物は未検証。
 - 統合版の実モデル確認: CPU/MLX各1プロセスに「旧翻訳要求→固定FLEURS音声の通常認識→存在しない音声」を連続送信。各request_idに対して順にinvalid_request・46文字の成功・invalid_audioが返り、空行や旧形式の出力はなかった。拒否後も認識が継続し、選択backendと元音声SHA-256の不変を確認。`/tmp/kototype-goals-XdWea0/verify_integrated_protocol_live.py`、`integrated-{cpu,mlx}-protocol-live.json`に記録。精度全体の合格や回復ダイアログの動作証拠ではない。
 - 次の必須作業は状態所有者・再試行責務の棚卸し、説明と配布物の整合、全受入条件の検証。応答プロトコル変更との依存関係をPRで明記する。
