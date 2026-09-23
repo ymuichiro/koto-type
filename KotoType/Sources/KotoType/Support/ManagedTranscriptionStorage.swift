@@ -208,3 +208,36 @@ enum KotoTypeStoragePaths {
         ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
     }
 }
+
+enum ModelStorageDirectoryAvailability: Equatable {
+    case usesDefault
+    case available
+    case missing
+    case notDirectory
+    case notWritable
+}
+
+extension KotoTypeStoragePaths {
+    static func modelStorageDirectoryAvailability(
+        directoryPath: String?,
+        fileManager: FileManager = .default
+    ) -> ModelStorageDirectoryAvailability {
+        guard let directoryPath else {
+            return .usesDefault
+        }
+        let path = directoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return .usesDefault }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            return .missing
+        }
+        guard isDirectory.boolValue else {
+            return .notDirectory
+        }
+        guard fileManager.isWritableFile(atPath: path) else {
+            return .notWritable
+        }
+        return .available
+    }
+}

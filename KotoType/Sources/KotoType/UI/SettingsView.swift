@@ -65,6 +65,7 @@ struct SettingsView: View {
     )
     @State private var isRefreshingStorage = false
     @State private var activeModelOperation: ManagedTranscriptionModelKind?
+    @State private var modelStorageDirectoryIssue: String?
     @State private var storageActionMessage: String?
     @State private var storageActionMessageIsError = false
     @State private var pendingStorageConfirmation: StorageConfirmationAction?
@@ -136,6 +137,7 @@ struct SettingsView: View {
         }
         .onChange(of: draft) { _ in
             updateDraftBridge()
+            refreshModelStorageDirectoryIssue()
         }
         .alert(item: $pendingStorageConfirmation) { action in
             Alert(
@@ -534,6 +536,12 @@ struct SettingsView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
+                if let modelStorageDirectoryIssue {
+                    Label(modelStorageDirectoryIssue, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(spacing: 10) {
                     Button("Choose Folder…") {
                         chooseModelStorageDirectory()
@@ -601,7 +609,10 @@ struct SettingsView: View {
                                     }
                                 }
                             }
-                            .disabled(isStorageBusy && activeModelOperation != status.kind)
+                            .disabled(
+                                (isStorageBusy && activeModelOperation != status.kind)
+                                    || modelStorageDirectoryIssue != nil
+                            )
                         }
                     }
                 }
@@ -873,10 +884,7 @@ struct SettingsView: View {
         )
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-              isDirectory.boolValue,
-              FileManager.default.isWritableFile(atPath: url.path) else {
+        guard KotoTypeStoragePaths.modelStorageDirectoryAvailability(directoryPath: url.path) == .available else {
             storageActionMessage = "Choose a writable folder that already exists."
             storageActionMessageIsError = true
             return
@@ -972,6 +980,7 @@ struct SettingsView: View {
 
     @MainActor
     private func refreshStorageSnapshot() async {
+        refreshModelStorageDirectoryIssue()
         isRefreshingStorage = true
         let snapshot = await storageManagementService.snapshot()
         storageSnapshot = snapshot
@@ -1007,6 +1016,12 @@ struct SettingsView: View {
 
     @MainActor
     private func downloadModel(_ kind: ManagedTranscriptionModelKind) async {
+        if let issue = refreshModelStorageDirectoryIssue() {
+            storageActionMessage = issue
+            storageActionMessageIsError = true
+            return
+        }
+
         activeModelOperation = kind
         let result = await storageManagementService.downloadModel(kind)
         activeModelOperation = nil
@@ -1018,6 +1033,27 @@ struct SettingsView: View {
             storageActionMessageIsError = true
         }
         await refreshStorageSnapshot()
+    }
+
+    @MainActor
+    @discardableResult
+    private func refreshModelStorageDirectoryIssue() -> String? {
+        let availability = KotoTypeStoragePaths.modelStorageDirectoryAvailability(
+            directoryPath: draft.modelStorageDirectoryPath
+        )
+        let issue: String?
+        switch availability {
+        case .usesDefault, .available:
+            issue = nil
+        case .missing:
+            issue = "The selected model storage folder is missing. Choose a new writable folder or use the default, then save settings."
+        case .notDirectory:
+            issue = "The selected model storage path is not a folder. Choose a writable folder or use the default, then save settings."
+        case .notWritable:
+            issue = "The selected model storage folder is not writable. Choose another folder or use the default, then save settings."
+        }
+        modelStorageDirectoryIssue = issue
+        return issue
     }
 
     private func modelDetailText(for status: ManagedTranscriptionModelStatus) -> String {
