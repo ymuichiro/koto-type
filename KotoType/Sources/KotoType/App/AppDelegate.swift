@@ -8,8 +8,6 @@ import UniformTypeIdentifiers
 private final class RecordingSessionContext {
     var hasFailedSegments = false
     let id: Int
-    let mode: RecordingRequestMode
-    let translationTargetLanguage: String
     let batchTranscriptionManager: BatchTranscriptionManager
     let windowFocusTarget: WindowFocusTarget?
     var liveTranscriptionPolicy: LiveTranscriptionPolicy?
@@ -19,13 +17,9 @@ private final class RecordingSessionContext {
 
     init(
         id: Int,
-        mode: RecordingRequestMode,
-        translationTargetLanguage: String,
         windowFocusTarget: WindowFocusTarget?
     ) {
         self.id = id
-        self.mode = mode
-        self.translationTargetLanguage = translationTargetLanguage
         self.windowFocusTarget = windowFocusTarget
         self.batchTranscriptionManager = BatchTranscriptionManager()
     }
@@ -76,7 +70,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isImportingAudio = false
     private var isCancelingImportedAudioTranscription = false
     private var didSuspendRealtimeWorkersForImport = false
-    private var pressedRecordingModes: Set<RecordingRequestMode> = []
     private var importedAudioTranscriptionManager: ImportedAudioTranscriptionManager?
     private var serverScriptPath: String = ""
     private var currentSettings: AppSettings = AppSettings()
@@ -336,11 +329,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.shared.log("Loaded settings: \(currentSettings)", level: .info)
         
         hotkeyManager = HotkeyManager()
-        hotkeyManager?.hotkeyKeyDown = { [weak self] mode in
-            self?.handleRecordingHotkeyPressed(mode)
+        hotkeyManager?.hotkeyKeyDown = { [weak self] in
+            self?.startRecording()
         }
-        hotkeyManager?.hotkeyKeyUp = { [weak self] mode in
-            self?.handleRecordingHotkeyReleased(mode)
+        hotkeyManager?.hotkeyKeyUp = { [weak self] in
+            self?.stopRecording()
         }
         
         NotificationCenter.default.addObserver(forName: .hotkeySettingsChanged, object: nil, queue: .main) { [weak self] notification in
@@ -349,7 +342,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard self != nil else { return }
                 if let settings {
                     Logger.shared.log(
-                        "AppDelegate: Received hotkey settings notification: transcription=\(settings.hotkeyConfig.description), translation=\(settings.translationHotkeyConfig.description), translationTargetLanguage=\(settings.translationTargetLanguage)"
+                        "AppDelegate: Received hotkey settings notification: transcription=\(settings.hotkeyConfig.description)"
                     )
                 }
             }
@@ -396,7 +389,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func startRecording(mode: RecordingRequestMode = .transcribe) {
+    func startRecording() {
         guard !isImportingAudio else {
             Logger.shared.log("Recording request ignored because imported audio transcription is running", level: .warning)
             return
@@ -414,16 +407,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let windowFocusTarget = WindowFocusRestorer.capture()
         currentSettings = SettingsManager.shared.load()
-        beginRecordingSession(mode: mode, windowFocusTarget: windowFocusTarget)
+        beginRecordingSession(windowFocusTarget: windowFocusTarget)
     }
 
     private func beginRecordingSession(
-        mode: RecordingRequestMode,
         windowFocusTarget: WindowFocusTarget?
     ) {
         let session = createRecordingSession(
-            mode: mode,
-            translationTargetLanguage: currentSettings.translationTargetLanguage,
             windowFocusTarget: windowFocusTarget
         )
         let sessionID = session.id
@@ -437,7 +427,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         activeRecordingSessionID = sessionID
         indicatorPresentation.beginLiveSession(sessionID)
         Logger.shared.log(
-            "Starting audio recording for session \(sessionID)... requestMode=\(session.mode.rawValue), translationTargetLanguage=\(session.translationTargetLanguage), backendMode=\(liveTranscriptionPolicy.mode.rawValue), reason=\(liveTranscriptionPolicy.logReason), recordingMaxDuration=\(Int(liveTranscriptionPolicy.recordingMaxDuration))s, processingTimeout=\(Int(liveTranscriptionPolicy.processingTimeout))s, finalizationTimeout=\(Int(liveTranscriptionPolicy.finalizationTimeout))s",
+            "Starting audio recording for session \(sessionID)... backendMode=\(liveTranscriptionPolicy.mode.rawValue), reason=\(liveTranscriptionPolicy.logReason), recordingMaxDuration=\(Int(liveTranscriptionPolicy.recordingMaxDuration))s, processingTimeout=\(Int(liveTranscriptionPolicy.processingTimeout))s, finalizationTimeout=\(Int(liveTranscriptionPolicy.finalizationTimeout))s",
             level: .info
         )
 
@@ -480,7 +470,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let recordingDuration = self.realtimeRecorder?.lastRecordingDuration ?? 0
             let processingTimeout = currentSession.liveTranscriptionPolicy?.processingTimeout
             Logger.shared.log(
-                "File created: \(url.path), localIndex=\(localIndex), globalIndex=\(globalIndex), session=\(sessionID), requestMode=\(currentSession.mode.rawValue), translationTargetLanguage=\(currentSession.translationTargetLanguage), backendMode=\(currentSession.liveTranscriptionPolicy?.mode.rawValue ?? "unknown"), recordingDuration=\(String(format: "%.1f", recordingDuration))s, processingTimeout=\(Int(processingTimeout ?? 0))s",
+                "File created: \(url.path), localIndex=\(localIndex), globalIndex=\(globalIndex), session=\(sessionID), backendMode=\(currentSession.liveTranscriptionPolicy?.mode.rawValue ?? "unknown"), recordingDuration=\(String(format: "%.1f", recordingDuration))s, processingTimeout=\(Int(processingTimeout ?? 0))s",
                 level: .info
             )
             self.pendingSegmentFiles[globalIndex] = url
@@ -492,8 +482,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: self.currentSettings,
                 sessionID: sessionID,
                 screenshotContext: screenshotContext,
-                mode: currentSession.mode,
-                translationTargetLanguage: currentSession.translationTargetLanguage,
                 processingTimeout: processingTimeout
             )
         }
@@ -614,24 +602,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleRecordingHotkeyPressed(_ mode: RecordingRequestMode) {
-        pressedRecordingModes.insert(mode)
-        startRecording(mode: mode)
-    }
-
-    private func handleRecordingHotkeyReleased(_ mode: RecordingRequestMode) {
-        pressedRecordingModes.remove(mode)
-
-        guard isRecording,
-              let sessionID = activeRecordingSessionID,
-              let session = sessionByID[sessionID],
-              session.mode == mode else {
-            return
-        }
-
-        stopRecording()
-    }
-    
     func stopRecording() {
         guard isRecording, let sessionID = activeRecordingSessionID, let session = sessionByID[sessionID] else {
             return
@@ -649,7 +619,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         isRecording = false
         activeRecordingSessionID = nil
         Logger.shared.log(
-            "Stopping audio recording for session \(sessionID)... requestMode=\(session.mode.rawValue), translationTargetLanguage=\(session.translationTargetLanguage)",
+            "Stopping audio recording for session \(sessionID)...",
             level: .info
         )
         realtimeRecorder?.onInputLevelChanged = nil
@@ -854,16 +824,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func createRecordingSession(
-        mode: RecordingRequestMode,
-        translationTargetLanguage: String,
         windowFocusTarget: WindowFocusTarget?
     ) -> RecordingSessionContext {
         let sessionID = nextRecordingSessionID
         nextRecordingSessionID += 1
         let session = RecordingSessionContext(
             id: sessionID,
-            mode: mode,
-            translationTargetLanguage: translationTargetLanguage,
             windowFocusTarget: windowFocusTarget
         )
         sessionByID[sessionID] = session

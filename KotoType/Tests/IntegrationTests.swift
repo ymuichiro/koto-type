@@ -189,8 +189,6 @@ private final class IntegrationTestPythonProcessManager: PythonProcessManaging {
         autoPunctuation: Bool,
         qualityPreset: TranscriptionQualityPreset,
         gpuAccelerationEnabled: Bool,
-        mode: RecordingRequestMode,
-        translationTargetLanguage: String,
         screenshotContext: String?,
         requestID: String
     ) -> Bool {

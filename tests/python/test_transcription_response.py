@@ -83,9 +83,9 @@ class TranscriptionResponseTests(unittest.TestCase):
     def test_confidence_rejection_is_failure_not_empty_success(self):
         self.assert_rejected_result("...", "transcribe", "unreliable_transcription")
 
-    def test_translation_rejection_is_failure_not_empty_success(self):
+    def test_retired_translation_is_rejected_before_inference(self):
         self.assert_rejected_result(
-            "これは日本語のままです。", "translate", "unsupported_translation_output"
+            "これは日本語のままです。", "translate", "invalid_request"
         )
 
     def assert_rejected_result(self, text, mode, error):

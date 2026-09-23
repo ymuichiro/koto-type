@@ -3,16 +3,37 @@ import Foundation
 import XCTest
 
 final class AppSettingsTests: XCTestCase {
+    func testRetiredTranslationSettingsAreIgnoredWithoutLosingSettings() throws {
+        // A retired field must neither overwrite the transcription shortcut nor
+        // cause legacy settings to fall back to defaults, even if malformed.
+        for retiredShortcut in ["{\"keyCode\":8}", "\"pt-br\"", "\"obsolete\"", "null"] {
+            let json = """
+            {"translationHotkeyConfig":\(retiredShortcut),"translationTargetLanguage":\(retiredShortcut),
+             "hotkeyConfig":{"useCommand":false,"useOption":true,
+                 "useControl":true,"useShift":false,"keyCode":49},
+             "language":"ja","autoPunctuation":false,
+             "keepBackendReadyInBackground":false,"recordingCompletionTimeout":480}
+            """
+            let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
+            XCTAssertEqual(settings.hotkeyConfig.keyCode, 49)
+            XCTAssertTrue(settings.hotkeyConfig.useOption)
+            XCTAssertEqual(settings.language, "ja")
+            XCTAssertFalse(settings.autoPunctuation)
+            XCTAssertFalse(settings.keepBackendReadyInBackground)
+            XCTAssertEqual(settings.recordingCompletionTimeout, 480)
+            let encoded = try JSONEncoder().encode(settings)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+            XCTAssertNil(object["translationHotkeyConfig"])
+            XCTAssertNil(object["translationTargetLanguage"])
+            XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: encoded), settings)
+        }
+    }
+
     func testDefaultInitialization() {
         let settings = AppSettings()
 
         XCTAssertEqual(settings.hotkeyConfig, .default)
-        XCTAssertEqual(settings.translationHotkeyConfig, .unset)
         XCTAssertEqual(settings.language, "auto")
-        XCTAssertEqual(
-            settings.translationTargetLanguage,
-            AppSettings.defaultTranslationTargetLanguage
-        )
         XCTAssertTrue(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .high)
         XCTAssertTrue(settings.gpuAccelerationEnabled)
@@ -33,15 +54,7 @@ final class AppSettingsTests: XCTestCase {
                 useShift: false,
                 keyCode: 0x31
             ),
-            translationHotkeyConfig: HotkeyConfiguration(
-                useCommand: true,
-                useOption: false,
-                useControl: true,
-                useShift: false,
-                keyCode: 0x08
-            ),
             language: "en",
-            translationTargetLanguage: "PT-BR",
             autoPunctuation: false,
             transcriptionQualityPreset: .high,
             gpuAccelerationEnabled: false,
@@ -51,9 +64,7 @@ final class AppSettingsTests: XCTestCase {
         )
 
         XCTAssertEqual(settings.hotkeyConfig.keyCode, 0x31)
-        XCTAssertEqual(settings.translationHotkeyConfig.keyCode, 0x08)
         XCTAssertEqual(settings.language, "en")
-        XCTAssertEqual(settings.translationTargetLanguage, "pt-br")
         XCTAssertFalse(settings.autoPunctuation)
         XCTAssertEqual(settings.transcriptionQualityPreset, .high)
         XCTAssertFalse(settings.gpuAccelerationEnabled)
@@ -75,19 +86,7 @@ final class AppSettingsTests: XCTestCase {
                 shiftSide: .right,
                 keyCode: 0x24
             ),
-            translationHotkeyConfig: HotkeyConfiguration(
-                useCommand: false,
-                useOption: true,
-                useControl: true,
-                useShift: false,
-                commandSide: .either,
-                optionSide: .left,
-                controlSide: .right,
-                shiftSide: .either,
-                keyCode: 0x31
-            ),
             language: "ja",
-            translationTargetLanguage: "PT-BR",
             autoPunctuation: false,
             transcriptionQualityPreset: .low,
             gpuAccelerationEnabled: false,
@@ -100,12 +99,7 @@ final class AppSettingsTests: XCTestCase {
         let decodedSettings = try JSONDecoder().decode(AppSettings.self, from: data)
 
         XCTAssertEqual(decodedSettings.hotkeyConfig, originalSettings.hotkeyConfig)
-        XCTAssertEqual(
-            decodedSettings.translationHotkeyConfig,
-            originalSettings.translationHotkeyConfig
-        )
         XCTAssertEqual(decodedSettings.language, originalSettings.language)
-        XCTAssertEqual(decodedSettings.translationTargetLanguage, "pt-br")
         XCTAssertEqual(decodedSettings.autoPunctuation, originalSettings.autoPunctuation)
         XCTAssertEqual(
             decodedSettings.transcriptionQualityPreset,
@@ -174,12 +168,7 @@ final class AppSettingsTests: XCTestCase {
                 keyCode: 49
             )
         )
-        XCTAssertEqual(decoded.translationHotkeyConfig, .unset)
         XCTAssertEqual(decoded.language, "en")
-        XCTAssertEqual(
-            decoded.translationTargetLanguage,
-            AppSettings.defaultTranslationTargetLanguage
-        )
         XCTAssertFalse(decoded.autoPunctuation)
         XCTAssertEqual(decoded.transcriptionQualityPreset, .high)
         XCTAssertTrue(decoded.gpuAccelerationEnabled)
@@ -201,28 +190,6 @@ final class AppSettingsTests: XCTestCase {
             AppSettings(recordingCompletionTimeout: .infinity).recordingCompletionTimeout,
             AppSettings.defaultRecordingCompletionTimeout
         )
-    }
-
-    func testTranslationTargetLanguageNormalizationDuringDecoding() throws {
-        let invalidJSON = """
-        {
-          "translationTargetLanguage": "PT_BR"
-        }
-        """.data(using: .utf8)!
-        let validJSON = """
-        {
-          "translationTargetLanguage": "PT-BR"
-        }
-        """.data(using: .utf8)!
-
-        let invalidDecoded = try JSONDecoder().decode(AppSettings.self, from: invalidJSON)
-        let validDecoded = try JSONDecoder().decode(AppSettings.self, from: validJSON)
-
-        XCTAssertEqual(
-            invalidDecoded.translationTargetLanguage,
-            AppSettings.defaultTranslationTargetLanguage
-        )
-        XCTAssertEqual(validDecoded.translationTargetLanguage, "pt-br")
     }
 
     func testRecordingCompletionTimeoutSupportsExtendedMLXRange() {

@@ -3,11 +3,10 @@ import AppKit
 final class HotkeyManager: NSObject, @unchecked Sendable {
     private var monitor: Any?
     private var settingsObserver: NSObjectProtocol?
-    var hotkeyKeyDown: ((RecordingRequestMode) -> Void)?
-    var hotkeyKeyUp: ((RecordingRequestMode) -> Void)?
-    private var hotkeyStateByMode: [RecordingRequestMode: HotkeyState] = [:]
+    var hotkeyKeyDown: (() -> Void)?
+    var hotkeyKeyUp: (() -> Void)?
+    private var state = HotkeyState(configuration: .unset)
     private let lock = NSLock()
-    private var _previousModifiers: NSEvent.ModifierFlags = []
 
     override init() {
         super.init()
@@ -39,105 +38,36 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
     }
 
     private func applySettings(_ settings: AppSettings) {
-        let translationHotkeyConfig =
-            settings.translationHotkeyConfig.isSet && settings.translationHotkeyConfig == settings.hotkeyConfig
-            ? .unset
-            : settings.translationHotkeyConfig
-
-        var releasedModes: [RecordingRequestMode] = []
         lock.lock()
-        for mode in RecordingRequestMode.allCases {
-            if hotkeyStateByMode[mode]?.isPressed == true {
-                releasedModes.append(mode)
-            }
-        }
-        hotkeyStateByMode = [
-            .transcribe: HotkeyState(configuration: settings.hotkeyConfig),
-            .translate: HotkeyState(configuration: translationHotkeyConfig),
-        ]
-        _previousModifiers = []
+        let wasPressed = state.configure(settings.hotkeyConfig)
         lock.unlock()
 
         Logger.shared.log(
-            "HotkeyManager: Updated configurations - transcription=\(settings.hotkeyConfig.description), translation=\(translationHotkeyConfig.description)",
+            "HotkeyManager: Updated configuration - transcription=\(settings.hotkeyConfig.description)",
             level: .info
         )
 
-        for mode in releasedModes {
+        if wasPressed {
             DispatchQueue.main.async { [weak self] in
-                self?.hotkeyKeyUp?(mode)
+                self?.hotkeyKeyUp?()
             }
         }
     }
 
     private func handleKeyEvent(_ event: NSEvent) {
-        let currentModifiers = HotkeyConfiguration.relevantModifiers(from: event.modifierFlags)
-
         lock.lock()
-        let previousModifiers = HotkeyConfiguration.relevantModifiers(from: _previousModifiers)
-        var hotkeyStateByMode = self.hotkeyStateByMode
-        var actions: [HotkeyEventAction] = []
-
-        for mode in RecordingRequestMode.allCases {
-            var state = hotkeyStateByMode[mode] ?? HotkeyState(configuration: .unset)
-            let config = state.configuration
-
-            guard config.isSet else {
-                if state.isPressed {
-                    state.isPressed = false
-                    actions.append(.released(mode))
-                }
-                hotkeyStateByMode[mode] = state
-                continue
-            }
-
-            let currentModifiersMatch = config.matches(modifierFlags: currentModifiers)
-            let previousModifiersMatch = config.matches(modifierFlags: previousModifiers)
-
-            if config.keyCode == 0 {
-                guard event.type == .flagsChanged else {
-                    hotkeyStateByMode[mode] = state
-                    continue
-                }
-
-                if currentModifiersMatch && !previousModifiersMatch && !state.isPressed {
-                    state.isPressed = true
-                    actions.append(.pressed(mode))
-                } else if previousModifiersMatch && !currentModifiersMatch && state.isPressed {
-                    state.isPressed = false
-                    actions.append(.released(mode))
-                }
-
-                hotkeyStateByMode[mode] = state
-                continue
-            }
-
-            if event.type == .keyDown, currentModifiersMatch, event.keyCode == config.keyCode, !state.isPressed {
-                state.isPressed = true
-                actions.append(.pressed(mode))
-            } else if event.type == .keyUp, event.keyCode == config.keyCode, state.isPressed {
-                state.isPressed = false
-                actions.append(.released(mode))
-            } else if event.type == .flagsChanged, previousModifiersMatch, !currentModifiersMatch, state.isPressed {
-                state.isPressed = false
-                actions.append(.released(mode))
-            }
-
-            hotkeyStateByMode[mode] = state
-        }
-
-        self.hotkeyStateByMode = hotkeyStateByMode
-        _previousModifiers = event.modifierFlags
+        let transition = state.handle(
+            type: event.type,
+            keyCode: event.keyCode,
+            modifiers: HotkeyConfiguration.relevantModifiers(from: event.modifierFlags)
+        )
         lock.unlock()
-
-        for action in actions {
-            DispatchQueue.main.async { [weak self] in
-                switch action {
-                case let .pressed(mode):
-                    self?.hotkeyKeyDown?(mode)
-                case let .released(mode):
-                    self?.hotkeyKeyUp?(mode)
-                }
+        guard let isPressed = transition else { return }
+        DispatchQueue.main.async { [weak self] in
+            if isPressed {
+                self?.hotkeyKeyDown?()
+            } else {
+                self?.hotkeyKeyUp?()
             }
         }
     }
@@ -154,12 +84,38 @@ final class HotkeyManager: NSObject, @unchecked Sendable {
     }
 }
 
-private struct HotkeyState {
-    let configuration: HotkeyConfiguration
-    var isPressed = false
-}
+struct HotkeyState {
+    private let configuration: HotkeyConfiguration
+    private(set) var isPressed = false
+    private var previousModifiers: NSEvent.ModifierFlags = []
 
-private enum HotkeyEventAction {
-    case pressed(RecordingRequestMode)
-    case released(RecordingRequestMode)
+    init(configuration: HotkeyConfiguration) {
+        self.configuration = configuration
+    }
+
+    mutating func configure(_ configuration: HotkeyConfiguration) -> Bool {
+        let wasPressed = isPressed
+        self = Self(configuration: configuration)
+        return wasPressed
+    }
+
+    // nil means no transition; true/false mean press/release respectively.
+    mutating func handle(type: NSEvent.EventType, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool? {
+        defer { previousModifiers = modifiers }
+        guard configuration.isSet else { return nil }
+        let matches = configuration.matches(modifierFlags: modifiers)
+        let previouslyMatched = configuration.matches(modifierFlags: previousModifiers)
+        let wasPressed = isPressed
+        if configuration.keyCode == 0 {
+            guard type == .flagsChanged else { return nil }
+            if matches && !previouslyMatched { isPressed = true }
+            else if previouslyMatched && !matches { isPressed = false }
+        } else if type == .keyDown && matches && keyCode == configuration.keyCode {
+            isPressed = true
+        } else if (type == .keyUp && keyCode == configuration.keyCode)
+                    || (type == .flagsChanged && previouslyMatched && !matches) {
+            isPressed = false
+        }
+        return isPressed == wasPressed ? nil : isPressed
+    }
 }
