@@ -27,11 +27,13 @@ def wait_for_line(process, timeout_seconds):
     return None
 
 
-def wait_for_transcript_line(process, timeout_seconds):
+def wait_for_non_control_line(process, timeout_seconds):
     deadline = time.time() + timeout_seconds
 
     while time.time() < deadline:
-        line = wait_for_line(process, timeout_seconds=max(1, int(deadline - time.time())))
+        line = wait_for_line(
+            process, timeout_seconds=max(1, int(deadline - time.time()))
+        )
         if line is None:
             return None
         if line.startswith("__KOTOTYPE_CONTROL__:"):
@@ -77,7 +79,9 @@ def resolve_smoke_language():
 
 def parse_smoke_arguments(arguments):
     healthcheck_only = "--healthcheck" in arguments
-    positional_arguments = [argument for argument in arguments if argument != "--healthcheck"]
+    positional_arguments = [
+        argument for argument in arguments if argument != "--healthcheck"
+    ]
     if len(positional_arguments) > 1:
         raise ValueError("Only one server binary path may be provided")
     server_binary = (
@@ -93,7 +97,9 @@ def main():
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
-    server_binary = configured_server_binary or (project_root / "dist" / "whisper_server")
+    server_binary = configured_server_binary or (
+        project_root / "dist" / "whisper_server"
+    )
     test_audio = resolve_smoke_audio_path(project_root)
     smoke_language = resolve_smoke_language()
     real_home = Path.home()
@@ -135,7 +141,7 @@ def main():
                 stdin.write(f"__KOTOTYPE_HEALTHCHECK__:{token}\n")
                 stdin.flush()
                 stdin.close()
-                line = wait_for_line(process, timeout_seconds=15)
+                line = wait_for_non_control_line(process, timeout_seconds=15)
                 expected = f"__KOTOTYPE_HEALTHCHECK_OK__:{token}"
                 if line != expected:
                     stderr = read_available_stderr(process)
@@ -148,22 +154,25 @@ def main():
                 print("Whisper server healthcheck passed")
                 return 0
 
-            request = json.dumps(
-                {
-                    "type": "transcription_request",
-                    "audio_path": str(test_audio),
-                    "language": smoke_language,
-                    "auto_punctuation": True,
-                    "quality_preset": "medium",
-                    "gpu_acceleration_enabled": False,
-                },
-                ensure_ascii=False,
-            ) + "\n"
+            request = (
+                json.dumps(
+                    {
+                        "type": "transcription_request",
+                        "audio_path": str(test_audio),
+                        "language": smoke_language,
+                        "auto_punctuation": True,
+                        "quality_preset": "medium",
+                        "gpu_acceleration_enabled": False,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
             stdin.write(request)
             stdin.flush()
             stdin.close()
 
-            line = wait_for_transcript_line(process, timeout_seconds=180)
+            line = wait_for_non_control_line(process, timeout_seconds=180)
             if line is None:
                 stderr = read_available_stderr(process)
                 print("No response from whisper_server", file=sys.stderr)
