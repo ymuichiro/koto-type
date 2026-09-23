@@ -3,6 +3,240 @@ import Foundation
 import XCTest
 
 final class MultiProcessManagerTests: XCTestCase {
+    func testRealProcessRetryCannotCrossReinitialization() throws {
+        let python = ProcessInfo.processInfo.environment["KOTOTYPE_TEST_PYTHON"] ?? "/usr/bin/python3"
+        guard FileManager.default.isExecutableFile(atPath: python) else {
+            throw XCTSkip("Set KOTOTYPE_TEST_PYTHON to run the real child-process regression")
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("worker-process-\(UUID().uuidString)")
+        let venv = directory.appendingPathComponent(".venv/bin")
+        try FileManager.default.createDirectory(at: venv, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createSymbolicLink(at: venv.appendingPathComponent("python"), withDestinationURL: URL(fileURLWithPath: python))
+        let script = directory.appendingPathComponent("server.py")
+        try """
+        import json, os, pathlib, sys
+        root = pathlib.Path(__file__).parent
+        with (root / "pids").open("a") as out:
+            out.write(str(os.getpid()) + "\\n")
+        for line in sys.stdin:
+            request = json.loads(line)
+            name = pathlib.Path(request["audio_path"]).name
+            with (root / "attempts").open("a") as out:
+                out.write(name + "\\n")
+            if name == "old.wav":
+                sys.exit(1)
+            print("__KOTOTYPE_CONTROL__:" + json.dumps({
+                "type": "transcription_result", "request_id": request["request_id"],
+                "text": "new result"
+            }), flush=True)
+        """.write(to: script, atomically: true, encoding: .utf8)
+        let runtime = PythonProcessManager.Runtime(
+            currentDirectoryPath: { directory.path },
+            bundlePath: { directory.appendingPathComponent("runner").path },
+            bundleResourcePath: { nil },
+            fileExists: { FileManager.default.fileExists(atPath: $0) },
+            findExecutable: { _ in nil }
+        )
+        var firstWorker: PythonProcessManager?
+        let manager = MultiProcessManager(processManagerFactory: {
+            let worker = PythonProcessManager(runtime: runtime)
+            if firstWorker == nil { firstWorker = worker }
+            return worker
+        }, healthCheckStartupGraceSeconds: 30)
+        defer { manager.stop() }
+        let completed = expectation(description: "fresh audio completes")
+        manager.segmentComplete = { index, text in
+            XCTAssertEqual(index, 702)
+            XCTAssertEqual(text, "new result")
+            completed.fulfill()
+        }
+        manager.segmentFailed = { _, error in XCTFail("Unexpected failure: \(error)") }
+        manager.initialize(count: 1, scriptPath: script.path)
+        let first = try XCTUnwrap(firstWorker)
+        let termination = first.processTerminated
+        first.processTerminated = { status in
+            termination?(status)
+            DispatchQueue.main.async {
+                manager.initialize(count: 1, scriptPath: script.path)
+                manager.processFile(url: directory.appendingPathComponent("new.wav"), index: 702, settings: AppSettings())
+            }
+        }
+        manager.processFile(url: directory.appendingPathComponent("old.wav"), index: 701, settings: AppSettings())
+        wait(for: [completed], timeout: 10)
+        let settled = expectation(description: "old retry deadline passed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { settled.fulfill() }
+        wait(for: [settled], timeout: 2)
+        manager.stop()
+        let attempts = try String(contentsOf: directory.appendingPathComponent("attempts"), encoding: .utf8).split(separator: "\n").map(String.init)
+        XCTAssertEqual(attempts, ["old.wav", "new.wav"])
+        let pids = try String(contentsOf: directory.appendingPathComponent("pids"), encoding: .utf8).split(separator: "\n").compactMap { Int32($0) }
+        XCTAssertGreaterThanOrEqual(pids.count, 2)
+        for pid in pids {
+            XCTAssertEqual(kill(pid, 0), -1, "Test child must be gone after stop")
+            XCTAssertEqual(errno, ESRCH)
+        }
+    }
+    func testDelayedRetryDoesNotSurviveReinitialization() {
+        var workers: [MockMultiProcessPythonManager] = []
+        let manager = MultiProcessManager {
+            let worker = MockMultiProcessPythonManager(sendSucceeds: !workers.isEmpty)
+            workers.append(worker)
+            return worker
+        }
+        defer { manager.stop() }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        manager.processFile(url: URL(fileURLWithPath: "/tmp/old-session.wav"), index: 601, settings: AppSettings())
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        let newWorker = workers.last!
+        let settled = expectation(description: "old retry deadline passed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { settled.fulfill() }
+        wait(for: [settled], timeout: 2)
+        XCTAssertTrue(newWorker.receivedLanguages.isEmpty, "Old audio must not enter the new worker lifecycle")
+    }
+
+    func testDelayedRecoveryDoesNotStopReinitializedWorker() {
+        var workers: [MockMultiProcessPythonManager] = []
+        let manager = MultiProcessManager {
+            let worker = MockMultiProcessPythonManager(sendSucceeds: true)
+            workers.append(worker)
+            return worker
+        }
+        defer { manager.stop() }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        workers[0].simulateTermination(status: 1)
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        let newWorker = workers.last!
+        let settled = expectation(description: "old recovery deadline passed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { settled.fulfill() }
+        wait(for: [settled], timeout: 2)
+        XCTAssertEqual(newWorker.stopCallCount, 0)
+        XCTAssertEqual(workers.count, 2)
+    }
+    func testRetryUsesNewIdentityAndRejectsPreviousAttemptResponse() {
+        var workers: [MockMultiProcessPythonManager] = []
+        let manager = MultiProcessManager {
+            let worker = MockMultiProcessPythonManager(sendSucceeds: !workers.isEmpty)
+            worker.onSend = { instance, _ in
+                guard workers.count > 1 else { return }
+                XCTAssertNotEqual(instance.requestID, workers[0].requestID)
+                instance.outputReceived?(transcriptionTestResponse(requestID: workers[0].requestID, text: "old attempt"))
+                instance.emitText("retry result")
+            }
+            workers.append(worker)
+            return worker
+        }
+        let completion = expectation(description: "retry result only")
+        manager.segmentComplete = { _, text in
+            XCTAssertEqual(text, "retry result")
+            completion.fulfill()
+        }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        manager.processFile(url: URL(fileURLWithPath: "/tmp/retry.wav"), index: 505, settings: AppSettings())
+        wait(for: [completion], timeout: 2)
+        XCTAssertEqual(workers.count, 2)
+    }
+
+    func testCancelledWorkerCapturedCallbackCannotCompleteNewRecording() {
+        var workers: [MockMultiProcessPythonManager] = []
+        let manager = MultiProcessManager {
+            let worker = MockMultiProcessPythonManager(sendSucceeds: true)
+            workers.append(worker)
+            return worker
+        }
+        let completion = expectation(description: "new recording only")
+        manager.segmentComplete = { index, text in
+            XCTAssertEqual(index, 507)
+            XCTAssertEqual(text, "new recording")
+            completion.fulfill()
+        }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        manager.processFile(url: URL(fileURLWithPath: "/tmp/old.wav"), index: 506, settings: AppSettings(), sessionID: 1)
+        let lateCallback = workers[0].outputReceived
+        let oldRequestID = workers[0].requestID
+        manager.cancel(sessionID: 1)
+        manager.processFile(url: URL(fileURLWithPath: "/tmp/new.wav"), index: 507, settings: AppSettings(), sessionID: 2)
+        lateCallback?(transcriptionTestResponse(requestID: oldRequestID, text: "cancelled recording"))
+        workers.last?.emitText("new recording")
+        wait(for: [completion], timeout: 1)
+    }
+
+    func testMismatchedIdentityIsIgnoredAndMatchingIdentityCompletes() {
+        let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+        let manager = MultiProcessManager { mock }
+        let completion = expectation(description: "current response completes")
+        manager.segmentComplete = { index, text in
+            XCTAssertEqual(index, 503)
+            XCTAssertEqual(text, "current")
+            completion.fulfill()
+        }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        manager.processFile(url: URL(fileURLWithPath: "/tmp/current.wav"), index: 503, settings: AppSettings())
+        mock.outputReceived?(transcriptionTestResponse(requestID: "previous-request", text: "stale"))
+        mock.emitText("current")
+        wait(for: [completion], timeout: 1)
+    }
+
+    func testMatchingBackendErrorUsesFailureCallback() {
+        let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+        let manager = MultiProcessManager { mock }
+        let failure = expectation(description: "backend failure is distinct from success")
+        manager.segmentComplete = { _, _ in XCTFail("Error is not a transcription") }
+        manager.segmentFailed = { index, code in
+            XCTAssertEqual(index, 504)
+            XCTAssertEqual(code, "invalid_audio")
+            failure.fulfill()
+        }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        manager.processFile(url: URL(fileURLWithPath: "/tmp/current.wav"), index: 504, settings: AppSettings())
+        mock.outputReceived?(PythonProcessManager.controlMessagePrefix +
+            "{\"type\":\"transcription_result\",\"request_id\":\"\(mock.requestID)\",\"error\":\"invalid_audio\"}")
+        wait(for: [failure], timeout: 1)
+    }
+
+    func testUncorrelatedOutputMustNotCompleteCurrentRecording() {
+        let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+        let manager = MultiProcessManager { mock }
+        let completion = expectation(description: "uncorrelated text is not a completed recording")
+        completion.isInverted = true
+        manager.segmentComplete = { _, _ in completion.fulfill() }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/current-recording.wav"),
+            index: 501,
+            settings: AppSettings()
+        )
+
+        // A delayed legacy line has no identity. It cannot be attributed to
+        // whichever recording happens to occupy this worker now.
+        mock.outputReceived?("previous recording text")
+        wait(for: [completion], timeout: 0.1)
+    }
+
+    func testControlErrorMustNeverBeInsertedAsTranscription() {
+        let mock = MockMultiProcessPythonManager(sendSucceeds: true)
+        let manager = MultiProcessManager { mock }
+        let completion = expectation(description: "control payload is not transcription text")
+        completion.isInverted = true
+        manager.segmentComplete = { _, _ in completion.fulfill() }
+        manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
+        defer { manager.stop() }
+        manager.processFile(
+            url: URL(fileURLWithPath: "/tmp/current-recording.wav"),
+            index: 502,
+            settings: AppSettings()
+        )
+
+        mock.outputReceived?(PythonProcessManager.controlMessagePrefix +
+            #"{"type":"transcription_error","code":"unsupported_request_mode"}"#)
+        wait(for: [completion], timeout: 0.1)
+    }
+
     func testInitializeStopsExistingProcessesBeforeReinitialize() {
         var created: [MockMultiProcessPythonManager] = []
         let manager = MultiProcessManager {
@@ -23,7 +257,7 @@ final class MultiProcessManagerTests: XCTestCase {
 
     func testProcessFileRetriesAndCompletesWithEmptyOnRepeatedSendFailure() {
         let sendAttempts = LockedInt()
-        let completion = expectation(description: "segment completes with empty")
+        let completion = expectation(description: "segment reports failure")
 
         let manager = MultiProcessManager {
             let mock = MockMultiProcessPythonManager(sendSucceeds: false)
@@ -33,9 +267,10 @@ final class MultiProcessManagerTests: XCTestCase {
             return mock
         }
 
-        manager.segmentComplete = { index, text in
+        manager.segmentComplete = { _, _ in XCTFail("Failed inference must not report success") }
+        manager.segmentFailed = { index, error in
             if index == 5 {
-                XCTAssertEqual(text, "")
+                XCTAssertEqual(error, "retry_exhausted")
                 completion.fulfill()
             }
         }
@@ -53,7 +288,7 @@ final class MultiProcessManagerTests: XCTestCase {
 
     func testSegmentTimeoutRetriesAndCompletesWithEmptyWhenNoOutputArrives() {
         let sendAttempts = LockedInt()
-        let completion = expectation(description: "segment completes with empty after timeout retries")
+        let completion = expectation(description: "segment reports failure after timeout retries")
 
         let manager = MultiProcessManager(
             processManagerFactory: {
@@ -70,9 +305,10 @@ final class MultiProcessManagerTests: XCTestCase {
             healthCheckStartupGraceSeconds: 5.0
         )
 
-        manager.segmentComplete = { index, text in
+        manager.segmentComplete = { _, _ in XCTFail("Failed inference must not report success") }
+        manager.segmentFailed = { index, error in
             if index == 11 {
-                XCTAssertEqual(text, "")
+                XCTAssertEqual(error, "segment_timeout")
                 completion.fulfill()
             }
         }
@@ -107,9 +343,10 @@ final class MultiProcessManagerTests: XCTestCase {
             healthCheckStartupGraceSeconds: 5.0
         )
 
-        manager.segmentComplete = { index, text in
+        manager.segmentComplete = { _, _ in XCTFail("Failed inference must not report success") }
+        manager.segmentFailed = { index, error in
             if index == 12 {
-                XCTAssertEqual(text, "")
+                XCTAssertEqual(error, "segment_timeout")
                 completion.fulfill()
             }
         }
@@ -134,7 +371,7 @@ final class MultiProcessManagerTests: XCTestCase {
         let manager = MultiProcessManager {
             let mock = MockMultiProcessPythonManager(sendSucceeds: true)
             mock.onSend = { instance, _ in
-                instance.outputReceived?("translated text")
+                instance.emitText("translated text")
             }
             created.append(mock)
             return mock
@@ -173,7 +410,7 @@ final class MultiProcessManagerTests: XCTestCase {
             mock.onSend = { instance, path in
                 sendOrder.append(path)
                 if path != "/tmp/first.wav" {
-                    instance.outputReceived?(path)
+                    instance.emitText(path)
                 }
             }
             worker = mock
@@ -191,7 +428,7 @@ final class MultiProcessManagerTests: XCTestCase {
         }
 
         XCTAssertEqual(manager.getPendingSegmentCount(), 2)
-        worker.outputReceived?("first")
+        worker.emitText("first")
         wait(for: [completed], timeout: 2.0)
         XCTAssertEqual(
             sendOrder.value,
@@ -207,7 +444,7 @@ final class MultiProcessManagerTests: XCTestCase {
         let manager = MultiProcessManager {
             let mock = MockMultiProcessPythonManager(sendSucceeds: true)
             mock.onSend = { instance, _ in
-                instance.outputReceived?("日本語")
+                instance.emitText("日本語")
             }
             created.append(mock)
             return mock
@@ -318,7 +555,7 @@ final class MultiProcessManagerTests: XCTestCase {
     }
 
     func testProcessFileRetryPreservesTranslateModeAndTargetLanguage() {
-        let completion = expectation(description: "translated segment completes empty after retries")
+        let completion = expectation(description: "translated segment reports failure after retries")
         var created: [MockMultiProcessPythonManager] = []
         let settings = AppSettings(translationTargetLanguage: "PT-BR")
 
@@ -328,9 +565,10 @@ final class MultiProcessManagerTests: XCTestCase {
             return mock
         }
 
-        manager.segmentComplete = { index, text in
+        manager.segmentComplete = { _, _ in XCTFail("Failed inference must not report success") }
+        manager.segmentFailed = { index, error in
             if index == 14 {
-                XCTAssertEqual(text, "")
+                XCTAssertEqual(error, "retry_exhausted")
                 completion.fulfill()
             }
         }
@@ -384,7 +622,7 @@ final class MultiProcessManagerTests: XCTestCase {
 
     func testStatus9DuringProcessingCompletesWithoutRetryAndSuppressesImmediateRecovery() {
         let sendAttempts = LockedInt()
-        let completion = expectation(description: "segment completes with empty after fatal termination")
+        let completion = expectation(description: "segment reports failure after fatal termination")
         var created: [MockMultiProcessPythonManager] = []
 
         let manager = MultiProcessManager {
@@ -397,9 +635,10 @@ final class MultiProcessManagerTests: XCTestCase {
             return mock
         }
 
-        manager.segmentComplete = { index, text in
+        manager.segmentComplete = { _, _ in XCTFail("Failed inference must not report success") }
+        manager.segmentFailed = { index, error in
             if index == 7 {
-                XCTAssertEqual(text, "")
+                XCTAssertEqual(error, "process_terminated")
                 completion.fulfill()
             }
         }
@@ -501,7 +740,7 @@ final class MultiProcessManagerTests: XCTestCase {
     }
 
     func testScreenshotContextIsDroppedAfterFirstSendAttempt() {
-        let completion = expectation(description: "segment completes with empty")
+        let completion = expectation(description: "segment reports failure")
         let capturedContexts = LockedOptionalStringArray()
 
         let manager = MultiProcessManager {
@@ -512,9 +751,10 @@ final class MultiProcessManagerTests: XCTestCase {
             return mock
         }
 
-        manager.segmentComplete = { index, text in
+        manager.segmentComplete = { _, _ in XCTFail("Failed inference must not report success") }
+        manager.segmentFailed = { index, error in
             if index == 21 {
-                XCTAssertEqual(text, "")
+                XCTAssertEqual(error, "retry_exhausted")
                 completion.fulfill()
             }
         }
@@ -545,7 +785,7 @@ final class MultiProcessManagerTests: XCTestCase {
                     PythonProcessManager.controlMessagePrefix
                         + "{\"effectiveBackend\":\"cpu\",\"gpuRequested\":true,\"gpuAvailable\":false,\"fallbackReason\":\"mlx_runtime_import_failed\"}"
                 )
-                instance.outputReceived?("segment text")
+                instance.emitText("segment text")
             }
             return mock
         }
@@ -598,7 +838,7 @@ final class MultiProcessManagerTests: XCTestCase {
             }
             mock.onSend = { instance, _ in
                 sendOrder.append("segment")
-                instance.outputReceived?("ready")
+                instance.emitText("ready")
             }
             return mock
         }
@@ -646,6 +886,11 @@ final class MultiProcessManagerTests: XCTestCase {
 }
 
 private final class MockMultiProcessPythonManager: PythonProcessManaging {
+    private(set) var requestID = ""
+
+    func emitText(_ text: String) {
+        outputReceived?(transcriptionTestResponse(requestID: requestID, text: text))
+    }
     var outputReceived: ((String) -> Void)?
     var processTerminated: ((Int32) -> Void)?
 
@@ -679,8 +924,10 @@ private final class MockMultiProcessPythonManager: PythonProcessManaging {
         gpuAccelerationEnabled: Bool,
         mode: RecordingRequestMode,
         translationTargetLanguage: String,
-        screenshotContext: String?
+        screenshotContext: String?,
+        requestID: String
     ) -> Bool {
+        self.requestID = requestID
         receivedLanguages.append(language)
         receivedModes.append(mode)
         receivedTranslationTargetLanguages.append(translationTargetLanguage)

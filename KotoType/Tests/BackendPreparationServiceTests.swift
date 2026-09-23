@@ -113,7 +113,8 @@ private final class MockPreparationPythonProcessManager: PythonProcessManaging {
         gpuAccelerationEnabled: Bool,
         mode: RecordingRequestMode,
         translationTargetLanguage: String,
-        screenshotContext: String?
+        screenshotContext: String?,
+        requestID: String
     ) -> Bool {
         sendInputCallCount += 1
         return true

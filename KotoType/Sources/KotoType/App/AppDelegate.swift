@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 @MainActor
 private final class RecordingSessionContext {
+    var hasFailedSegments = false
     let id: Int
     let mode: RecordingRequestMode
     let translationTargetLanguage: String
@@ -647,10 +648,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         isRecording = false
         activeRecordingSessionID = nil
-        session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.sessionByID[sessionID]?.clearScreenshotContext()
-        }
         Logger.shared.log(
             "Stopping audio recording for session \(sessionID)... requestMode=\(session.mode.rawValue), translationTargetLanguage=\(session.translationTargetLanguage)",
             level: .info
@@ -687,6 +684,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     result: result
                 )
             }
+        }
+        session.setScreenshotContext(ScreenContextExtractor.captureScreenTextContext())
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.sessionByID[sessionID]?.clearScreenshotContext()
         }
     }
 
@@ -890,14 +891,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     "Ignoring late segment completion for cleaned-up global index=\(globalIndex).",
                     level: .debug
                 )
-                cleanupSegmentFile(globalIndex: globalIndex)
                 return
             }
             Logger.shared.log(
                 "Received segment completion for unknown global index=\(globalIndex). Ignoring stale callback.",
                 level: .warning
             )
-            cleanupSegmentFile(globalIndex: globalIndex)
+            // Without a route this callback owns no file. Recovery may still
+            // be waiting for the user's explicit save/discard decision.
             return
         }
 
@@ -913,6 +914,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         session.batchTranscriptionManager.completeSegment(index: route.localIndex, text: output)
         tryFinalizePendingSessionsIfNeeded()
+    }
+
+    private func handleSegmentFailure(globalIndex: Int) {
+        guard let route = segmentRouter.consume(globalIndex: globalIndex),
+              let session = sessionByID[route.sessionID] else { return }
+        session.hasFailedSegments = true
+        session.batchTranscriptionManager.completeSegment(index: route.localIndex, text: "")
+        tryFinalizePendingSessionsIfNeeded()
+        offerFailedAudioRecovery(globalIndex: globalIndex)
+    }
+
+    private func offerFailedAudioRecovery(globalIndex: Int) {
+        guard let source = pendingSegmentFiles[globalIndex] else { return }
+
+        // The segment stays in pendingSegmentFiles while the user decides,
+        // protecting it from stale-file cleanup. No persistent copy is made
+        // unless the user explicitly chooses a destination.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.pendingSegmentFiles[globalIndex] == source else { return }
+            defer { self.cleanupSegmentFile(globalIndex: globalIndex) }
+            while true {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "文字起こしに失敗しました"
+                alert.informativeText = "この録音の結果は入力していません。音声を保存すると、音声ファイルの取り込みから再試行できます。保存しない音声は破棄されます。"
+                alert.addButton(withTitle: "音声を保存…")
+                alert.addButton(withTitle: "破棄")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.wav]
+                panel.nameFieldStringValue = "recording.wav"
+                guard panel.runModal() == .OK, let destination = panel.url else { continue }
+                do {
+                    try RecordingAudioExport.save(source: source, destination: destination)
+                    return
+                } catch {
+                    let failure = NSAlert()
+                    failure.messageText = "音声を保存できませんでした"
+                    failure.informativeText = "別の保存先を選んでください。元の一時音声はまだ破棄していません。"
+                    failure.runModal()
+                }
+            }
+        }
     }
 
     private func enqueueSessionForFinalization(sessionID: Int, timeoutInterval: TimeInterval) {
@@ -939,9 +984,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, let session = self.sessionByID[sessionID] else { return }
             session.completionTimeoutWorkItem = nil
+            if !session.batchTranscriptionManager.isComplete() {
+                session.hasFailedSegments = true
+                let unfinishedIndices = self.segmentRouter.removeAll(forSessionID: sessionID)
+                self.rememberIgnoredLateSegmentCompletions(unfinishedIndices)
+                self.multiProcessManager?.cancel(sessionID: sessionID)
+                for index in unfinishedIndices {
+                    self.offerFailedAudioRecovery(globalIndex: index)
+                }
+            }
             self.finalizationQueue.markTimedOut(sessionID: sessionID)
             Logger.shared.log(
-                "Transcription timeout reached for session \(sessionID) after \(Int(normalizedTimeoutInterval)) seconds. Finalizing with available text.",
+                "Transcription timeout reached for session \(sessionID) after \(Int(normalizedTimeoutInterval)) seconds. Incomplete results will not be inserted.",
                 level: .warning
             )
             self.tryFinalizePendingSessionsIfNeeded()
@@ -988,7 +1042,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         session.cancelCompletionTimeout()
         session.cancelFinalizationReadyWorkItem()
 
-        let finalText = session.batchTranscriptionManager.finalize() ?? ""
+        let completedText = session.batchTranscriptionManager.finalize() ?? ""
+        let finalText = session.hasFailedSegments ? "" : completedText
         let didInsertText: Bool
         if !finalText.isEmpty {
             Logger.shared.log(
@@ -1438,6 +1493,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 level: .info
             )
             self.handleSegmentComplete(globalIndex: segmentIndex, output: output)
+        }
+        multiProcessManager?.segmentFailed = { [weak self] segmentIndex, _ in
+            self?.handleSegmentFailure(globalIndex: segmentIndex)
         }
     }
 

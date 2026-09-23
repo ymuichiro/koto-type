@@ -35,6 +35,7 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         Logger.shared.log("BatchTranscriptionManager: finalize called", level: .info)
         lock.lock()
         defer { lock.unlock() }
+        guard allSegmentsComplete else { return nil }
         
         let combined = combineSegments()
         
@@ -72,7 +73,12 @@ final class BatchTranscriptionManager: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         
-        return pendingSegments.allSatisfy { pending in
+        return allSegmentsComplete
+    }
+
+    // Caller holds lock so checking completeness and reading text are atomic.
+    private var allSegmentsComplete: Bool {
+        pendingSegments.allSatisfy { pending in
             pending.index < completedSegments.count &&
                 completedSegments[pending.index]?.text != nil
         }

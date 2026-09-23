@@ -5,6 +5,7 @@ import ast
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from python import whisper_server
@@ -13,6 +14,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class UserDictionaryTests(unittest.TestCase):
+    def test_application_support_override_isolates_dictionary_and_runtime_state(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"KOTOTYPE_APPLICATION_SUPPORT_DIR": directory}
+        ):
+            self.assertEqual(
+                whisper_server.default_application_support_directory(), directory
+            )
+            for path in [
+                whisper_server.default_dictionary_path(),
+                whisper_server.default_server_state_path(),
+                whisper_server.default_server_state_lock_path(),
+                whisper_server.default_managed_cpu_model_path(),
+                whisper_server.default_managed_mlx_model_path(),
+                whisper_server.default_managed_model_cache_path(),
+            ]:
+                self.assertTrue(Path(path).is_relative_to(directory), path)
+            log_path, log = whisper_server.setup_logging()
+            log("isolated test")
+            self.assertEqual(Path(log_path).parent, Path(directory))
+            self.assertIn("isolated test", Path(log_path).read_text())
+
     def assertPromptUsesNoTranslationGuidance(self, prompt):
         self.assertIsNotNone(prompt)
         self.assertIn("Do not translate, summarize, or rewrite into another language.", prompt)

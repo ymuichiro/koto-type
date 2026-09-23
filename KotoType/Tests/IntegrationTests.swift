@@ -76,7 +76,7 @@ final class IntegrationTests: XCTestCase {
         multiProcessManager = MultiProcessManager {
             let manager = IntegrationTestPythonProcessManager()
             manager.onSend = { instance, _ in
-                instance.outputReceived?("Integration transcript")
+                instance.outputReceived?(transcriptionTestResponse(requestID: instance.requestID, text: "Integration transcript"))
             }
             return manager
         }
@@ -172,6 +172,7 @@ final class IntegrationTests: XCTestCase {
 }
 
 private final class IntegrationTestPythonProcessManager: PythonProcessManaging {
+    private(set) var requestID = ""
     var outputReceived: ((String) -> Void)?
     var processTerminated: ((Int32) -> Void)?
     var onSend: ((IntegrationTestPythonProcessManager, String) -> Void)?
@@ -190,8 +191,10 @@ private final class IntegrationTestPythonProcessManager: PythonProcessManaging {
         gpuAccelerationEnabled: Bool,
         mode: RecordingRequestMode,
         translationTargetLanguage: String,
-        screenshotContext: String?
+        screenshotContext: String?,
+        requestID: String
     ) -> Bool {
+        self.requestID = requestID
         onSend?(self, text)
         return true
     }

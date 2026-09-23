@@ -229,7 +229,8 @@ final class PythonProcessManager: @unchecked Sendable {
         gpuAccelerationEnabled: Bool = true,
         mode: RecordingRequestMode = .transcribe,
         translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
-        screenshotContext: String? = nil
+        screenshotContext: String? = nil,
+        requestID: String = UUID().uuidString
     ) -> Bool {
         if text.hasPrefix(Self.healthCheckRequestPrefix) {
             return sendLine(text)
@@ -237,6 +238,7 @@ final class PythonProcessManager: @unchecked Sendable {
 
         var payload: [String: Any] = [
             "type": "transcription_request",
+            "request_id": requestID,
             "audio_path": text,
             "language": language,
             "auto_punctuation": autoPunctuation,

@@ -38,12 +38,14 @@ final class MultiProcessManager: @unchecked Sendable {
     private let healthCheckStartupGraceSeconds: TimeInterval
     private let processManagerFactory: () -> any PythonProcessManaging
     private var isStopping = false
+    private var lifecycleID = UUID()
 
     private static let healthCheckRequestPrefix = "__KOTOTYPE_HEALTHCHECK__:"
     private static let healthCheckResponsePrefix = "__KOTOTYPE_HEALTHCHECK_OK__:"
     
     var outputReceived: ((Int, String) -> Void)?
     var segmentComplete: ((Int, String) -> Void)?
+    var segmentFailed: ((Int, String) -> Void)?
 
     static func shouldAutoRecoverIdleTermination(status: Int32) -> Bool {
         // Exit status 0 while idle usually means stdin was closed (EOF) and the server
@@ -83,6 +85,7 @@ final class MultiProcessManager: @unchecked Sendable {
         oldProcesses = processes
         self.scriptPath = scriptPath
         self.isStopping = false
+        self.lifecycleID = UUID()
         self.processes.removeAll()
         self.idleProcesses.removeAll()
         self.segmentContextByProcess.removeAll()
@@ -126,10 +129,15 @@ final class MultiProcessManager: @unchecked Sendable {
         mode: RecordingRequestMode = .transcribe,
         translationTargetLanguage: String = AppSettings.defaultTranslationTargetLanguage,
         retryCount: Int = 0,
-        processingTimeout: TimeInterval? = nil
+        processingTimeout: TimeInterval? = nil,
+        expectedLifecycleID: UUID? = nil
     ) {
         Logger.shared.log("MultiProcessManager: processFile called - url=\(url.path), index=\(index)", level: .info)
         processLock.lock()
+        if let expectedLifecycleID, expectedLifecycleID != lifecycleID {
+            processLock.unlock()
+            return
+        }
         if let sessionID, cancelledSessionIDs.contains(sessionID) {
             processLock.unlock()
             Logger.shared.log(
@@ -144,6 +152,7 @@ final class MultiProcessManager: @unchecked Sendable {
             return
         }
         let context = SegmentContext(
+            lifecycleID: lifecycleID,
             url: url,
             index: index,
             settings: settings,
@@ -167,11 +176,11 @@ final class MultiProcessManager: @unchecked Sendable {
         guard let processIndex = availableProcess else {
             if !didEnqueue {
                 Logger.shared.log(
-                    "MultiProcessManager: pending queue is full for segment \(index); completing with empty result",
+                    "MultiProcessManager: pending queue is full for segment \(index); reporting failure",
                     level: .error
                 )
                 DispatchQueue.main.async { [weak self] in
-                    self?.segmentComplete?(index, "")
+                    self?.segmentFailed?(index, "queue_full")
                 }
                 return
             }
@@ -199,6 +208,7 @@ final class MultiProcessManager: @unchecked Sendable {
     
     private func assignProcess(processIndex: Int, context: SegmentContext, screenshotContext: String?) {
         var assignedContext = context
+        assignedContext.requestID = UUID().uuidString
         assignedContext.assignedAt = Date()
 
         processLock.lock()
@@ -237,7 +247,8 @@ final class MultiProcessManager: @unchecked Sendable {
             gpuAccelerationEnabled: assignedContext.settings.gpuAccelerationEnabled,
             mode: assignedContext.mode,
             translationTargetLanguage: assignedContext.translationTargetLanguage,
-            screenshotContext: screenshotContext
+            screenshotContext: screenshotContext,
+            requestID: assignedContext.requestID
         )
 
         if !sendSucceeded {
@@ -329,6 +340,11 @@ final class MultiProcessManager: @unchecked Sendable {
             )
             return
         }
+        guard let response = TranscriptionResponse.parse(output),
+              response.request_id == context.requestID else {
+            processLock.unlock()
+            return
+        }
         segmentContextByProcess.removeValue(forKey: processIndex)
         idleProcesses.insert(processIndex)
         idleTerminationHistory.removeValue(forKey: processIndex)
@@ -341,8 +357,12 @@ final class MultiProcessManager: @unchecked Sendable {
         )
 
         DispatchQueue.main.async { [weak self] in
-            self?.outputReceived?(processIndex, output)
-            self?.segmentComplete?(context.index, output)
+            if let text = response.text {
+                self?.outputReceived?(processIndex, text)
+                self?.segmentComplete?(context.index, text)
+            } else {
+                self?.segmentFailed?(context.index, response.error!)
+            }
         }
         drainPendingSegments()
     }
@@ -399,7 +419,7 @@ final class MultiProcessManager: @unchecked Sendable {
         processLock.unlock()
 
         recoverProcess(processIndex: processIndex)
-        retryOrCompleteWithEmpty(context: context, reason: reason)
+        retryOrFail(context: context, reason: reason)
     }
 
     private func handleFatalTermination(processIndex: Int, status: Int32, context: SegmentContext?) {
@@ -423,11 +443,11 @@ final class MultiProcessManager: @unchecked Sendable {
 
         if let context {
             Logger.shared.log(
-                "MultiProcessManager: process \(processIndex) terminated with status \(status) while processing segment \(context.index); completing with empty result and delaying recovery for \(Int(fatalIdleTerminationCooldownSeconds))s",
+                "MultiProcessManager: process \(processIndex) terminated with status \(status) while processing segment \(context.index); reporting failure and delaying recovery for \(Int(fatalIdleTerminationCooldownSeconds))s",
                 level: .error
             )
             DispatchQueue.main.async { [weak self] in
-                self?.segmentComplete?(context.index, "")
+                self?.segmentFailed?(context.index, "process_terminated")
             }
         } else {
             Logger.shared.log(
@@ -439,24 +459,24 @@ final class MultiProcessManager: @unchecked Sendable {
         scheduleRecovery(processIndex: processIndex, delay: fatalIdleTerminationCooldownSeconds)
     }
 
-    private func retryOrCompleteWithEmpty(context: SegmentContext, reason: String) {
+    private func retryOrFail(context: SegmentContext, reason: String) {
         if reason == "segment_timeout" {
             Logger.shared.log(
                 "MultiProcessManager: segment \(context.index) timed out; completing without repeating the same expensive inference",
                 level: .error
             )
             DispatchQueue.main.async { [weak self] in
-                self?.segmentComplete?(context.index, "")
+                self?.segmentFailed?(context.index, "segment_timeout")
             }
             return
         }
         guard context.retryCount < maxRetryCount else {
             Logger.shared.log(
-                "MultiProcessManager: max retry reached for segment \(context.index), completing with empty result",
+                "MultiProcessManager: max retry reached for segment \(context.index), reporting failure",
                 level: .error
             )
             DispatchQueue.main.async { [weak self] in
-                self?.segmentComplete?(context.index, "")
+                self?.segmentFailed?(context.index, "retry_exhausted")
             }
             return
         }
@@ -477,7 +497,8 @@ final class MultiProcessManager: @unchecked Sendable {
                     mode: context.mode,
                     translationTargetLanguage: context.translationTargetLanguage,
                     retryCount: nextRetry,
-                    processingTimeout: context.processingTimeout
+                    processingTimeout: context.processingTimeout,
+                    expectedLifecycleID: context.lifecycleID
                 )
             }
         }
@@ -599,9 +620,13 @@ final class MultiProcessManager: @unchecked Sendable {
         scheduleRecovery(processIndex: processIndex, delay: delay)
     }
 
-    private func recoverProcess(processIndex: Int) {
+    private func recoverProcess(processIndex: Int, expectedLifecycleID: UUID? = nil) {
         var oldManager: (any PythonProcessManaging)?
         processLock.lock()
+        if let expectedLifecycleID, expectedLifecycleID != lifecycleID {
+            processLock.unlock()
+            return
+        }
         if isStopping {
             processLock.unlock()
             return
@@ -708,6 +733,7 @@ final class MultiProcessManager: @unchecked Sendable {
             return
         }
         scheduledRecoveries.insert(processIndex)
+        let scheduledLifecycleID = lifecycleID
         processLock.unlock()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -715,6 +741,10 @@ final class MultiProcessManager: @unchecked Sendable {
 
             let now = Date()
             self.processLock.lock()
+            guard self.lifecycleID == scheduledLifecycleID else {
+                self.processLock.unlock()
+                return
+            }
             self.scheduledRecoveries.remove(processIndex)
             let blockedUntil = self.recoverySuppressedUntil[processIndex] ?? .distantPast
             let blocked = blockedUntil > now
@@ -727,7 +757,7 @@ final class MultiProcessManager: @unchecked Sendable {
                 }
                 return
             }
-            self.recoverProcess(processIndex: processIndex)
+            self.recoverProcess(processIndex: processIndex, expectedLifecycleID: scheduledLifecycleID)
         }
     }
 
@@ -852,7 +882,7 @@ final class MultiProcessManager: @unchecked Sendable {
                 level: .error
             )
             DispatchQueue.main.async { [weak self] in
-                self?.segmentComplete?(context.index, "")
+                self?.segmentFailed?(context.index, "queue_timeout")
             }
         }
 
@@ -928,7 +958,8 @@ final class MultiProcessManager: @unchecked Sendable {
             gpuAccelerationEnabled: false,
             mode: .transcribe,
             translationTargetLanguage: AppSettings.defaultTranslationTargetLanguage,
-            screenshotContext: nil
+            screenshotContext: nil,
+            requestID: UUID().uuidString
         )
     }
     
@@ -938,6 +969,7 @@ final class MultiProcessManager: @unchecked Sendable {
 
         processLock.lock()
         isStopping = true
+        lifecycleID = UUID()
         let allProcesses = processes
         processes.removeAll()
         idleProcesses.removeAll()
@@ -1084,6 +1116,8 @@ final class MultiProcessManager: @unchecked Sendable {
 }
 
 private struct SegmentContext {
+    let lifecycleID: UUID
+    var requestID = ""
     let url: URL
     let index: Int
     let settings: AppSettings

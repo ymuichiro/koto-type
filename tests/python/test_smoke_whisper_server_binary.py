@@ -16,7 +16,7 @@ SPEC.loader.exec_module(SMOKE)
 
 
 class SmokeWhisperServerBinaryTests(unittest.TestCase):
-    def test_default_audio_and_language_remain_local_ja_fixture(self):
+    def test_default_requires_explicit_speech_fixture(self):
         with mock.patch.dict(
             os.environ,
             {
@@ -25,10 +25,7 @@ class SmokeWhisperServerBinaryTests(unittest.TestCase):
             },
             clear=False,
         ):
-            self.assertEqual(
-                SMOKE.resolve_smoke_audio_path(PROJECT_ROOT),
-                PROJECT_ROOT / "assets" / "audio" / "test_speech_ja.wav",
-            )
+            self.assertIsNone(SMOKE.resolve_smoke_audio_path())
             self.assertEqual(SMOKE.resolve_smoke_language(), "ja")
 
     def test_release_smoke_can_select_generated_audio_and_language(self):
@@ -42,7 +39,7 @@ class SmokeWhisperServerBinaryTests(unittest.TestCase):
             clear=False,
         ):
             self.assertEqual(
-                SMOKE.resolve_smoke_audio_path(PROJECT_ROOT),
+                SMOKE.resolve_smoke_audio_path(),
                 Path(configured_audio).resolve(),
             )
             self.assertEqual(SMOKE.resolve_smoke_language(), "en")
