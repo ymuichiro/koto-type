@@ -224,6 +224,9 @@ test_*.py
 artifacts/runtime/
 artifacts/evaluations/
 
+# Generated local benchmark report
+/artifacts/benchmarks/asr_benchmark_results.json
+
 # Sparkle / release artifacts
 appcast.xml
 KotoType/appcast.xml

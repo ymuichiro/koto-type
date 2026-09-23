@@ -66,7 +66,6 @@ class WorkerResult:
     cold_total_seconds: float
     warm_run_seconds: list[float]
     transcript_chars: int
-    transcript_preview: str
     requested_language: str
     detected_language: str | None = None
     language_probability: float | None = None
@@ -151,7 +150,6 @@ def faster_whisper_benchmark(
         last_text = " ".join(segment.text for segment in warm_segments).strip()
 
     cold_text = " ".join(segment.text for segment in cold_segments).strip()
-    preview = (last_text or cold_text)[:120]
 
     return WorkerResult(
         label=model_config["label"],
@@ -162,7 +160,6 @@ def faster_whisper_benchmark(
         cold_total_seconds=cold_total_seconds,
         warm_run_seconds=warm_run_seconds,
         transcript_chars=len(last_text or cold_text),
-        transcript_preview=preview,
         requested_language=language,
         detected_language=getattr(info, "language", None),
         language_probability=getattr(info, "language_probability", None),
@@ -215,7 +212,6 @@ def mlx_whisper_benchmark(
         last_result = warm_result
 
     cold_text = cold_result.get("text", "").strip()
-    preview = (last_text or cold_text)[:120]
 
     return WorkerResult(
         label=model_config["label"],
@@ -226,7 +222,6 @@ def mlx_whisper_benchmark(
         cold_total_seconds=cold_total_seconds,
         warm_run_seconds=warm_run_seconds,
         transcript_chars=len(last_text or cold_text),
-        transcript_preview=preview,
         requested_language=language,
         detected_language=(last_result or cold_result).get("language"),
         language_probability=(last_result or cold_result).get("language_probability"),

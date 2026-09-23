@@ -17,6 +17,7 @@
 |GPU/CPU切替とフォールバック|BackendManager、TranscriptionBackendStatus|利用環境と推論失敗への回復|維持。品質や状態の分岐を検証し、不要な重複だけを削減|
 |常駐・ヘルスチェック・再試行|MultiProcessManager、PythonProcessManager、バックグラウンド待機設定|初動速度と復帰の責務がある一方、複数の寿命管理が複雑|責務整理対象。推論後idle復帰・切断・再録音の検証なしに単純削除しない|
 |旧Whisper API互換性matrix|`scripts/check_whisper_backend_compatibility.py`、11条件、直接ライブラリ呼び出し|CI/Make/テスト/製品から参照されず、3秒440Hz純音・廃止済み翻訳taskを含む歴史的なAPI調査|実行コードとraw JSONを削除。要約だけ保持し、依存変更で必要になった場合に製品経路テストとして再導入|
+|ASRベンチマークの古い生成物|`artifacts/benchmarks/asr_benchmark_results.json`、`assets/audio/test_speech_ja_300s.wav`|レポートは純音測定の transcript preview とローカルパスを含み、長尺WAVは9.2MBの純音。#138後は長尺WAVへのコード参照なし|古いレポートと長尺WAVを削除。将来のJSON出力はローカル専用としてignoreし、transcript previewは保存しない。3秒純音はnoise評価の非音声対照で使うため維持|
 |更新・署名|AppUpdater、release.yml、appcast.xml|安全な配布・更新に不可欠|維持|
 
 翻訳モデルの根拠: https://github.com/openai/whisper#command-line-usage
@@ -74,4 +75,4 @@
 
 移動・分割だけを削減量に数えない。最終差分で製品LOC、公開機能、保存設定、依存、状態の所有者、再試行箇所を再集計する。元の6大ファイル合計は7,818行だが、別ファイルへ移した分を成果に含めない。
 
-単体テストだけで成功としない。#131では利用者の実マイク音声2回を基準版・修正版のCPU/MLXで限定比較したが、出力は同一で固有語の誤りも残った。2026-09-23にユーザーから追加録音2件の保存先が提示されたが、示された一時パス上にファイルがなく、評価には使えていない。さらに公開日本語/英語音声60件×3反復のMLXモデル候補比較ではLarge-v3の日本語CERと失敗率が改善したものの、疑問符・自動言語判定の誤りが残り、CPU版は未検証のため採用していない（集計と制約は品質側 `core-quality-progress.md`）。両作業ツリーで配布bundle内backendのhealthcheck・実音声要求とad-hoc署名は確認済みだが、GUI録音→目的アプリ入力、Developer ID/notarization・署名済み更新、状態遷移・品質/idleの受入条件は残る。Issue #131/#132は両方OPENのままにする。
+単体テストだけで成功としない。#131では利用者実マイク録音2件（18.10/18.17秒）を基準版・修正版のCPU/MLXで限定比較した記録があり、出力は同一、英語固有語の誤りも残る。今回再掲された一時パスはこの比較に使われた同じファイルで、その後削除済みのため再読込・再評価はできない。これは製品アプリから目的アプリへの入力や修正による改善の証拠ではない。さらに公開日本語/英語音声60件×3反復のMLXモデル候補比較ではLarge-v3の日本語CERと失敗率が改善したものの、疑問符・自動言語判定の誤りが残り、CPU版は未検証のため採用していない（集計と制約は品質側 `core-quality-progress.md`）。両作業ツリーで配布bundle内backendのhealthcheck・実音声要求とad-hoc署名は確認済みだが、GUI録音→目的アプリ入力、Developer ID/notarization・署名済み更新、状態遷移・品質/idleの受入条件は残る。Issue #131/#132は両方OPENのままにする。
