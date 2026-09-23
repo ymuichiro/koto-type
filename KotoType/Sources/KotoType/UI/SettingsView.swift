@@ -521,6 +521,33 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Model storage folder")
+                    .font(.subheadline)
+                Text(
+                    "Downloaded CPU and MLX models and their caches are stored in KotoType subfolders here. "
+                        + "Changing this folder does not move existing files; they remain in the previous folder."
+                )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(draft.modelStorageDirectoryPath ?? KotoTypeStoragePaths.applicationSupportDirectory().path)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+                HStack(spacing: 10) {
+                    Button("Choose Folder…") {
+                        chooseModelStorageDirectory()
+                    }
+                    if draft.modelStorageDirectoryPath != nil {
+                        Button("Use Default") {
+                            draft.modelStorageDirectoryPath = nil
+                            storageActionMessage = "Save settings to use the default model storage folder."
+                            storageActionMessageIsError = false
+                        }
+                    }
+                }
+            }
+
             storageCard(
                 title: "Transcription history",
                 detail: "\(storageSnapshot.historyEntryCount) entr\(storageSnapshot.historyEntryCount == 1 ? "y" : "ies") • \(KotoTypeStoragePaths.formattedByteCount(storageSnapshot.historyByteCount))",
@@ -738,6 +765,9 @@ struct SettingsView: View {
         onHotkeyChanged(settings)
         onSettingsChanged?()
         draftBridge?.markSaved(snapshot: draft.snapshot)
+        Task {
+            await refreshStorageSnapshot()
+        }
         return true
     }
 
@@ -826,6 +856,35 @@ struct SettingsView: View {
             dictionaryStatusMessage = error.localizedDescription
             dictionaryStatusMessageIsError = true
         }
+    }
+
+    private func chooseModelStorageDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Model Storage Folder"
+        panel.message = "KotoType creates its model and cache folders inside the selected folder."
+        panel.prompt = "Choose"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(
+            fileURLWithPath: draft.modelStorageDirectoryPath
+                ?? KotoTypeStoragePaths.applicationSupportDirectory().path,
+            isDirectory: true
+        )
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              FileManager.default.isWritableFile(atPath: url.path) else {
+            storageActionMessage = "Choose a writable folder that already exists."
+            storageActionMessageIsError = true
+            return
+        }
+
+        draft.modelStorageDirectoryPath = url.standardizedFileURL.path
+        storageActionMessage = "Save settings to use the selected model storage folder."
+        storageActionMessageIsError = false
     }
 
     private func dictionaryImportMessage(from result: UserDictionaryCSVImportResult) -> String {

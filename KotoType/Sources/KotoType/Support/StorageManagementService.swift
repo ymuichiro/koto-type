@@ -36,6 +36,7 @@ final class StorageManagementService: @unchecked Sendable {
     private let temporaryCacheURL: URL?
     private let managedDownloadCacheURL: URL?
     private let managedModelsRootURL: URL?
+    private let modelStorageRootURL: URL?
 
     init(
         historyManager: TranscriptionHistoryManager = .shared,
@@ -44,7 +45,8 @@ final class StorageManagementService: @unchecked Sendable {
         scriptPath: String? = nil,
         temporaryCacheURL: URL? = nil,
         managedDownloadCacheURL: URL? = nil,
-        managedModelsRootURL: URL? = nil
+        managedModelsRootURL: URL? = nil,
+        modelStorageRootURL: URL? = nil
     ) {
         self.historyManager = historyManager
         self.modelService = modelService
@@ -53,6 +55,7 @@ final class StorageManagementService: @unchecked Sendable {
         self.temporaryCacheURL = temporaryCacheURL
         self.managedDownloadCacheURL = managedDownloadCacheURL
         self.managedModelsRootURL = managedModelsRootURL
+        self.modelStorageRootURL = modelStorageRootURL
     }
 
     func snapshot() async -> StorageManagementSnapshot {
@@ -119,12 +122,22 @@ final class StorageManagementService: @unchecked Sendable {
     }
 
     private var resolvedManagedDownloadCacheURL: URL {
-        managedDownloadCacheURL ?? KotoTypeStoragePaths.managedModelCacheRoot(fileManager: fileManager)
+        managedDownloadCacheURL ?? KotoTypeStoragePaths.managedModelCacheRoot(
+            storageRootURL: resolvedModelStorageRootURL,
+            fileManager: fileManager
+        )
     }
 
     private func resolvedManagedModelDirectory(for kind: ManagedTranscriptionModelKind) -> URL {
-        (managedModelsRootURL ?? KotoTypeStoragePaths.managedModelsRoot(fileManager: fileManager))
+        (managedModelsRootURL ?? KotoTypeStoragePaths.managedModelsRoot(
+            storageRootURL: resolvedModelStorageRootURL,
+            fileManager: fileManager
+        ))
             .appendingPathComponent(kind.storageDirectoryName, isDirectory: true)
+    }
+
+    private var resolvedModelStorageRootURL: URL {
+        modelStorageRootURL ?? KotoTypeStoragePaths.modelStorageRoot(fileManager: fileManager)
     }
 
     private static func serverScriptPath(currentPath: String = FileManager.default.currentDirectoryPath) -> String {

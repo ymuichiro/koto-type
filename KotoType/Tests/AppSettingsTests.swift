@@ -21,6 +21,7 @@ final class AppSettingsTests: XCTestCase {
             XCTAssertFalse(settings.autoPunctuation)
             XCTAssertFalse(settings.keepBackendReadyInBackground)
             XCTAssertEqual(settings.recordingCompletionTimeout, 480)
+            XCTAssertNil(settings.modelStorageDirectoryPath)
             let encoded = try JSONEncoder().encode(settings)
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
             XCTAssertNil(object["translationHotkeyConfig"])
@@ -43,6 +44,7 @@ final class AppSettingsTests: XCTestCase {
             settings.recordingCompletionTimeout,
             AppSettings.defaultRecordingCompletionTimeout
         )
+        XCTAssertNil(settings.modelStorageDirectoryPath)
     }
 
     func testCustomInitialization() {
@@ -71,6 +73,13 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(settings.keepBackendReadyInBackground)
         XCTAssertTrue(settings.launchAtLogin)
         XCTAssertEqual(settings.recordingCompletionTimeout, 420.0)
+    }
+
+    func testModelStorageDirectoryPathIsTrimmedAndStandardized() {
+        let settings = AppSettings(modelStorageDirectoryPath: " /tmp/models/../speech-models ")
+
+        XCTAssertEqual(settings.modelStorageDirectoryPath, "/tmp/speech-models")
+        XCTAssertNil(AppSettings(modelStorageDirectoryPath: "  ").modelStorageDirectoryPath)
     }
 
     func testCodingAndDecodingRoundTrip() throws {

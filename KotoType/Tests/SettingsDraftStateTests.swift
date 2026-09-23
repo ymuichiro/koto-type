@@ -68,6 +68,17 @@ final class SettingsDraftStateTests: XCTestCase {
         XCTAssertEqual(edited.settings.hotkeyConfig.keyCode, 0x08)
     }
 
+    func testDraftPreservesModelStorageDirectoryPath() {
+        let draft = SettingsDraft(
+            settings: AppSettings(modelStorageDirectoryPath: "/tmp/kototype-models"),
+            dictionaryWords: [],
+            voiceShortcuts: []
+        )
+
+        XCTAssertEqual(draft.appSettings.modelStorageDirectoryPath, "/tmp/kototype-models")
+        XCTAssertEqual(draft.snapshot.settings.modelStorageDirectoryPath, "/tmp/kototype-models")
+    }
+
     @MainActor
     func testDraftBridgeTracksSavedState() {
         let initialSnapshot = SettingsDraft(

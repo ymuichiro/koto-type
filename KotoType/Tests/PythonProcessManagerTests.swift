@@ -263,38 +263,75 @@ final class PythonProcessManagerTests: XCTestCase {
     }
 
     func testRuntimeEnvironmentForAppBundleForcesBackendSafetyCaps() {
+        let defaultStorageRoot = KotoTypeStoragePaths.applicationSupportDirectory()
         let environment = PythonProcessManager.runtimeEnvironment(
             base: [
                 "KOTOTYPE_MAX_ACTIVE_SERVERS": "8",
                 "KOTOTYPE_MAX_PARALLEL_MODEL_LOADS": "4",
             ],
-            bundlePath: "/Applications/KotoType.app"
+            bundlePath: "/Applications/KotoType.app",
+            settings: AppSettings()
         )
 
         XCTAssertEqual(environment["KOTOTYPE_MAX_ACTIVE_SERVERS"], "1")
         XCTAssertEqual(environment["KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"], "1")
         XCTAssertEqual(environment["KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"], "120")
-        XCTAssertEqual(environment["KOTOTYPE_CPU_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .cpu).path)
-        XCTAssertEqual(environment["KOTOTYPE_MLX_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .mlx).path)
-        XCTAssertEqual(environment["KOTOTYPE_MODEL_CACHE_DIR"], KotoTypeStoragePaths.managedModelCacheRoot().path)
-        XCTAssertEqual(environment["HF_HOME"], KotoTypeStoragePaths.huggingFaceHome().path)
-        XCTAssertEqual(environment["HUGGINGFACE_HUB_CACHE"], KotoTypeStoragePaths.huggingFaceHubCache().path)
+        XCTAssertEqual(
+            environment["KOTOTYPE_CPU_MODEL_DIR"],
+            KotoTypeStoragePaths.managedModelDirectory(
+                for: .cpu,
+                storageRootURL: defaultStorageRoot
+            ).path
+        )
+        XCTAssertEqual(
+            environment["KOTOTYPE_MLX_MODEL_DIR"],
+            KotoTypeStoragePaths.managedModelDirectory(
+                for: .mlx,
+                storageRootURL: defaultStorageRoot
+            ).path
+        )
+        XCTAssertEqual(
+            environment["KOTOTYPE_MODEL_CACHE_DIR"],
+            KotoTypeStoragePaths.managedModelCacheRoot(storageRootURL: defaultStorageRoot).path
+        )
+        XCTAssertEqual(
+            environment["HF_HOME"],
+            KotoTypeStoragePaths.huggingFaceHome(storageRootURL: defaultStorageRoot).path
+        )
+        XCTAssertEqual(
+            environment["HUGGINGFACE_HUB_CACHE"],
+            KotoTypeStoragePaths.huggingFaceHubCache(storageRootURL: defaultStorageRoot).path
+        )
     }
 
     func testRuntimeEnvironmentForDevelopmentKeepsExistingValues() {
+        let defaultStorageRoot = KotoTypeStoragePaths.applicationSupportDirectory()
         let environment = PythonProcessManager.runtimeEnvironment(
             base: [
                 "KOTOTYPE_MAX_ACTIVE_SERVERS": "8",
                 "KOTOTYPE_MAX_PARALLEL_MODEL_LOADS": "4",
             ],
-            bundlePath: "/tmp/koto-type/.build/debug/KotoType"
+            bundlePath: "/tmp/koto-type/.build/debug/KotoType",
+            settings: AppSettings()
         )
 
         XCTAssertEqual(environment["KOTOTYPE_MAX_ACTIVE_SERVERS"], "8")
         XCTAssertEqual(environment["KOTOTYPE_MAX_PARALLEL_MODEL_LOADS"], "4")
         XCTAssertNil(environment["KOTOTYPE_MODEL_LOAD_WAIT_TIMEOUT_SECONDS"])
-        XCTAssertEqual(environment["KOTOTYPE_CPU_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .cpu).path)
-        XCTAssertEqual(environment["KOTOTYPE_MLX_MODEL_DIR"], KotoTypeStoragePaths.managedModelDirectory(for: .mlx).path)
+        XCTAssertEqual(
+            environment["KOTOTYPE_CPU_MODEL_DIR"],
+            KotoTypeStoragePaths.managedModelDirectory(
+                for: .cpu,
+                storageRootURL: defaultStorageRoot
+            ).path
+        )
+        XCTAssertEqual(
+            environment["KOTOTYPE_MLX_MODEL_DIR"],
+            KotoTypeStoragePaths.managedModelDirectory(
+                for: .mlx,
+                storageRootURL: defaultStorageRoot
+            ).path
+        )
     }
 
     func testRuntimeEnvironmentForAppBundlePrependsPackageManagerPaths() {
@@ -308,6 +345,33 @@ final class PythonProcessManagerTests: XCTestCase {
         XCTAssertEqual(
             environment["PATH"],
             "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        )
+    }
+
+    func testRuntimeEnvironmentUsesConfiguredModelStorageDirectory() {
+        let storageRoot = URL(fileURLWithPath: "/Volumes/Models/KotoType", isDirectory: true)
+        let environment = PythonProcessManager.runtimeEnvironment(
+            base: [:],
+            bundlePath: "/Applications/KotoType.app",
+            settings: AppSettings(modelStorageDirectoryPath: storageRoot.path)
+        )
+
+        XCTAssertEqual(
+            environment["KOTOTYPE_CPU_MODEL_DIR"],
+            KotoTypeStoragePaths.managedModelDirectory(for: .cpu, storageRootURL: storageRoot).path
+        )
+        XCTAssertEqual(
+            environment["KOTOTYPE_MLX_MODEL_DIR"],
+            KotoTypeStoragePaths.managedModelDirectory(for: .mlx, storageRootURL: storageRoot).path
+        )
+        XCTAssertEqual(
+            environment["KOTOTYPE_MODEL_CACHE_DIR"],
+            KotoTypeStoragePaths.managedModelCacheRoot(storageRootURL: storageRoot).path
+        )
+        XCTAssertEqual(environment["HF_HOME"], KotoTypeStoragePaths.huggingFaceHome(storageRootURL: storageRoot).path)
+        XCTAssertEqual(
+            environment["HUGGINGFACE_HUB_CACHE"],
+            KotoTypeStoragePaths.huggingFaceHubCache(storageRootURL: storageRoot).path
         )
     }
 

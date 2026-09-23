@@ -112,31 +112,55 @@ enum KotoTypeStoragePaths {
             .appendingPathComponent(appDirectoryName, isDirectory: true)
     }
 
-    static func managedModelsRoot(fileManager: FileManager = .default) -> URL {
-        applicationSupportDirectory(fileManager: fileManager)
+    static func modelStorageRoot(
+        directoryPath: String? = SettingsManager.shared.load().modelStorageDirectoryPath,
+        fileManager: FileManager = .default
+    ) -> URL {
+        guard let directoryPath,
+              !directoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return applicationSupportDirectory(fileManager: fileManager)
+        }
+        return URL(fileURLWithPath: directoryPath, isDirectory: true).standardizedFileURL
+    }
+
+    static func managedModelsRoot(
+        storageRootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> URL {
+        (storageRootURL ?? modelStorageRoot(fileManager: fileManager))
             .appendingPathComponent("managed-models", isDirectory: true)
     }
 
     static func managedModelDirectory(
         for kind: ManagedTranscriptionModelKind,
+        storageRootURL: URL? = nil,
         fileManager: FileManager = .default
     ) -> URL {
-        managedModelsRoot(fileManager: fileManager)
+        managedModelsRoot(storageRootURL: storageRootURL, fileManager: fileManager)
             .appendingPathComponent(kind.storageDirectoryName, isDirectory: true)
     }
 
-    static func managedModelCacheRoot(fileManager: FileManager = .default) -> URL {
-        applicationSupportDirectory(fileManager: fileManager)
+    static func managedModelCacheRoot(
+        storageRootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> URL {
+        (storageRootURL ?? modelStorageRoot(fileManager: fileManager))
             .appendingPathComponent("model-cache", isDirectory: true)
     }
 
-    static func huggingFaceHome(fileManager: FileManager = .default) -> URL {
-        managedModelCacheRoot(fileManager: fileManager)
+    static func huggingFaceHome(
+        storageRootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> URL {
+        managedModelCacheRoot(storageRootURL: storageRootURL, fileManager: fileManager)
             .appendingPathComponent("huggingface", isDirectory: true)
     }
 
-    static func huggingFaceHubCache(fileManager: FileManager = .default) -> URL {
-        huggingFaceHome(fileManager: fileManager)
+    static func huggingFaceHubCache(
+        storageRootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> URL {
+        huggingFaceHome(storageRootURL: storageRootURL, fileManager: fileManager)
             .appendingPathComponent("hub", isDirectory: true)
     }
 
@@ -150,13 +174,33 @@ enum KotoTypeStoragePaths {
             .appendingPathComponent(temporaryBatchDirectoryName, isDirectory: true)
     }
 
-    static func managedModelEnvironment(fileManager: FileManager = .default) -> [String: String] {
+    static func managedModelEnvironment(
+        storageRootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> [String: String] {
         [
-            "KOTOTYPE_CPU_MODEL_DIR": managedModelDirectory(for: .cpu, fileManager: fileManager).path,
-            "KOTOTYPE_MLX_MODEL_DIR": managedModelDirectory(for: .mlx, fileManager: fileManager).path,
-            "KOTOTYPE_MODEL_CACHE_DIR": managedModelCacheRoot(fileManager: fileManager).path,
-            "HF_HOME": huggingFaceHome(fileManager: fileManager).path,
-            "HUGGINGFACE_HUB_CACHE": huggingFaceHubCache(fileManager: fileManager).path,
+            "KOTOTYPE_CPU_MODEL_DIR": managedModelDirectory(
+                for: .cpu,
+                storageRootURL: storageRootURL,
+                fileManager: fileManager
+            ).path,
+            "KOTOTYPE_MLX_MODEL_DIR": managedModelDirectory(
+                for: .mlx,
+                storageRootURL: storageRootURL,
+                fileManager: fileManager
+            ).path,
+            "KOTOTYPE_MODEL_CACHE_DIR": managedModelCacheRoot(
+                storageRootURL: storageRootURL,
+                fileManager: fileManager
+            ).path,
+            "HF_HOME": huggingFaceHome(
+                storageRootURL: storageRootURL,
+                fileManager: fileManager
+            ).path,
+            "HUGGINGFACE_HUB_CACHE": huggingFaceHubCache(
+                storageRootURL: storageRootURL,
+                fileManager: fileManager
+            ).path,
         ]
     }
 

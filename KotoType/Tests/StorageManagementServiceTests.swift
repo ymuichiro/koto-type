@@ -94,7 +94,8 @@ final class StorageManagementServiceTests: XCTestCase {
     }
 
     func testStorageManagementSnapshotFallsBackToFilesystemModelStatusWhenLiveStatusIsUnavailable() async throws {
-        let modelsRootURL = tempRoot.appendingPathComponent("models", isDirectory: true)
+        let storageRootURL = tempRoot.appendingPathComponent("selected-model-storage", isDirectory: true)
+        let modelsRootURL = KotoTypeStoragePaths.managedModelsRoot(storageRootURL: storageRootURL)
         let mlxDirectory = modelsRootURL.appendingPathComponent("mlx-whisper-large-v3-turbo", isDirectory: true)
         try FileManager.default.createDirectory(at: mlxDirectory, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: mlxDirectory.appendingPathComponent("config.json"))
@@ -111,8 +112,7 @@ final class StorageManagementServiceTests: XCTestCase {
             fileManager: .default,
             scriptPath: "/tmp/whisper_server.py",
             temporaryCacheURL: tempRoot.appendingPathComponent("temporary-cache", isDirectory: true),
-            managedDownloadCacheURL: tempRoot.appendingPathComponent("download-cache", isDirectory: true),
-            managedModelsRootURL: modelsRootURL
+            modelStorageRootURL: storageRootURL
         )
 
         let snapshot = await service.snapshot()
@@ -121,6 +121,11 @@ final class StorageManagementServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.models.first(where: { $0.kind == .mlx })?.isDownloaded, true)
         XCTAssertGreaterThan(snapshot.models.first(where: { $0.kind == .mlx })?.byteCount ?? 0, 0)
         XCTAssertEqual(snapshot.models.first(where: { $0.kind == .cpu })?.isDownloaded, false)
+        XCTAssertEqual(snapshot.models.first(where: { $0.kind == .mlx })?.directoryPath, mlxDirectory.path)
+        XCTAssertEqual(
+            snapshot.caches.first(where: { $0.id == "managed-download-cache" })?.path,
+            KotoTypeStoragePaths.managedModelCacheRoot(storageRootURL: storageRootURL).path
+        )
     }
 
     func testStorageManagementServiceClearsHistoryAndCaches() throws {
