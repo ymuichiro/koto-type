@@ -98,7 +98,7 @@ class BenchmarkInputTests(unittest.TestCase):
 
 
 class BenchmarkArtifactPrivacyTests(unittest.TestCase):
-    def test_worker_result_does_not_serialize_audio_path(self):
+    def test_worker_result_omits_audio_path_and_transcript_preview(self):
         result = benchmark_asr_models.WorkerResult(
             label="test",
             backend="test",
@@ -108,11 +108,12 @@ class BenchmarkArtifactPrivacyTests(unittest.TestCase):
             cold_total_seconds=0.2,
             warm_run_seconds=[0.1],
             transcript_chars=1,
-            transcript_preview="x",
             requested_language="ja",
         )
 
-        self.assertNotIn("audio_path", json.loads(json.dumps(asdict(result))))
+        artifact = json.loads(json.dumps(asdict(result)))
+        self.assertNotIn("audio_path", artifact)
+        self.assertNotIn("transcript_preview", artifact)
 
     def test_failure_artifact_does_not_store_local_audio_path(self):
         with TemporaryDirectory() as temp_dir:

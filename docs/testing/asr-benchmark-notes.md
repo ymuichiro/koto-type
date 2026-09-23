@@ -20,8 +20,7 @@ uv run python scripts/benchmark_asr_models.py \
 - Supply `--short-audio` explicitly; the bundled 440 Hz WAV is a pure tone, not speech
 - If `--long-audio` is omitted, a repeated copy of the short input is generated temporarily for the requested duration; this is duration stress, not natural long-form speech
 - A supplied `--long-audio` is used as-is
-- Results are written to `artifacts/benchmarks/asr_benchmark_results.json`
-- Results keep case names and durations but omit local audio/repository paths; failed worker details are reduced to a path-safe summary
+- Results are written to `artifacts/benchmarks/asr_benchmark_results.json` (gitignored); output contains run metadata but no transcript text or local audio/repository paths
 - `mlx-whisper` does not currently support beam search, so the shared benchmark uses greedy decoding
 
 ## Language detection comparison
