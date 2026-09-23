@@ -800,12 +800,14 @@ final class MultiProcessManagerTests: XCTestCase {
         wait(for: [completion], timeout: 2.0)
     }
 
-    func testBackendProbeTemporarilyMarksProcessBusyUntilStatusArrives() {
+    @MainActor
+    func testBackendProbePublishesProgressAndKeepsProcessBusyUntilStatusArrives() async {
         let probeHandled = expectation(description: "probe handled")
         let segmentCompleted = expectation(description: "segment completed after probe")
         let sendOrder = LockedStringArray()
         let queuedURL = URL(fileURLWithPath: "/tmp/probe.wav")
         let queuedSettings = AppSettings()
+        BackendPreparationProgressStore.shared.reset()
 
         var manager: MultiProcessManager!
         manager = MultiProcessManager {
@@ -846,8 +848,10 @@ final class MultiProcessManagerTests: XCTestCase {
         manager.initialize(count: 1, scriptPath: "/tmp/whisper_server.py")
         XCTAssertTrue(manager.requestBackendProbe(gpuAccelerationEnabled: true, preloadModel: true))
 
-        wait(for: [probeHandled, segmentCompleted], timeout: 2.0)
+        await fulfillment(of: [probeHandled, segmentCompleted], timeout: 2.0)
         XCTAssertEqual(sendOrder.value, ["probe", "segment"])
+        XCTAssertEqual(BackendPreparationProgressStore.shared.currentProgress.step, .loadingMLXModel)
+        XCTAssertEqual(BackendPreparationProgressStore.shared.currentProgress.detail, "worker=0")
     }
 
     func testBackendProbeUsesDedicatedTimeoutInsteadOfHealthCheckTimeout() {

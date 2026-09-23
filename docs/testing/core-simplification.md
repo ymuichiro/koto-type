@@ -53,7 +53,7 @@
 
 - #131統合前のmain比較: Swiftは追加67行／削除280行、純減213行。Pythonは追加26行／削除200行、純減174行。製品コード合計の純減387行で、テスト削除や資料は含めない。Pythonには先行したCPU重複分岐の削除も含む。
 - #131統合後の簡素化差分は、#133のmerge commit `e2b6e4d` を親として確定。製品Sourcesと`python/whisper_server.py`は追加100行・削除491行、純減391行。#131の安全性追加を削減と混同しない。全差分は25ファイル、追加353行・削除864行（テスト・資料を含む）。
-- 廃止した保存設定は翻訳先と翻訳ホットキーの2項目。翻訳機能全体の撤去はまだ未完了。依存の削減は0。
+- 廃止した保存設定は翻訳先と翻訳ホットキーの2項目。翻訳UI・設定・プロトコル・推論分岐は撤去済み。配布アプリで旧設定移行とエラー表示を操作する確認は未達。依存の削減は0。
 - AppDelegateの`pressedRecordingModes`は宣言・insert・removeの3参照のみで読み取りがなく、録音可否や停止判定に使われないため削除。sessionとworker contextのmode保存、およびimport・retry・sendInputのmode引数も撤去。Python送信時だけ固定の`transcribe`を明示する。ホットキーのモード辞書・列挙ループ・アクション配列・RecordingRequestMode型も削除し、ひとつのHotkeyStateに押下状態と直前の修飾キーを集約した。
 - 設定移行・HotkeyConfiguration・import・workerの関連48テストが合格。その後の書き込み専用集合削除はSwift buildとdiff --checkが成功。実キー入力・マイク・配布物での証拠ではない。
 - mode伝播撤去後はworker・import・backend準備・full flowの31テストとbuildが合格。旧「modeを保つ」テストは、同じ入力音声パスを全3試行で保つ確認へ変更。プロトコルの実プロセス検証と#131統合後の検証は別途必要。
@@ -65,8 +65,10 @@
 - #131統合は共通のmain基準と両作業ツリーの3方向比較で実施。requestIDを維持しつつmode/translationTargetLanguageを復活させないよう競合を解消した。品質PR #133はmerge commit `e2b6e4d` としてmainへ統合済み。簡素化commit `f5589d7` はそのcommitを親とし、共有変更を重複計上しない。Issue #132はPR・CI・配布アプリ確認だけでは閉じず、全受入条件が終わるまでOPENを維持する。
 - 統合後のPython全127テスト、要求解析と実stdin応答の重点20テスト、ruff/tyが合格。Swiftビルドと応答・音声保存・batch・worker・import・hotkeyの関連49テストも合格。実マイク・目的アプリへの挿入・配布物は未検証。
 - 統合版の実モデル確認: CPU/MLX各1プロセスに「旧翻訳要求→固定FLEURS音声の通常認識→存在しない音声」を連続送信。各request_idに対して順にinvalid_request・46文字の成功・invalid_audioが返り、空行や旧形式の出力はなかった。拒否後も認識が継続し、選択backendと元音声SHA-256の不変を確認。`/tmp/kototype-goals-XdWea0/verify_integrated_protocol_live.py`、`integrated-{cpu,mlx}-protocol-live.json`に記録。精度全体の合格や回復ダイアログの動作証拠ではない。
+- 2026-09-23の参照棚卸しで、`BackendPreparationService` は製品Sourcesに生成箇所がなく、初期セットアップは `AppDelegate → MultiProcessManager` のbackend probeを使うと確認。旧クラスは別の `PythonProcessManager`・`scriptPath`・completion lock・timeoutを持ち、その専用3テストも実行されない製品経路を検証していた。クラス90行と専用テスト140行を削除し、実際の `MultiProcessManager` probeテストへ進捗Storeの更新検証を移した。`BackendPreparationProgress` と `BackendPreparationProgressStore`、実workerのprobe/timeout/fallbackは維持。公開機能・設定・依存・有効な再試行箇所は不変で、孤立していた状態所有箇所を1つ削減。
+- この削除後、`cd KotoType && swift test --filter MultiProcessManagerTests` は29件成功、`cd KotoType && swift test` は286件成功、`git diff --check` 成功。配布アプリの起動・設定画面・録音E2Eは未確認。
 - 次の必須作業は状態所有者・再試行責務の棚卸し、説明と配布物の整合、全受入条件の検証。応答プロトコル変更との依存関係をPRで明記する。
 
 移動・分割だけを削減量に数えない。最終差分で製品LOC、公開機能、保存設定、依存、状態の所有者、再試行箇所を再集計する。元の6大ファイル合計は7,818行だが、別ファイルへ移した分を成果に含めない。
 
-単体テストだけで成功としない。#131では利用者の実マイク音声2回を基準版・修正版のCPU/MLXで限定比較したが、出力は同一で固有語の誤りも残った。さらに公開日本語/英語音声60件×3反復のMLXモデル候補比較ではLarge-v3の日本語CERと失敗率が改善したものの、疑問符・自動言語判定の誤りが残り、CPU版は未検証のため採用していない（集計と制約は品質側 `core-quality-progress.md`）。両作業ツリーで配布bundle内backendのhealthcheck・実音声要求とad-hoc署名は確認済みだが、GUI録音→目的アプリ入力、Developer ID/notarization・署名済み更新、状態遷移・品質/idleの受入条件は残る。Issue #131/#132は両方OPENのままにする。
+単体テストだけで成功としない。#131では利用者の実マイク音声2回を基準版・修正版のCPU/MLXで限定比較したが、出力は同一で固有語の誤りも残った。2026-09-23にユーザーから追加録音2件の保存先が提示されたが、示された一時パス上にファイルがなく、評価には使えていない。さらに公開日本語/英語音声60件×3反復のMLXモデル候補比較ではLarge-v3の日本語CERと失敗率が改善したものの、疑問符・自動言語判定の誤りが残り、CPU版は未検証のため採用していない（集計と制約は品質側 `core-quality-progress.md`）。両作業ツリーで配布bundle内backendのhealthcheck・実音声要求とad-hoc署名は確認済みだが、GUI録音→目的アプリ入力、Developer ID/notarization・署名済み更新、状態遷移・品質/idleの受入条件は残る。Issue #131/#132は両方OPENのままにする。
