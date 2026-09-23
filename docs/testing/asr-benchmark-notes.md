@@ -1,6 +1,6 @@
 # ASR Local Benchmark Notes
 
-This note is used to capture local benchmark results for standalone ASR experiments before any app integration work.
+This note captures local timing experiments for standalone ASR before any app integration work. The benchmark measures latency and transcript length, not recognition accuracy or the KotoType product path.
 
 ## Scope
 
@@ -11,13 +11,15 @@ This note is used to capture local benchmark results for standalone ASR experime
 ## Current command
 
 ```bash
-.venv/bin/python scripts/benchmark_asr_models.py
+uv run python scripts/benchmark_asr_models.py \
+  --short-audio /path/to/authorized-real-speech.wav
 ```
 
 ## Notes
 
-- Short audio defaults to `assets/audio/test_speech_ja.wav`
-- Long audio defaults to a generated 300-second WAV derived from the short audio sample
+- Supply `--short-audio` explicitly; the bundled 440 Hz WAV is a pure tone, not speech
+- If `--long-audio` is omitted, a repeated copy of the short input is generated temporarily for the requested duration; this is duration stress, not natural long-form speech
+- A supplied `--long-audio` is used as-is
 - Results are written to `artifacts/benchmarks/asr_benchmark_results.json`
 - Results keep case names and durations but omit local audio/repository paths; failed worker details are reduced to a path-safe summary
 - `mlx-whisper` does not currently support beam search, so the shared benchmark uses greedy decoding
@@ -29,7 +31,7 @@ The benchmark keeps the historical explicit-Japanese default and accepts `--lang
 ```bash
 uv run python scripts/benchmark_asr_models.py \
   --language auto \
-  --short-audio assets/audio/test_speech_ja.wav \
+  --short-audio /path/to/authorized-real-speech.wav \
   --warm-runs 3
 ```
 
@@ -45,6 +47,8 @@ With `auto`, the benchmark passes `language=None` to the backend and records req
 - MLX fp16 candidate: `mlx-community/whisper-large-v3-turbo-fp16`
 
 ### Short audio (3 seconds)
+
+These historical latency-only measurements used the bundled 440 Hz pure-tone WAV, not speech. They are not representative ASR speech benchmarks or evidence of model accuracy.
 
 - `faster-whisper-large-v3-turbo-cpu-int8`: cold `5.40s`, warm avg `4.10s`, warm RTF `1.368`
 - `mlx-whisper-large-v3-turbo`: cold `0.91s`, warm avg `0.52s`, warm RTF `0.173`
